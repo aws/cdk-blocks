@@ -97,6 +97,7 @@ export interface FileBucketOptions {
     maxUploadBytes?: number;
     noncurrentVersionExpirationDays?: number;
     objectLock?: ObjectLockOptions;
+    onObjectCreated?: ObjectCreatedOptions;
     removalPolicy?: 'destroy' | 'retain';
     versioned?: boolean;
 }
@@ -178,6 +179,25 @@ export interface LifecycleRule {
     expirationDays?: number;
     prefix?: string;
     transitionToIaDays?: number;
+}
+
+// @public
+export interface ObjectCreatedContext {
+    receiveCount: number;
+}
+
+// @public
+export interface ObjectCreatedEvent {
+    path: string;
+    size: number;
+    versionId?: string;
+}
+
+// @public
+export interface ObjectCreatedOptions {
+    handler: (event: ObjectCreatedEvent, context: ObjectCreatedContext) => Promise<void>;
+    prefix?: string;
+    suffix?: string;
 }
 
 // @public

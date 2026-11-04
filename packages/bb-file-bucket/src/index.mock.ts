@@ -25,11 +25,17 @@ import {
 } from './upload-constraints.js';
 import type { UploadConstraints } from './upload-constraints.js';
 import { resolveContentDisposition } from './content-disposition.js';
+import {
+	OBJECT_CREATED_JOB_ID, matchesObjectCreatedFilter, objectCreatedJobHandler, toS3NotificationMessage,
+	validateObjectCreatedOptions,
+} from './object-created.js';
+import type { S3NotificationMessage } from './object-created.js';
+import { AsyncJob } from '@aws-cdk-blocks/bb-async-job';
 import type {
 	FileBucketOptions, PutOptions, PutUrlOptions, ScanOptions,
 	FileContent, FileInfo, ExternalBucketRef, ExternalKmsKeyRef,
 	FileDownloadClient, FileUploadClient, FileVersionInfo,
-	GetOptionsFor, DeleteOptionsFor, GetUrlOptionsFor,
+	GetOptionsFor, DeleteOptionsFor, GetUrlOptionsFor, ObjectCreatedOptions,
 } from './types.js';
 
 // Fail closed if this mock entry loads in a deployed env — see assertNotMockInDeployedEnv.
@@ -42,6 +48,7 @@ export type {
 	FileDownloadDescriptor, FileUploadDescriptor,
 	VersionedGetOptions, VersionedDeleteOptions, VersionedGetUrlOptions,
 	GetOptionsFor, DeleteOptionsFor, GetUrlOptionsFor,
+	ObjectCreatedOptions, ObjectCreatedEvent, ObjectCreatedContext,
 } from './types.js';
 
 import { Logger } from '@aws-cdk-blocks/bb-logger';
@@ -95,6 +102,8 @@ export class FileBucket<O extends FileBucketOptions = FileBucketOptions> extends
 	private readonly objectLocked: boolean;
 	/** `allowedContentTypes` / `maxUploadBytes`, enforced identically by the AWS runtime (see upload-constraints.ts). */
 	private readonly uploadConstraints: UploadConstraints;
+	/** `onObjectCreated` delivery: the user's filter, and the internal job that runs the handler with retries. */
+	private readonly objectCreated?: { options: ObjectCreatedOptions; job: AsyncJob<S3NotificationMessage> };
 
 	/** @internal Logger for internal operations. Defaults to error-level when not provided. */
 	protected log: ChildLogger;
@@ -120,7 +129,20 @@ export class FileBucket<O extends FileBucketOptions = FileBucketOptions> extends
 		// a provisioned one).
 		if (options?.bucket) validateUploadConstraintOptions(this.fullId, options);
 		this.uploadConstraints = uploadConstraintsFrom(options);
+		validateObjectCreatedOptions(this.fullId, options);
 		this.log = options?.logger ?? new Logger(this, 'logger', { level: 'error' });
+		// Same child the CDK layer provisions. Submitting an S3-shaped message runs
+		// the handler through the same parser, retries, and dead-letter accounting
+		// as a deployed bucket's notifications.
+		if (options?.onObjectCreated) {
+			this.objectCreated = {
+				options: options.onObjectCreated,
+				job: new AsyncJob<S3NotificationMessage>(this, OBJECT_CREATED_JOB_ID, {
+					handler: objectCreatedJobHandler(options.onObjectCreated),
+					logger: options.logger,
+				}),
+			};
+		}
 		this.dataDir = getMockDataDir(this);
 		this.versioned = options?.versioned ?? true;
 		this.registerClientMiddleware('@aws-cdk-blocks/bb-file-bucket/middleware');
@@ -136,7 +158,8 @@ export class FileBucket<O extends FileBucketOptions = FileBucketOptions> extends
 	/**
 	 * Upload a file.
 	 *
-	 * Overwrites any existing file at the given path.
+	 * Overwrites any existing file at the given path. Triggers `onObjectCreated`
+	 * when the path matches its filter.
 	 *
 	 * The object's metadata is replaced too: it becomes exactly `options.metadata`
 	 * (none when omitted). Metadata can't be edited in place, so to change it,
@@ -174,8 +197,9 @@ export class FileBucket<O extends FileBucketOptions = FileBucketOptions> extends
 			cacheControl: options?.cacheControl,
 		};
 
+		let versionId: string | undefined;
 		if (this.versioned) {
-			const versionId = this.nextVersionId(path);
+			versionId = this.nextVersionId(path);
 			const versionsDir = versionsDirFor(this.dataDir, path);
 			mkdirSync(versionsDir, { recursive: true });
 			writeFileSync(versionContentPath(this.dataDir, path, versionId), buf);
@@ -186,6 +210,16 @@ export class FileBucket<O extends FileBucketOptions = FileBucketOptions> extends
 
 		this.writeMeta(path, meta);
 		writeFileSync(filePath, buf);
+
+		// Like an S3 notification, the handler runs after the write, not inside it:
+		// submit() only enqueues. Dev file-server uploads (putUrl / createUploadHandle)
+		// and restoreVersion() also come through here.
+		const objectCreated = this.objectCreated;
+		if (objectCreated && matchesObjectCreatedFilter(path, objectCreated.options)) {
+			await objectCreated.job.submit(toS3NotificationMessage({
+				path, size: buf.length, ...(versionId !== undefined ? { versionId } : {}),
+			}));
+		}
 	}
 
 	/**

@@ -31,6 +31,9 @@ import {
 import type { UploadConstraints } from './upload-constraints.js';
 import { resolveContentDisposition } from './content-disposition.js';
 import { deriveBucketName } from './bucket-name.js';
+import { OBJECT_CREATED_JOB_ID, objectCreatedJobHandler } from './object-created.js';
+import type { S3NotificationMessage } from './object-created.js';
+import { AsyncJob } from '@aws-cdk-blocks/bb-async-job';
 
 /** Headers a presigned upload must sign in addition to the presigner's defaults. */
 const SIGNED_UPLOAD_HEADERS = new Set(['content-type']);
@@ -45,6 +48,7 @@ export type {
 	FileDownloadDescriptor, FileUploadDescriptor,
 	VersionedGetOptions, VersionedDeleteOptions, VersionedGetUrlOptions,
 	GetOptionsFor, DeleteOptionsFor, GetUrlOptionsFor,
+	ObjectCreatedOptions, ObjectCreatedEvent, ObjectCreatedContext,
 } from './types.js';
 
 /**
@@ -95,6 +99,16 @@ export class FileBucket<O extends FileBucketOptions = FileBucketOptions> extends
 			customUserAgent: this.buildUserAgentChain(),
 		});
 		installClientUserAgent(this.s3);
+
+		// The CDK layer provisions this child (and points the bucket's S3
+		// notifications at its queue) only for a bucket it owns. The job registers
+		// itself as that queue's consumer, so delivered events reach the handler.
+		if (options?.onObjectCreated && !options.bucket) {
+			new AsyncJob<S3NotificationMessage>(this, OBJECT_CREATED_JOB_ID, {
+				handler: objectCreatedJobHandler(options.onObjectCreated),
+				logger: options.logger,
+			});
+		}
 	}
 
 	async put(path: string, body: Buffer | string, options?: PutOptions): Promise<void> {
