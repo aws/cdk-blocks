@@ -285,6 +285,22 @@ export interface CdkRunOptions {
    * SIGTERM killed this process and left cdk running, unwatched.
    */
   deferSignals?: boolean;
+  /** With `deferSignals`: also read the child's output while it is relayed; see {@link CdkOutputReader}. */
+  reader?: CdkOutputReader;
+}
+
+/**
+ * Reads a CDK child's output on the side while {@link CdkOutput.run} relays it
+ * under `deferSignals`, for example to explain an authorization failure as soon
+ * as the CDK CLI prints it (`createSandboxDeployObserver` in `sandbox.ts`).
+ * What is relayed does not change, curated or not.
+ */
+export interface CdkOutputReader {
+  /**
+   * Read one whole line of the child's stdout or stderr (no trailing newline),
+   * after the relay has handled it.
+   */
+  line(line: string, from: 'stdout' | 'stderr'): void;
 }
 
 /** One operation's CDK output policy: how its children are run and relayed. */
@@ -304,6 +320,7 @@ export interface CdkOutput {
    * stays inherited, the progress summary prints on success, and failures
    * throw the same messages `runSync` does. Never prints the retained output:
    * a retried step (destroy) fails more than once before the operation does.
+   * With `options.deferSignals` and `options.reader`, see {@link CdkOutputReader}.
    */
   run(command: string, args: string[], options?: CdkRunOptions): void | Promise<void>;
   /** Print the retained raw output to stderr (curated levels only; no-op when empty). */
@@ -368,13 +385,14 @@ export function createCdkOutput(options: CdkOutputOptions): CdkOutput {
     streams,
     run(command: string, args: string[], runOptions: CdkRunOptions = {}): void | Promise<void> {
       runStart = ring.total();
-      const { deferSignals, ...spawnOptions } = runOptions;
+      const { deferSignals, reader, ...spawnOptions } = runOptions;
       if (deferSignals) {
         return runStreaming(command, args, {
           ...spawnOptions,
           label: options.label,
           operation: options.verb ?? 'deploy',
           curated: streams,
+          onLine: reader && ((line, from) => reader.line(line, from)),
         });
       }
       if (!streams) {
@@ -449,6 +467,19 @@ function relayLines(stream: NodeJS.ReadableStream | null | undefined, sink: Outp
   });
 }
 
+/** Call `onLine` with each whole line of `stream` (UTF-8), and with a last line without a newline when it ends. */
+function readLines(stream: NodeJS.ReadableStream | null | undefined, onLine: (line: string) => void): void {
+  if (!stream) return;
+  const assembler = createLineAssembler();
+  stream.setEncoding('utf-8');
+  stream.on('data', (chunk: string) => {
+    for (const line of assembler.push(chunk)) onLine(line);
+  });
+  stream.on('end', () => {
+    for (const line of assembler.flush()) onLine(line);
+  });
+}
+
 /** Lambda platform lines `cdk watch` tails from CloudWatch; never relayed. */
 const LAMBDA_PLATFORM_LINE = /\[(START|END|REPORT|INIT_START)\s+RequestId:/;
 
@@ -498,6 +529,13 @@ export interface CdkWatchOutputOptions {
   retainLines?: number;
   /** Default {@link WATCH_FAILURE_IDLE_MS}. */
   failureIdleMs?: number;
+  /**
+   * Also called with every whole line of the output (blank and Lambda platform
+   * lines included), at every level, after the relay has handled it: not
+   * curated, after the chunk that completed the line has printed. The sandbox
+   * reads it for authorization and credential failures.
+   */
+  onLine?: (line: string, from: 'stdout' | 'stderr') => void;
 }
 
 /**
@@ -517,9 +555,13 @@ export interface CdkWatchOutputOptions {
  * keeps watching. So a cycle that logged a failure line and no success marker
  * also counts as failed once the next cycle starts or output goes quiet for
  * `failureIdleMs`.
+ *
+ * With `onLine`, both streams are also read line by line (see
+ * {@link CdkWatchOutputOptions.onLine}); what is relayed does not change.
  */
 export function attachCdkWatchOutput(child: ChildProcess, options: CdkWatchOutputOptions = {}): void {
   const level = options.level ?? resolveLogLevel();
+  const { onLine } = options;
   if (!isCuratedLevel(level)) {
     child.stdout?.on('data', (data) => {
       const str = data.toString().trim();
@@ -530,6 +572,11 @@ export function attachCdkWatchOutput(child: ChildProcess, options: CdkWatchOutpu
     child.stderr?.on('data', (data) => {
       console.error(`[CDK Watch] ${data.toString().trim()}`);
     });
+    // Registered after the relay, so a line is read once its chunk has printed.
+    if (onLine) {
+      readLines(child.stdout, (line) => onLine(line, 'stdout'));
+      readLines(child.stderr, (line) => onLine(line, 'stderr'));
+    }
     return;
   }
 
@@ -594,6 +641,11 @@ export function attachCdkWatchOutput(child: ChildProcess, options: CdkWatchOutpu
   };
   relay(child.stdout, 'stdout');
   relay(child.stderr, 'stderr');
+  // Registered after the relay, so a line is read once the relay has handled it.
+  if (onLine) {
+    readLines(child.stdout, (line) => onLine(line, 'stdout'));
+    readLines(child.stderr, (line) => onLine(line, 'stderr'));
+  }
   child.once('exit', (code) => {
     clearIdle();
     if (options.stopping?.() || code === 0) return;
