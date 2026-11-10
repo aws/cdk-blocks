@@ -209,7 +209,7 @@ describe('harness-integrity: ungraceful 2-agent teardown is reclassified harness
 		assert.equal(verdictOf(cell), 'harness_error');
 	});
 
-	it('the isolation-active teardown reason is the concrete WALL-CLOCK-TIMEOUT label, not the old agent-teardown one', () => {
+	it('the isolation-active teardown reason is the concrete WALL-CLOCK-TIMEOUT label', () => {
 		// Under active isolation the death is an infra wall-clock timeout, NOT an agent pkill-storm, so the
 		// reason must read as a timeout. Still harness_error, still EXCLUDED — only the label changed.
 		const cell = { failed_at: AGENT_FAIL_AT, status: 'error', stop_reason: '', isolation_active: true };
@@ -217,7 +217,6 @@ describe('harness-integrity: ungraceful 2-agent teardown is reclassified harness
 		assert.equal(klass, 'harness_error');
 		assert.equal(reason, 'wall_clock_timeout');
 		assert.equal(reason, AGENT_HARNESS_TIMEOUT_REASON);
-		assert.notEqual(reason, 'agent_harness_teardown'); // the old, misleading label is gone
 		assert.equal(isScoredCell(cell), false); // still EXCLUDED from the headline mean
 	});
 
