@@ -628,7 +628,6 @@ export function realtimeTests(getApi: () => typeof apiType) {
 				const _good1: import('cdk-blocks').DisconnectReason = 'timeout';
 				const _good2: import('cdk-blocks').DisconnectReason = 'error';
 				const _good3: import('cdk-blocks').DisconnectReason = 'unknown';
-				assert.ok(true);
 			});
 		});
 	});

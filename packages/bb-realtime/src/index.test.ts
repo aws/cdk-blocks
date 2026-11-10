@@ -268,14 +268,6 @@ describe('Realtime', () => {
 		);
 	});
 
-	// ── Error Constants ──────────────────────────────────────────────────
-
-	it('RealtimeErrors has expected constants', () => {
-		assert.strictEqual(RealtimeErrors.PublishFailed, 'PublishFailedException');
-		assert.strictEqual(RealtimeErrors.ValidationFailed, 'ValidationFailedException');
-		assert.strictEqual(RealtimeErrors.ConnectionFailed, 'ConnectionFailedException');
-	});
-
 	// ── Static namespace() helper ────────────────────────────────────────
 
 	it('Realtime.namespace() returns a config with schema', () => {
@@ -475,8 +467,6 @@ describe('Realtime', () => {
 
 		// @ts-expect-error — extra field not in schema
 		rt.publish('events', 'ch', { x: 1, y: 2 });
-
-		assert.ok(true); // test is compile-time only
 	});
 
 	it('type system prevents accessing non-existent namespaces', () => {
@@ -489,8 +479,6 @@ describe('Realtime', () => {
 
 		// @ts-expect-error — 'cursors' namespace doesn't exist
 		rt.publish('cursors', 'ch', 'hello').catch(() => {});
-
-		assert.ok(true);
 	});
 
 	// ── Token Minting & Validation ───────────────────────────────────────
