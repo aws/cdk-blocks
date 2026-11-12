@@ -145,6 +145,13 @@ void describe('server origin lock-down', () => {
       assert.deepStrictEqual(value, originReferer(resources, ORIGIN_ID.server));
     });
 
+    void it('no literal hex secret appears anywhere in the template', () => {
+      const { template } = synth({ stackName: 'GuessableName' });
+      const json = JSON.stringify(template.toJSON());
+      assert.ok(!json.includes(legacySecret('GuessableName')));
+      assert.ok(!/"[0-9a-f]{64}"/.test(json), 'no 64-hex literal (the old derived secret) in the template');
+    });
+
     void it('the image (IPX) origin has its own secret and its own API', () => {
       const { resources } = synth({ ipx: true });
       const ssrHeader = originReferer(resources, ORIGIN_ID.server);
