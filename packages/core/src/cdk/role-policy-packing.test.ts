@@ -439,7 +439,7 @@ describe('enableRolePolicyPacking — managed-policies-per-role quota', () => {
 			() => Template.fromStack(stack),
 			(err: Error) => {
 				assert.match(err.message, /PackingStack\/Role needs \d+ managed policies, more than the 20 allowed/);
-				assert.match(err.message, /separate Blocks backend \(another BlocksStack or BlocksBackend\)/);
+				assert.match(err.message, /separate CDK Blocks backend \(another BlocksStack or BlocksBackend\)/);
 				assert.ok(err.message.includes(MANAGED_POLICIES_PER_ROLE_QUOTA_CONTEXT_KEY), err.message);
 				assert.doesNotMatch(err.message, /blocks-iam\.json/);
 				assert.match(err.message, /even after merging statements and packing them into managed policies/);
@@ -579,7 +579,7 @@ describe('enableRolePolicyPacking — managed-policies-per-role quota', () => {
 // ── Wiring into the shared execution role ─────────────────────────────────
 
 // Same inline default-compute stub as permissions-boundary.test.ts: core's tests
-// can't depend on @aws-blocks/bb-lambda-compute.
+// can't depend on @aws-cdk-blocks/bb-lambda-compute.
 class StubLambdaCompute extends ComputeBase {
 	readonly fn: lambda.NodejsFunction;
 

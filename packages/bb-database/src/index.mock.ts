@@ -2,10 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { join } from 'node:path';
-import { type ChildLogger, Logger } from '@aws-blocks/bb-logger';
-import { registerSdkIdentifiers, Scope, type ScopeParent } from '@aws-blocks/core';
-import { assertNotMockInDeployedEnv, getMockDataDir } from '@aws-blocks/core/bb-utils';
+import { type ChildLogger, Logger } from '@aws-cdk-blocks/bb-logger';
+import { registerSdkIdentifiers, Scope, type ScopeParent } from '@aws-cdk-blocks/core';
+import { assertNotMockInDeployedEnv, getMockDataDir } from '@aws-cdk-blocks/core/bb-utils';
 import type { SqlQuery } from './common/sql.js';
+import { LOCAL_APP_ROLE } from './constants.js';
 import { RulesEngine } from './dialect/rules-engine.js';
 import { dataApiEngine, type RowCountingEngine } from './engines/handle.js';
 import { PGLITE_SUBDIR, type SchemaEngine, sharedPgliteCluster } from './engines/pglite-cluster.js';
@@ -50,8 +51,9 @@ function pgliteEngine(dataDir: string, kind: ClusterType, schemaName: string): S
  * is Aurora DSQL; `type: 'aurora'` is Aurora PostgreSQL Serverless v2 with the
  * express configuration. Part of the `Database` block, not a block on its own.
  *
- * Locally it is one PGlite under `.bb-data/{fullId}/pglite/`, with DSQL's checks
- * and limits when the type is `dsql`.
+ * Locally it is one PGlite under `.cdk-blocks/local/data/{fullId}/pglite/`, with DSQL's checks
+ * and limits when the type is `dsql`. When the type is `aurora`, a migration can create the
+ * contrib extensions that PGlite and Aurora PostgreSQL both have, such as `citext` and `pgcrypto`.
  *
  * @example
  * const shared = new DatabaseCluster(scope, 'shared', { type: 'dsql' });
@@ -76,7 +78,7 @@ export class DatabaseCluster extends Scope {
 	 * privileges are the block's: a role that owns the tables is not filtered by Row Level Security policies.
 	 *
 	 * The connection string is never written in code. With `name`, the block reads the SSM SecureString
-	 * `/<stackName>-<name>` on AWS and the value under `.bb-data/` locally; `npm run db -- connect --name <name>`
+	 * `/<stackName>-<name>` on AWS and the value under `.cdk-blocks/local/data/` locally; `npm run db -- connect --name <name>`
 	 * checks the database and stores both. With `connectionString`, the block reads your own `AppSetting`
 	 * or `Secret`.
 	 *
@@ -117,7 +119,7 @@ export class DatabaseCluster extends Scope {
  * of the earlier block.
  *
  * On AWS the block reaches the cluster through the RDS Data API, as the earlier block did. Locally the cluster
- * is one PGlite under `.bb-data/{fullId}/pglite/`.
+ * is one PGlite under `.cdk-blocks/local/data/{fullId}/pglite/`.
  *
  * @deprecated Only for an app that deployed `Database` of `@aws-blocks/bb-data`. It gets no new features. A
  * new app uses `DatabaseCluster`.
@@ -149,14 +151,14 @@ export class LegacyDatabaseCluster extends Scope {
  * SQL database on PostgreSQL. Omit `cluster` and the block owns an Aurora DSQL
  * cluster; pass a {@link DatabaseCluster} to share one.
  *
- * Locally this is PGlite under `.bb-data/`, with dsql-lint and the DSQL
+ * Locally this is PGlite under `.cdk-blocks/local/data/`, with dsql-lint and the DSQL
  * transaction limits applied when the cluster is `dsql`. Migrations in
  * `./cdk-blocks/migrations/{id}` run on first use. `simulateConflict(db)` from
- * `@aws-blocks/bb-database/testing` makes the next commit fail with
+ * `@aws-cdk-blocks/bb-database/testing` makes the next commit fail with
  * `SerializationFailure` so retry logic can be tested without a deployed cluster.
  *
  * @example
- * import { Database, sql } from '@aws-blocks/bb-database';
+ * import { Database, sql } from '@aws-cdk-blocks/bb-database';
  * const db = new Database(scope, 'db');
  * const user = await db.queryOne<User>(sql`SELECT id, email FROM users WHERE id = ${id}`);
  */
@@ -276,7 +278,13 @@ export class Database extends Scope {
 			simulateConflict,
 			migrationsPath: this.migrationsPath,
 		});
-		registerSdkIdentifiers(this.fullId, { clusterId: resolved.clusterFullId, schemaName: this.schemaName });
+		registerSdkIdentifiers(this.fullId, {
+			clusterId: resolved.clusterFullId,
+			schemaName: this.schemaName,
+			// The role the block's statements run as, on a cluster the block provisions: locally the one plain role
+			// of every PGlite. An existing database and a LegacyDatabaseCluster run as the role of their connection.
+			...(resolved.external || this.ownerRunsStatements ? {} : { roleName: LOCAL_APP_ROLE }),
+		});
 	}
 
 	/**
@@ -338,10 +346,10 @@ export class Database extends Scope {
 	 * number of retries.
 	 *
 	 * An `ApiError` thrown inside `fn` (a 404, or the 401 from `requireAuth`) and
-	 * any branded Blocks error reach the caller unchanged; the transaction still
+	 * any branded CDK Blocks error reach the caller unchanged; the transaction still
 	 * rolls back. Any other error becomes `TransactionFailed`.
 	 *
-	 * @throws {DatabaseErrors.TransactionFailed} If `fn` throws an error that is not an `ApiError`, a Blocks error or a database error, or the commit fails
+	 * @throws {DatabaseErrors.TransactionFailed} If `fn` throws an error that is not an `ApiError`, a CDK Blocks error or a database error, or the commit fails
 	 * @throws {DatabaseErrors.SerializationFailure} On an unretried conflict (HTTP 409, retriable)
 	 * @throws {DatabaseErrors.TransactionRowLimitExceeded} When the transaction changes more than 3,000 rows or 10 MiB on a `dsql` cluster
 	 * @example

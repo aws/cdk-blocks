@@ -6,7 +6,7 @@
  *
  * Scenarios (one test module each under `test/`):
  * - Container `AsyncJob`s: a `Compute` of `type: 'container'` (AWS Fargate) backs
- *   an `AsyncJob`, and the container reaches Blocks resources (KVStore +
+ *   an `AsyncJob`, and the container reaches CDK Blocks resources (KVStore +
  *   FileBucket) exactly as a Lambda handler would. A second job proves the
  *   per-handler wall-clock limit is enforced by hard-terminating the worker
  *   thread.
@@ -38,11 +38,11 @@
  * set, the Lambda computes run in it too.
  */
 
-import { ApiNamespace, type BlocksContext, Scope } from '@aws-blocks/core';
-import { Compute, CronJob } from '@aws-blocks/blocks';
-import { AsyncJob } from '@aws-blocks/bb-async-job';
-import { KVStore } from '@aws-blocks/bb-kv-store';
-import { FileBucket } from '@aws-blocks/bb-file-bucket';
+import { ApiNamespace, type BlocksContext, Scope } from '@aws-cdk-blocks/core';
+import { Compute, CronJob } from 'aws-cdk-blocks';
+import { AsyncJob } from '@aws-cdk-blocks/bb-async-job';
+import { KVStore } from '@aws-cdk-blocks/bb-kv-store';
+import { FileBucket } from '@aws-cdk-blocks/bb-file-bucket';
 
 // A short scope id: every resource name derives from it (see the stack name in index.cdk.ts).
 const scope = new Scope('compute');
@@ -61,7 +61,7 @@ const worker = new Compute(scope, 'worker', {
 });
 
 // A job dispatched to the container. Its handler writes to BOTH a KVStore and a
-// FileBucket — proving the container reaches Blocks resources exactly as the
+// FileBucket — proving the container reaches CDK Blocks resources exactly as the
 // Lambda handler does (shared execution role, same config, same SDK-identifier
 // resolution). `timeoutSeconds` and `maxConcurrencyPerCPU` are properties of the
 // work and live on the job.
@@ -162,7 +162,7 @@ const scaleFromZeroJob = new AsyncJob(scope, 'scale-from-zero-job', {
 /**
  * Which compute served the call, and the request URL its handler saw — what the
  * API-namespace scenarios assert on. On Lambda the function env vars are set; on
- * a container task Blocks stamps `BLOCKS_SERVICE_MODE=worker` and the compute's
+ * a container task CDK Blocks stamps `BLOCKS_SERVICE_MODE=worker` and the compute's
  * id (`BLOCKS_COMPUTE_ID`), and Fargate sets the task metadata endpoint.
  */
 function whereAmI(context?: BlocksContext) {
@@ -300,7 +300,7 @@ export const api = new ApiNamespace(scope, 'api', (context) => ({
 
   async containerJobGetArtifact(key: string) {
     // Reads the FileBucket object the container handler wrote — proves the
-    // container reached a second Blocks resource.
+    // container reached a second CDK Blocks resource.
     const content = await bucket.get(`container-artifacts/${key}.txt`);
     return content ? { value: content.body.toString('utf8') } : null;
   },

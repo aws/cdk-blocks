@@ -1,7 +1,7 @@
 // Direct import from backend - types available in IDE, Proxy injected at runtime
 import { api, authApi } from 'cdk-blocks';
-import { isBlocksError } from '@aws-blocks/blocks/client';
-import { Authenticator, onAuthChange, injectTheme, StatusMessage, type StatusMessageHandle } from '@aws-blocks/blocks/ui';
+import { isBlocksError } from 'aws-cdk-blocks/client';
+import { Authenticator, onAuthChange, injectTheme, StatusMessage, type StatusMessageHandle } from 'aws-cdk-blocks/ui';
 
 injectTheme();
 
@@ -289,4 +289,4 @@ Object.assign(window, {
   runAllTests,
 });
 
-console.log('AWS Blocks Demo loaded - using direct backend imports with Proxy');
+console.log('AWS CDK Blocks Demo loaded - using direct backend imports with Proxy');

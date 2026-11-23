@@ -22,7 +22,7 @@ export interface ScopeOptions {
    * scopes, unless one of them sets its own. Omit to inherit the parent scope's
    * compute, and ultimately the app's default compute.
    *
-   * Pass a `Compute` block (from `@aws-blocks/blocks`) to place a whole part of
+   * Pass a `Compute` block (from `aws-cdk-blocks`) to place a whole part of
    * the backend at once — every `ApiNamespace`, `AsyncJob` and `CronJob`
    * created under it:
    *
@@ -70,7 +70,7 @@ export type ScopeParent = Scope | { id: string };
  * Create a scope at the top of your backend file:
  * 
  * ```typescript
- * import { Scope } from '@aws-blocks/core';
+ * import { Scope } from '@aws-cdk-blocks/core';
  * 
  * const scope = new Scope('my-app');
  * ```
@@ -78,14 +78,14 @@ export type ScopeParent = Scope | { id: string };
  * Then instantiate Building Blocks within that scope:
  * 
  * ```typescript
- * import { KVStore } from '@aws-blocks/bb-kv-store';
+ * import { KVStore } from '@aws-cdk-blocks/bb-kv-store';
  * 
  * const store = new KVStore(scope, 'user-prefs', {});
  * ```
  * 
  * ## Available Building Blocks
  * 
- * **IMPORTANT: Always use Blocks Building Blocks instead of creating your own storage, data structures, or AWS SDK calls.**
+ * **IMPORTANT: Always use CDK Blocks Building Blocks instead of creating your own storage, data structures, or AWS SDK calls.**
  * 
  * Building Blocks provide:
  * - **Local mocking** - Run in-process during development (`npm run dev`) with no AWS resources
@@ -94,10 +94,10 @@ export type ScopeParent = Scope | { id: string };
  * 
  * Each Building Block has comprehensive docstrings with use-cases, scaling characteristics, performance metrics, and best practices. Import and explore:
  * 
- * - **`ApiNamespace`** from `@aws-blocks/core` - Define type-safe APIs with automatic frontend/backend integration
- * - **`KVStore`** from `@aws-blocks/bb-kv-store` - Key-value and document storage, with optional schemas, keys, indexes, and queries (DynamoDB)
- * - **`Auth`** from `@aws-blocks/bb-auth` - Authentication (email + password, social, OIDC and SAML sign-in) with built-in UI components
- * - **`Database`** from `@aws-blocks/bb-database` - SQL database on PostgreSQL (Aurora DSQL, or Aurora PostgreSQL Serverless v2)
+ * - **`ApiNamespace`** from `@aws-cdk-blocks/core` - Define type-safe APIs with automatic frontend/backend integration
+ * - **`KVStore`** from `@aws-cdk-blocks/bb-kv-store` - Key-value and document storage, with optional schemas, keys, indexes, and queries (DynamoDB)
+ * - **`Auth`** from `@aws-cdk-blocks/bb-auth` - Authentication (email + password, social, OIDC and SAML sign-in) with built-in UI components
+ * - **`Database`** from `@aws-cdk-blocks/bb-database` - SQL database on PostgreSQL (Aurora DSQL, or Aurora PostgreSQL Serverless v2)
  * 
  * Read each Building Block's class and method docstrings for detailed documentation.
  * 
@@ -142,14 +142,14 @@ export type ScopeParent = Scope | { id: string };
  * 
  * ## Deployed to AWS
  * 
- * When deployed (`npm run sandbox` or `npm run deploy`), Blocks provisions real AWS resources:
+ * When deployed (`npm run sandbox` or `npm run deploy`), CDK Blocks provisions real AWS resources:
  * - Lambda functions for your APIs
  * - DynamoDB tables for KVStore
  * - Aurora DSQL for Database (Aurora PostgreSQL Serverless v2 with a `DatabaseCluster` of type `'aurora'`)
  * - S3 buckets for file storage
  * - IAM roles and policies
  * 
- * Infrastructure is **inferred from your code**. You write application logic; Blocks determines
+ * Infrastructure is **inferred from your code**. You write application logic; CDK Blocks determines
  * what AWS resources are needed and provisions them automatically.
  * 
  * ## Best Practices
@@ -195,7 +195,7 @@ const bbRegistry: {
 
 /**
  * Which scope path claimed each `fullId`, for every scope constructed in this
- * process. Process-wide, like the SDK identifier registry and the `.bb-data`
+ * process. Process-wide, like the SDK identifier registry and the `.cdk-blocks/local/data`
  * directory it protects. See `./scope-fullid-claims.ts`.
  */
 const fullIdClaims: ScopeFullIdClaims = { owners: new Map(), collided: new Set() };
@@ -237,7 +237,7 @@ export class Scope {
     };
     // computeScopeFullId, not this.fullId: a subclass getter may read fields it has not set yet.
     const collision = claimScopeFullId(fullIdClaims, this, computeScopeFullId(this));
-    if (collision) console.warn(`[Blocks] ${collision}`);
+    if (collision) console.warn(`[AWS CDK Blocks] ${collision}`);
 
     if (options?.bbName) {
       this.bbName = options.bbName;
@@ -397,7 +397,7 @@ export class Scope {
    * - `['bb', 'ParentBB/parentVersion']` — if this BB is nested inside another BB
    * - `['bb', 'SelfBB/selfVersion']` — the current BB
    *
-   * @param coreVersion - The version of @aws-blocks/core
+   * @param coreVersion - The version of @aws-cdk-blocks/core
    * @returns Array of [key, value] pairs for customUserAgent
    *
    * @example
@@ -588,8 +588,8 @@ export function buildingBlockParent(
 }
 
 /**
- * How a Blocks backend's API is exposed to clients: `'apigateway'` (the API
- * Gateway endpoint itself, the default) or `'cloudfront'` (a Blocks-managed
+ * How a CDK Blocks backend's API is exposed to clients: `'apigateway'` (the API
+ * Gateway endpoint itself, the default) or `'cloudfront'` (a CDK Blocks-managed
  * CloudFront distribution in front of it). See {@link BlocksStackProps.apiFrontDoor}.
  */
 export type ApiFrontDoorTier = 'apigateway' | 'cloudfront';
@@ -597,12 +597,12 @@ export type ApiFrontDoorTier = 'apigateway' | 'cloudfront';
 /**
  * AWS WAF protection for the backend API. See {@link BlocksStackProps.apiWaf}.
  *
- * Either let Blocks create a web ACL (`enabled: true`, optionally with a
+ * Either let CDK Blocks create a web ACL (`enabled: true`, optionally with a
  * `rateLimit`), or bring your own (`webAclArn`). The two are mutually exclusive.
  */
 export interface ApiWafOptions {
   /**
-   * Create a Blocks-managed web ACL with the AWS managed Common and Known Bad
+   * Create a CDK Blocks-managed web ACL with the AWS managed Common and Known Bad
    * Inputs rule groups and a per-IP rate limit. Default: `false`.
    */
   enabled?: boolean;
@@ -628,7 +628,7 @@ export interface BlocksStackProps extends StackProps {
    * policy, deletion protection, …). Start from `BlocksPresets.sandbox` or
    * `BlocksPresets.production` and override individual fields as needed. Any
    * field a block also exposes as a per-block option is overridden by that
-   * option. See `BlocksDefaults` in `@aws-blocks/core/cdk`.
+   * option. See `BlocksDefaults` in `@aws-cdk-blocks/core/cdk`.
    */
   defaults: BlocksDefaults;
   /**
@@ -636,14 +636,14 @@ export interface BlocksStackProps extends StackProps {
    *
    * - `'apigateway'` — clients call the stack's API Gateway endpoint directly, on
    *   its own `execute-api` domain. Nothing extra to deploy.
-   * - `'cloudfront'` — Blocks puts a CloudFront distribution in front of the
+   * - `'cloudfront'` — CDK Blocks puts a CloudFront distribution in front of the
    *   gateway (built as a regional endpoint, so traffic passes through one
    *   CloudFront layer), and clients call the distribution's domain instead.
    *
    * Whichever tier you pick, `publicApiUrl` (and the `ApiUrl` stack output) is the
    * URL clients should call. When a CloudFront-backed `Hosting` door (the default
    * CloudFront door, or the stacked door's edge) fronts the API, the API is served
-   * from Hosting's distribution; under `'cloudfront'` Blocks then creates no second
+   * from Hosting's distribution; under `'cloudfront'` CDK Blocks then creates no second
    * distribution. Behind any other `Hosting` door (ALB, API Gateway, your own), the
    * browser still reaches the API same-origin through the door, and under
    * `'cloudfront'` the API keeps its own distribution for every other client.
@@ -692,7 +692,7 @@ export interface BlocksStackProps extends StackProps {
    * - `bb-realtime`'s WebSocket API: AWS WAF can't attach to API Gateway
    *   WebSocket APIs.
    *
-   * The Blocks-managed web ACL runs the AWS managed Common rule set and Known
+   * The CDK Blocks-managed web ACL runs the AWS managed Common rule set and Known
    * Bad Inputs rule set, plus a per-IP rate limit. The Common rule set's body
    * rules (`SizeRestrictions_BODY`, `CrossSiteScripting_BODY`, `GenericLFI_BODY`,
    * `GenericRFI_BODY`) count instead of block, because RPC bodies routinely

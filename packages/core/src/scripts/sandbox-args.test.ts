@@ -210,7 +210,7 @@ describe('buildSandboxCdkEnv — framework sink reaches the synth child, and hon
   });
 
   function inCleanProject(): void {
-    // No .blocks/config.json, so consent falls back to the enabled default.
+    // No .cdk-blocks/config.json, so consent falls back to the enabled default.
     const tmp = join(tmpdir(), `sandbox-env-test-${Date.now()}`);
     mkdirSync(tmp, { recursive: true });
     process.chdir(tmp);
@@ -335,14 +335,14 @@ describe('preview sandbox — the previewMode context', () => {
 describe('findHostingUrl — the URL a preview sandbox prints', () => {
   it('reads the Hosting construct output whatever its hash suffix, adding a scheme when missing', () => {
     assert.strictEqual(
-      findHostingUrl({ ApiUrl: 'https://api.example/prod/aws-blocks/api', HostingHostingUrlAB12CD34: 'https://abc.execute-api.us-west-2.amazonaws.com' }),
+      findHostingUrl({ ApiUrl: 'https://api.example/prod/cdk-blocks/api', HostingHostingUrlAB12CD34: 'https://abc.execute-api.us-west-2.amazonaws.com' }),
       'https://abc.execute-api.us-west-2.amazonaws.com',
     );
     assert.strictEqual(findHostingUrl({ HostingHostingUrl99: 'd111.cloudfront.net' }), 'https://d111.cloudfront.net');
   });
 
   it('is undefined for a backend-only sandbox', () => {
-    assert.strictEqual(findHostingUrl({ ApiUrl: 'https://api.example/prod/aws-blocks/api' }), undefined);
+    assert.strictEqual(findHostingUrl({ ApiUrl: 'https://api.example/prod/cdk-blocks/api' }), undefined);
   });
 });
 
@@ -360,7 +360,7 @@ describe('previewRemovalWarning — a plain sandbox deploy over a hosted preview
   };
   const withPreview = {
     'MyApp-sandbox-me': {
-      ApiUrl: 'https://api.example/prod/aws-blocks/api',
+      ApiUrl: 'https://api.example/prod/cdk-blocks/api',
       HostingHostingUrlAB12CD34: 'https://abc.execute-api.us-west-2.amazonaws.com',
     },
   };
@@ -381,7 +381,7 @@ describe('previewRemovalWarning — a plain sandbox deploy over a hosted preview
   it('is silent for a preview deploy, a backend-only stack, and no or an unreadable outputs file', () => {
     assert.strictEqual(previewRemovalWarning(outputsWith(withPreview), true), undefined);
     assert.strictEqual(
-      previewRemovalWarning(outputsWith({ 'MyApp-sandbox-me': { ApiUrl: 'https://api.example/prod/aws-blocks/api' } }), false),
+      previewRemovalWarning(outputsWith({ 'MyApp-sandbox-me': { ApiUrl: 'https://api.example/prod/cdk-blocks/api' } }), false),
       undefined,
     );
     assert.strictEqual(previewRemovalWarning(join(tmpdir(), 'no-such-dir', 'outputs.json'), false), undefined);

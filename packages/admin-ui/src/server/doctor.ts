@@ -175,13 +175,13 @@ function localDevServerCheck(input: DoctorCheckInput): DoctorCheck {
 
 function bbDataCheck(input: DoctorCheckInput): DoctorCheck {
 	if (input.localDevServer.bbDataPresent) {
-		return okCheck('bb-data', 'Local data', 'local data present (.bb-data)');
+		return okCheck('bb-data', 'Local data', 'local data present (.cdk-blocks/local/data)');
 	}
 	return actionableCheck(
 		'bb-data',
 		'Local data',
 		'warn',
-		'no local data yet (.bb-data is absent)',
+		'no local data yet (.cdk-blocks/local/data is absent)',
 		'run npm run dev to generate local data',
 	);
 }
@@ -246,7 +246,7 @@ function deployedStackChecks(input: DoctorCheckInput): DoctorCheck[] {
 				'deployed-stack',
 				'Deployed stack',
 				'warn',
-				'no candidate stack name could be resolved from .blocks/config.json or package.json, so no stage was looked up',
+				'no candidate stack name could be resolved from .cdk-blocks/config.json or package.json, so no stage was looked up',
 				'deploy once (npm run sandbox, or npm run deploy for production) — or ignore this if you are only working locally',
 			),
 		];
@@ -319,7 +319,7 @@ function actionableCheck(
  * individually guarded, because a report about a broken environment that itself
  * fails on a broken environment is worthless.
  *
- * Also the CLI entry — core lazily imports `@aws-blocks/admin-ui/doctor` and
+ * Also the CLI entry — core lazily imports `@aws-cdk-blocks/admin-ui/doctor` and
  * calls `runDoctor({ projectRoot, profile, region })`.
  *
  * @param probes - Test seams. Defaulted to the real AWS/network probes so both

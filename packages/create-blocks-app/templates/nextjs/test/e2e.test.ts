@@ -3,7 +3,7 @@ import assert from 'node:assert';
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { ApiNamespaceClient } from '@aws-blocks/blocks/client';
+import { ApiNamespaceClient } from 'aws-cdk-blocks/client';
 import type { api as apiType } from '../cdk-blocks/index.js';
 
 // npm is npm.cmd on Windows, which spawn won't resolve without a shell.
@@ -86,7 +86,7 @@ test('home page loads', async () => {
   assert.strictEqual(res.status, 200, 'Home page should return 200');
 });
 
-test('app: server serves its Blocks config', async () => {
+test('app: server serves its AWS CDK Blocks config', async () => {
   const configUrl = `${baseUrl.replace(/\/$/, '')}/.blocks-sandbox/config.json`;
   const response = await fetch(configUrl);
   assert.ok(response.ok, `expected ${configUrl} to respond ok`);
@@ -99,7 +99,7 @@ test('greet returns message and timestamp', async () => {
   const response = await fetch(configUrl);
   assert.ok(response.ok, `expected ${configUrl} to respond ok`);
   const config = await response.json();
-  assert.strictEqual(typeof config.apiUrl, 'string', 'Blocks config should contain an API URL');
+  assert.strictEqual(typeof config.apiUrl, 'string', 'AWS CDK Blocks config should contain an API URL');
   const api = ApiNamespaceClient<typeof apiType>('api', { url: new URL(config.apiUrl, baseUrl).href });
   const result = await api.greet('World');
   assert.strictEqual(result.message, 'Hello, World!');

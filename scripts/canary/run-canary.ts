@@ -2,21 +2,30 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Blocks canary.
+ * CDK Blocks canary.
  *
- * Scaffolds a fresh app from a published @aws-blocks registry, then builds it,
+ * Scaffolds a fresh app from a published @aws-cdk-blocks registry, then builds it,
  * runs its local e2e (mocks) and runs `cdk synth` (no AWS credentials).
  *
  * Usage:
  *   tsx scripts/canary/run-canary.ts [--template <name>] [--registry <url>] [--keep]
  *
  * Environment:
- *   BLOCKS_REGISTRY_URL    Scoped registry for @aws-blocks (overridden by --registry).
+ *   BLOCKS_REGISTRY_URL    Default registry the scaffolded app installs from (overridden by --registry).
  *   BLOCKS_REGISTRY_TOKEN  Auth token for the registry (omit for an open registry).
+ *
+ * The registry is set as npm's DEFAULT, not per scope: npm resolves a registry
+ * per scope, so a `@aws-cdk-blocks:registry=` line cannot route the unscoped
+ * `aws-cdk-blocks` umbrella. So whatever `--registry` points at has to answer
+ * for EVERY package the scaffolded app installs, third-party ones included.
+ * `scripts/publish/serve-local-registry.ts` forwards those upstream and is the
+ * supported target; a registry serving only this repo's keys (the S3/CloudFront
+ * one `publish.ts` uploads to) would 404 `zod`, `aws-cdk-lib` and the rest, so
+ * it needs the local proxy in front of it.
  */
 
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -100,13 +109,21 @@ function capture(
   }).trim();
 }
 
+/** Every install path of `name` in the app's package-lock.json. */
+function installedPaths(appDir: string, name: string): string[] {
+  const lock = JSON.parse(readFileSync(join(appDir, "package-lock.json"), "utf-8")) as {
+    packages?: Record<string, unknown>;
+  };
+  return Object.keys(lock.packages ?? {}).filter((path) => path.endsWith(`node_modules/${name}`));
+}
+
 // ── Main ────────────────────────────────────────────────────────────
 
 function main(): void {
   const args = parseArgs();
   const workDir = mkdtempSync(join(tmpdir(), "blocks-canary-"));
 
-  console.log("=== Blocks canary ===");
+  console.log("=== AWS CDK Blocks canary ===");
   console.log(`  template : ${args.template}`);
   console.log(`  work dir : ${workDir}`);
 
@@ -115,13 +132,21 @@ function main(): void {
   const npmrcPath = join(workDir, ".npmrc");
   const env: NodeJS.ProcessEnv = {
     ...process.env,
+    // `npm run canary` exports a lowercase npm_config_userconfig (~/.npmrc).
+    // npm reads both spellings and the one later in the environment wins, and
+    // the scaffold's own `npm install` inherits a reordered environment, so set
+    // both: otherwise the app installs from the public registry.
     NPM_CONFIG_USERCONFIG: npmrcPath,
+    npm_config_userconfig: npmrcPath,
     npm_config_cache: join(workDir, ".npm-cache"),
     // The template e2e uses node:test; keep the runner output clean.
     NODE_OPTIONS: "--test-reporter=spec",
   };
 
-  const npmrcLines = [`@aws-blocks:registry=${args.registry}`];
+  // The default registry, not a scope line: npm resolves a registry per scope,
+  // so `@aws-cdk-blocks:registry=` cannot route the unscoped `aws-cdk-blocks`
+  // umbrella the templates depend on.
+  const npmrcLines = [`registry=${args.registry}`];
   if (process.env.BLOCKS_REGISTRY_TOKEN) {
     // npm keys the token on //host/path/ (scheme stripped).
     const hostPath = args.registry.replace(/^https?:/, "");
@@ -138,14 +163,14 @@ function main(): void {
     console.log("\n=== Verify registry access ===");
     const cliVersion = capture(
       "npm",
-      ["view", "@aws-blocks/create-blocks-app", "version"],
+      ["view", "@aws-cdk-blocks/create-blocks-app", "version"],
       { cwd: workDir, env },
     );
-    console.log(`  @aws-blocks/create-blocks-app@${cliVersion}`);
+    console.log(`  @aws-cdk-blocks/create-blocks-app@${cliVersion}`);
 
     // ── Install the CLI from the published registry ─────────
     console.log("\n=== Install create-blocks-app from published registry ===");
-    run("npm", ["install", "@aws-blocks/create-blocks-app@latest", "--silent"], {
+    run("npm", ["install", "@aws-cdk-blocks/create-blocks-app@latest", "--silent"], {
       cwd: workDir,
       env,
     });
@@ -163,6 +188,21 @@ function main(): void {
       scaffoldArgs.push("--template", args.template);
     }
     run(createCmd, scaffoldArgs, { cwd: workDir, env });
+
+    // ── One copy of @aws-cdk-blocks/core ────────────────────────
+    // core keeps module-level registries (SDK identifiers, the branded-error
+    // class), so a second copy splits them: getSdkIdentifiers() returns {} and
+    // `instanceof ApiError` fails. npm nests core under every block when a
+    // scaffold's devDependency conflicts with core's optional-peer chain
+    // (unctx → unplugin → vitest pins @types/node), so check the installed tree.
+    console.log("\n=== Verify a single @aws-cdk-blocks/core install ===");
+    const corePaths = installedPaths(appDir, "@aws-cdk-blocks/core");
+    if (corePaths.length !== 1) {
+      throw new Error(
+        `expected one @aws-cdk-blocks/core in node_modules, found ${corePaths.length}:\n  ${corePaths.join("\n  ")}`,
+      );
+    }
+    console.log(`  ${corePaths[0]}`);
 
     // ── Build ───────────────────────────────────────────────
     console.log("\n=== Build scaffolded app ===");
@@ -189,7 +229,7 @@ function main(): void {
     }
 
     console.log(
-      `\n🎉 Blocks canary passed (template: ${args.template}).`,
+      `\n🎉 CDK Blocks canary passed (template: ${args.template}).`,
     );
   } finally {
     if (args.keep) {

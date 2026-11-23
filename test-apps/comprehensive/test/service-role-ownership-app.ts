@@ -9,7 +9,7 @@
  * `BlocksStack`, then removes the `Condition` of every trust statement of every
  * IAM role and synthesizes. The service-principal trust check then reports each
  * role whose trust names a non-Lambda service principal: as a synth error when
- * AWS Blocks owns the role, as a warning when the app does. Prints one JSON
+ * CDK Blocks owns the role, as a warning when the app does. Prints one JSON
  * line: `{ errors, warnings, serviceRoles }`, each a list of role resource
  * paths (`serviceRoles` = every role with a non-Lambda service principal).
  *
@@ -25,7 +25,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { BlocksPresets, BlocksStack, Hosting } from '@aws-blocks/blocks/cdk';
+import { BlocksPresets, BlocksStack, Hosting } from 'aws-cdk-blocks/cdk';
 import * as cdk from 'aws-cdk-lib';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import * as kms from 'aws-cdk-lib/aws-kms';
@@ -33,8 +33,8 @@ import type { IConstruct } from 'constructs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const LAMBDA_PRINCIPALS = new Set(['lambda.amazonaws.com', 'edgelambda.amazonaws.com']);
-const WARNING_ID = '@aws-blocks/core:serviceRoleTrustWithoutSourceCondition';
-const KEY_WARNING_ID = '@aws-blocks/core:kmsKeyPolicyWithoutSourceCondition';
+const WARNING_ID = '@aws-cdk-blocks/core:serviceRoleTrustWithoutSourceCondition';
+const KEY_WARNING_ID = '@aws-cdk-blocks/core:kmsKeyPolicyWithoutSourceCondition';
 
 interface TrustStatement {
   Principal?: { Service?: string | string[] };

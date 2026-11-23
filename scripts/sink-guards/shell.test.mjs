@@ -53,17 +53,17 @@ const ALLOWLIST = [
 		at: 'packages/core/src/scripts/process-tree.ts:242',
 		reason: 'CIM query of Windows processes: the only interpolated values are pids through Math.trunc into a fixed Get-CimInstance -Filter template, run with -NoProfile -NonInteractive and an argv array.',
 	},
-	{ at: 'packages/create-block/src/index.ts:287', reason: `npm view of an @aws-blocks/* name: ${WINDOWS_NPM}` },
-	{ at: 'packages/create-block/src/index.ts:632', reason: `npm run build -w <validated name>: ${WINDOWS_NPM}` },
-	{ at: 'packages/create-block/src/index.ts:637', reason: `npm test -w <validated name>: ${WINDOWS_NPM}` },
+	{ at: 'packages/create-block/src/index.ts:287', reason: `npm view of an @aws-cdk-blocks/* name: ${WINDOWS_NPM}` },
+	{ at: 'packages/create-block/src/index.ts:640', reason: `npm run build -w <validated name>: ${WINDOWS_NPM}` },
+	{ at: 'packages/create-block/src/index.ts:645', reason: `npm test -w <validated name>: ${WINDOWS_NPM}` },
 	{ at: 'scripts/ci/_proc.mjs:53', reason: CI_WINDOWS },
 	{ at: 'scripts/ci/windows-template-e2e.mjs:54', reason: CI_WINDOWS },
 	{
-		at: 'scripts/agent-bench/steps/4-judge.ts:128',
+		at: 'scripts/agent-bench/steps/4-judge.ts:136',
 		reason: 'The only value is the judge copy directory, passed through shellQuote() (single-quoted, embedded quotes escaped).',
 	},
 	{
-		at: 'scripts/agent-bench/steps/4-judge.ts:259',
+		at: 'scripts/agent-bench/steps/4-judge.ts:270',
 		reason: 'The only interpolation is --exclude-dir flags built from the constant STAGE_EXCLUDE_DIRS set in this script.',
 	},
 	{
@@ -71,7 +71,7 @@ const ALLOWLIST = [
 		reason: 'Maintainer planning script: every gh command is a literal in this file, interpolating only the ORG constant and numeric ids.',
 	},
 	{
-		at: 'scripts/publish/publish.ts:107',
+		at: 'scripts/publish/publish.ts:110',
 		reason: 'The only value is a mkdtemp() directory under os.tmpdir() that this script just created, double-quoted.',
 	},
 ];

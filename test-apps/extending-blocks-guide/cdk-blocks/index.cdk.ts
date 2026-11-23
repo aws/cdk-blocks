@@ -4,7 +4,7 @@
 import * as cdk from 'aws-cdk-lib';
 import * as sqs from 'aws-cdk-lib/aws-sqs';
 import * as dynamodb from 'aws-cdk-lib/aws-dynamodb';
-import { BlocksStack, BlocksPresets, registerConfig } from '@aws-blocks/blocks/cdk';
+import { BlocksStack, BlocksPresets, registerConfig } from 'aws-cdk-blocks/cdk';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { getSandboxId } from './scripts/sandbox-id.js';
@@ -39,7 +39,7 @@ const externalQueue = new sqs.Queue(blocksStack, 'external-queue');
 externalQueue.grantSendMessages(blocksStack.executionRole);
 registerConfig(blocksStack, 'EXTERNAL_QUEUE_URL', externalQueue.queueUrl);
 
-// Pattern 2 fixtures: two DynamoDB tables that pretend to predate Blocks.
+// Pattern 2 fixtures: two DynamoDB tables that pretend to predate CDK Blocks.
 // We pre-pinned the physical names above so each KVStore.fromExisting could
 // pass them through at synth time.
 //

@@ -1,10 +1,10 @@
 # Upgrading an older app
 
-An app keeps the `cdk-blocks/index.cdk.ts` that `create-blocks-app` copied into it when it was scaffolded. Upgrading `@aws-blocks/blocks` doesn't change that file. Templates declare `"@aws-blocks/blocks": "*"`, so a fresh install of an old app pulls the current release, and an `index.cdk.ts` written for an older release can stop synthesizing.
+An app keeps the `cdk-blocks/index.cdk.ts` that `create-blocks-app` copied into it when it was scaffolded. Upgrading `aws-cdk-blocks` doesn't change that file. Templates declare `"aws-cdk-blocks": "*"`, so a fresh install of an old app pulls the current release, and an `index.cdk.ts` written for an older release can stop synthesizing.
 
 Find your app's shape below and apply the edits. Every other file is unchanged.
 
-| Template version | What you see on current `@aws-blocks/blocks` |
+| Template version | What you see on current `aws-cdk-blocks` |
 |---|---|
 | 0.1.0 to 0.1.19 | `BlocksStack.create() requires a \`defaults\` field` (older releases: `TypeError: Cannot read properties of undefined (reading 'vpc')`) |
 | 0.1.20 to 0.2.0 | `error TS2339: Property 'handler' does not exist on type 'BlocksStack'` |
@@ -37,7 +37,7 @@ Before:
 
 ```ts
 import { RemovalPolicies, Mixins } from 'aws-cdk-lib';
-import { Hosting, BlocksStack, SandboxDisableDeletionProtection } from '@aws-blocks/blocks/cdk';
+import { Hosting, BlocksStack, SandboxDisableDeletionProtection } from 'aws-cdk-blocks/cdk';
 
 export const blocksStack = await BlocksStack.create(app, stackName, {
   backendHandlerPath: join(__dirname, 'index.handler.ts'),
@@ -54,7 +54,7 @@ if (sandboxMode) {
 After:
 
 ```ts
-import { Hosting, BlocksStack, BlocksPresets } from '@aws-blocks/blocks/cdk';
+import { Hosting, BlocksStack, BlocksPresets } from 'aws-cdk-blocks/cdk';
 
 export const blocksStack = await BlocksStack.create(app, stackName, {
   backendHandlerPath: join(__dirname, 'index.handler.ts'),
@@ -87,11 +87,11 @@ If your own code uses `blocksStack.handler`, use the stack-wide equivalents, whi
 | `resource.grantRead(blocksStack.handler)` | `resource.grantRead(blocksStack.executionRole)` |
 | `blocksStack.handler.addToRolePolicy(statement)` | `blocksStack.executionRole.addToPrincipalPolicy(statement)` |
 
-`registerConfig` is exported from `@aws-blocks/blocks/cdk`. Values it registers are loaded into `process.env` on every compute at cold start, but a real environment variable of the same name wins.
+`registerConfig` is exported from `aws-cdk-blocks/cdk`. Values it registers are loaded into `process.env` on every compute at cold start, but a real environment variable of the same name wins.
 
 ## A `KVStore` from release 0.4.0 or earlier: `custom-named resource requires replacing`
 
-This section is for an app that deployed a `KVStore` with `@aws-blocks/bb-kv-store` 0.4.0 or earlier and now deploys on a later release. The cause is the Building Block, not the template. The deploy fails on the table of that store:
+This section is for an app that deployed a `KVStore` with `@aws-cdk-blocks/bb-kv-store` 0.4.0 or earlier and now deploys on a later release. The cause is the Building Block, not the template. The deploy fails on the table of that store:
 
 ```text
 CloudFormation cannot update a stack when a custom-named resource requires replacing. Rename <table name> and update the stack again.
@@ -106,16 +106,16 @@ Keep the old table with `LegacyKVStore`, and migrate its items to a `KVStore` wi
 1. In `cdk-blocks/index.ts`, change the class on the line of the old store to `LegacyKVStore`. Keep its id and every option it had. Add a `KVStore` with a new id next to it:
 
    ```ts
-   import { KVStore, LegacyKVStore } from '@aws-blocks/blocks';
+   import { KVStore, LegacyKVStore } from 'aws-cdk-blocks';
 
    // Before: const prefs = new KVStore<Prefs>(scope, 'prefs', { ttl: true });
    const oldPrefs = new LegacyKVStore<Prefs>(scope, 'prefs', { ttl: true });
    const prefs = new KVStore<Prefs>(scope, 'prefs-v2');
    ```
 
-   Deploy. The deploy goes through: it creates the table of `prefs-v2` and doesn't change the old one. `LegacyKVStore` has the `get`, `put`, `delete`, and `scan` of release 0.4.0, so code that still calls the old store keeps working.
+   Deploy. The deploy goes through: it creates the table of `prefs-v2` and doesn't change the old one. `LegacyKVStore` has the `get`, `put`, `delete`, and `scan` of release 0.4.0. Its `scan` adds `limit`, `cursor`, and expiry metadata; its `get` defaults to a strongly consistent read at twice the read capacity. Pass `{ consistentRead: false }` to keep eventually consistent reads.
 
-2. Migrate the data however is appropriate for your app. `LegacyKVStore` does not copy the items. The [`KVStore` README](../../packages/bb-kv-store/README.md#upgrade-from-release-040-or-earlier) lists the tools for a copy and steps that are suitable for some migrations.
+2. Migrate the data however is appropriate for your app. `LegacyKVStore` does not copy the items. The [`KVStore` README](../../packages/bb-kv-store/README.md#step-2-migrate-the-data) describes one way to migrate while the app stays live and explains its limits.
 
 3. When the data is in the new store, remove the `LegacyKVStore` line and any read of the old store, and deploy. The old table leaves the stack. A table with a removal policy of `destroy` is deleted. A retained table, which is the default of the production preset, stays in your account until you delete it.
 
@@ -123,14 +123,14 @@ Keep the old table with `LegacyKVStore`, and migrate its items to a `KVStore` wi
 
 ## A `DistributedDatabase`: keep its cluster with `Database`
 
-This section is for an app that deployed a `DistributedDatabase` with `@aws-blocks/bb-distributed-data` and now deploys on a release where `@aws-blocks/blocks` exports `Database` and no `DistributedDatabase`.
+This section is for an app that deployed a `DistributedDatabase` with `@aws-blocks/bb-distributed-data` and now deploys on a release where `aws-cdk-blocks` exports `Database` and no `DistributedDatabase`.
 
 A `Database` with no `cluster` option owns an Aurora DSQL cluster, as `DistributedDatabase` did. When the `Database` has the id of the `DistributedDatabase`, in the same scope and the same stack, it is the same cluster to CloudFormation. The deploy keeps the cluster and its rows.
 
 1. In `cdk-blocks/index.ts`, change the class to `Database`. Keep the id, the scope, and `migrationsPath`:
 
    ```ts
-   import { Database, sql } from '@aws-blocks/blocks';
+   import { Database, sql } from 'aws-cdk-blocks';
 
    // Before: const ledger = new DistributedDatabase(scope, 'ledger', { migrationsPath: './aws-blocks/dsql-migrations' });
    const ledger = new Database(scope, 'ledger', { migrationsPath: './aws-blocks/dsql-migrations' });
@@ -148,12 +148,12 @@ This path is only for `DistributedDatabase`. For a `Database` of `@aws-blocks/bb
 
 ## A `Database` of `@aws-blocks/bb-data`: keep its cluster with `LegacyDatabaseCluster`
 
-This section is for an app that deployed `Database` with `@aws-blocks/bb-data` and now deploys on a release where `Database` comes from `@aws-blocks/bb-database`.
+This section is for an app that deployed `Database` with `@aws-blocks/bb-data` and now deploys on a release where `Database` comes from `@aws-cdk-blocks/bb-database`.
 
 The old `Database` owned an Aurora PostgreSQL cluster in a VPC. The new `Database` owns a different kind of cluster, so the same line of code would give you a new, empty database, and the deploy would delete the credentials secret of the old cluster. Keep the old cluster with `LegacyDatabaseCluster`, and run a `Database` with a new id on it:
 
 ```ts
-import { Database, LegacyDatabaseCluster } from '@aws-blocks/blocks';
+import { Database, LegacyDatabaseCluster } from 'aws-cdk-blocks';
 
 // Before: const db = new Database(scope, 'main', { minCapacity: 1, migrationsPath: './cdk-blocks/migrations' });
 const cluster = new LegacyDatabaseCluster(scope, 'main', { minCapacity: 1 });
@@ -167,18 +167,18 @@ Run `cdk diff` before you deploy. The [`Database` README](../../packages/bb-data
 This one is optional: nothing stops working if you skip it. It is for:
 
 - an app scaffolded from a Vite template (`default`, `bare`, `react`, `auth`, `agent`, `demo`) whose `tsconfig.json` still lists `cdk-blocks/**/*` in `include`, and
-- a project you added AWS Blocks to, when its frontend `tsconfig` sets `types` (such as create-vite's `"types": ["vite/client"]`) and `tsc` reports `error TS2591: Cannot find name 'process'` in `cdk-blocks/`.
+- a project you added AWS CDK Blocks to, when its frontend `tsconfig` sets `types` (such as create-vite's `"types": ["vite/client"]`) and `tsc` reports `error TS2591: Cannot find name 'process'` in `cdk-blocks/`.
 
 The frontend imports the backend (`import { api } from 'cdk-blocks'`), so its `tsconfig` typechecks the backend source with the frontend's settings. A single `tsconfig.json` with Node types makes that pass, but it also lets browser code use `process` or `Buffer` without an error. Current templates make the backend a TypeScript project of its own, with Node types, and the frontend reads it through a [project reference](https://www.typescriptlang.org/docs/handbook/project-references.html). `tsc -b` builds the backend's declarations into `node_modules/.tmp/` first.
 
 Skip this for a Next.js app: `next build` ignores project references when it type-checks, so it checks `cdk-blocks/` with the app's `tsconfig.json` either way, and that needs Node types (a `tsconfig.json` that sets no `types` has them). Skip it for a backend-only app (`backend`, `api-only`, `sql`, `cron`, `observability`, `observability`) too: all its code runs on Node.
 
-### An app from a Blocks Vite template
+### An app from a CDK Blocks Vite template
 
 1. Copy the TypeScript files of a fresh scaffold of the same template (pass its name to `--template`), made in a folder outside your app (on Windows, pick another folder than `/tmp`):
 
    ```bash
-   npx @aws-blocks/create-blocks-app@latest /tmp/fresh-app --template default --skip-install
+   npx @aws-cdk-blocks/create-blocks-app@latest /tmp/fresh-app --template default --skip-install
    cp /tmp/fresh-app/tsconfig.json /tmp/fresh-app/tsconfig.app.json /tmp/fresh-app/tsconfig.node.json .
    cp /tmp/fresh-app/cdk-blocks/tsconfig.json cdk-blocks/
    ```
@@ -197,7 +197,7 @@ Skip this for a Next.js app: `next build` ignores project references when it typ
 
 ### Any other project
 
-1. Give the backend its own project: copy [the default template's `cdk-blocks/tsconfig.json`](../../packages/create-blocks-app/templates/default/cdk-blocks/tsconfig.json) into `cdk-blocks/`. Adding AWS Blocks to a project with `create-blocks-app` already wrote it. Make sure `@types/node` is in your `devDependencies`.
+1. Give the backend its own project: copy [the default template's `cdk-blocks/tsconfig.json`](../../packages/create-blocks-app/templates/default/cdk-blocks/tsconfig.json) into `cdk-blocks/`. Adding CDK Blocks to a project with `create-blocks-app` already wrote it. Make sure `@types/node` is in your `devDependencies`.
 
 2. In the `tsconfig` that compiles the code importing `cdk-blocks` (`tsconfig.app.json` in a create-vite app, otherwise `tsconfig.json`), add:
 
@@ -235,8 +235,8 @@ Skip this for a Next.js app: `next build` ignores project references when it typ
 
   Then add `{ "path": "../shared" }` to `references` in `cdk-blocks/tsconfig.json`, and `{ "path": "./shared" }` to those of `tsconfig.app.json`.
 - A backend method whose signature uses a Node type, such as one that returns a `Buffer`, reads as `any` in the frontend, with no error (`skipLibCheck` hides it). Return plain JSON-serializable values from API methods.
-- [TROUBLESHOOTING.md](../../packages/blocks/TROUBLESHOOTING.md#typescript-errors-in-aws-blocks-from-the-frontend) lists the errors of this layout, including `TS2742` under pnpm.
+- [TROUBLESHOOTING.md](../../packages/blocks/TROUBLESHOOTING.md#typescript-errors-in-cdk-blocks-from-the-frontend) lists the errors of this layout, including `TS2742` under pnpm.
 
 ## Keep the next upgrade from surprising you
 
-Pin `@aws-blocks/blocks` (for example `"^0.9.0"` instead of `"*"`) in `package.json`, so a fresh install doesn't pull a release with breaking changes. Check the package's `CHANGELOG.md` when you move the range.
+Pin `aws-cdk-blocks` (for example `"^0.9.0"` instead of `"*"`) in `package.json`, so a fresh install doesn't pull a release with breaking changes. Check the package's `CHANGELOG.md` when you move the range.

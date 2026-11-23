@@ -1,4 +1,4 @@
-import { ApiNamespace, KVStore, Scope } from '@aws-blocks/blocks';
+import { ApiNamespace, KVStore, Scope } from 'aws-cdk-blocks';
 import { CognitoVerifier } from './cognito-verifier.js';
 
 const scope = new Scope('my-app');
@@ -14,7 +14,7 @@ const auth = new CognitoVerifier({
 export const api = new ApiNamespace(scope, 'api', (context) => ({
   // Public — no auth required
   async greet(name: string) {
-    return { message: `Hello from Blocks, ${name}!`, timestamp: Date.now() };
+    return { message: `Hello from CDK Blocks, ${name}!`, timestamp: Date.now() };
   },
 
   // Protected — requires signed-in user

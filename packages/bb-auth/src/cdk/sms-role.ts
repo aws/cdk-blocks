@@ -8,14 +8,14 @@
  * sign-in / verification, or SMS MFA. `Auth` sets no `smsRole` prop, so the
  * role is CDK's default, rendered with one `cognito-idp` trust statement whose
  * only condition is the `sts:ExternalId` SMS needs; CDK offers no prop to
- * extend it. The role lives under the `Auth` scope, which marks itself as AWS
- * Blocks-owned (its `bbName` is an official Building Block's), so the core
+ * extend it. The role lives under the `Auth` scope, which marks itself as
+ * CDK Blocks-owned (its `bbName` is an official Building Block's), so the core
  * synth-time trust check holds it to the source-condition rule.
  *
  * @internal
  */
 
-import { sourceScopedConditions } from '@aws-blocks/core/cdk/internal';
+import { sourceScopedConditions } from '@aws-cdk-blocks/core/cdk/internal';
 import * as cdk from 'aws-cdk-lib';
 import type * as cognito from 'aws-cdk-lib/aws-cognito';
 

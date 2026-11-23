@@ -135,14 +135,14 @@ describe('parseNamespacesFromRpcError', () => {
 });
 
 describe('stackNameCandidates', () => {
-	it('derives the production candidate from .blocks/config.json stackId', () => {
-		const root = makeProject({ '.blocks/config.json': JSON.stringify({ stackId: 'my-app-abc123' }) });
+	it('derives the production candidate from .cdk-blocks/config.json stackId', () => {
+		const root = makeProject({ '.cdk-blocks/config.json': JSON.stringify({ stackId: 'my-app-abc123' }) });
 		assert.deepStrictEqual(stackNameCandidates(root), ['my-app-abc123-prod']);
 	});
 
 	it('adds the sandbox candidate when a sandbox id exists', () => {
 		const root = makeProject({
-			'.blocks/config.json': JSON.stringify({ stackId: 'my-app-abc123' }),
+			'.cdk-blocks/config.json': JSON.stringify({ stackId: 'my-app-abc123' }),
 			'.cdk-blocks-sandbox/sandbox-id.txt': 'dev-jane\n',
 		});
 		assert.deepStrictEqual(stackNameCandidates(root), ['my-app-abc123-prod', 'my-app-abc123-dev-jane']);
@@ -150,7 +150,7 @@ describe('stackNameCandidates', () => {
 
 	it('ignores an empty sandbox id file', () => {
 		const root = makeProject({
-			'.blocks/config.json': JSON.stringify({ stackId: 'my-app-abc123' }),
+			'.cdk-blocks/config.json': JSON.stringify({ stackId: 'my-app-abc123' }),
 			'.cdk-blocks-sandbox/sandbox-id.txt': '   \n',
 		});
 		assert.deepStrictEqual(stackNameCandidates(root), ['my-app-abc123-prod']);
@@ -163,7 +163,7 @@ describe('stackNameCandidates', () => {
 
 	it('falls back to the package name when config.json is corrupt', () => {
 		const root = makeProject({
-			'.blocks/config.json': '{ not json',
+			'.cdk-blocks/config.json': '{ not json',
 			'package.json': JSON.stringify({ name: 'my-app' }),
 		});
 		assert.deepStrictEqual(stackNameCandidates(root), ['my-app-prod']);
@@ -182,7 +182,7 @@ describe('stackNameCandidates', () => {
 	});
 
 	it('ignores a non-string stackId', () => {
-		const root = makeProject({ '.blocks/config.json': JSON.stringify({ stackId: 42 }) });
+		const root = makeProject({ '.cdk-blocks/config.json': JSON.stringify({ stackId: 42 }) });
 		assert.deepStrictEqual(stackNameCandidates(root), []);
 	});
 });
@@ -202,12 +202,28 @@ describe('detectLocalDevServer', () => {
 				});
 			}),
 		);
-		assert.deepStrictEqual(seen, ['http://localhost:4400/aws-blocks/api']);
+		assert.deepStrictEqual(seen, ['http://localhost:4400/cdk-blocks/api']);
 		assert.strictEqual(status.serverUp, true);
 		assert.strictEqual(status.serverUrl, 'http://localhost:4400');
 		assert.strictEqual(status.port, 4400);
 		assert.strictEqual(status.portSource, 'server-script');
 		assert.deepStrictEqual(status.namespaces, ['api', 'admin']);
+	});
+
+	it('falls back to the legacy /aws-blocks/api path of an older dev server', async () => {
+		const root = makeProject({ 'cdk-blocks/scripts/server.ts': 'startDevServer({ port: 4400 });\n' });
+		const seen: string[] = [];
+		const status = await detectLocalDevServer(
+			root,
+			stubFetch((url) => {
+				seen.push(url);
+				if (url.endsWith('/cdk-blocks/api')) return new Response('{"error":"Not Found"}', { status: 404 });
+				return jsonResponse({ jsonrpc: '2.0', id: 1, error: { code: -32601, message: "API 'x' not found. Available: api" } });
+			}),
+		);
+		assert.deepStrictEqual(seen, ['http://localhost:4400/cdk-blocks/api', 'http://localhost:4400/aws-blocks/api']);
+		assert.strictEqual(status.serverUp, true);
+		assert.deepStrictEqual(status.namespaces, ['api']);
 	});
 
 	it('reports up with no namespaces when the body is not a JSON-RPC error', async () => {
@@ -248,11 +264,11 @@ describe('detectLocalDevServer', () => {
 		assert.strictEqual(status.serverUp, false);
 	});
 
-	it('reports .bb-data independently of the server state', async () => {
-		const withData = makeProject({ '.bb-data/marker': 'x' });
+	it('reports .cdk-blocks/local/data independently of the server state', async () => {
+		const withData = makeProject({ '.cdk-blocks/local/data/marker': 'x' });
 		const down = await detectLocalDevServer(withData, () => Promise.reject(new Error('ECONNREFUSED')));
 		assert.strictEqual(down.serverUp, false);
-		assert.strictEqual(down.bbDataPresent, true, '.bb-data survives the server being stopped');
+		assert.strictEqual(down.bbDataPresent, true, '.cdk-blocks/local/data survives the server being stopped');
 		rmSync(withData, { recursive: true, force: true });
 
 		const withoutData = makeProject({});

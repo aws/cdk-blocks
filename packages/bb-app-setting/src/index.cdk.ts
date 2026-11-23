@@ -8,9 +8,9 @@ import * as lambda from 'aws-cdk-lib/aws-lambda';
 import { LogGroup, type RetentionDays } from 'aws-cdk-lib/aws-logs';
 import * as cr from 'aws-cdk-lib/custom-resources';
 import * as ec2 from 'aws-cdk-lib/aws-ec2';
-import { BuildingBlockScope, DEFAULT_NODE_RUNTIME, synthGuard } from '@aws-blocks/core/cdk';
-import { markAddedChildrenBlocksOwned, registerSharedConfig } from '@aws-blocks/core/cdk/internal';
-import type { ScopeParent } from '@aws-blocks/core';
+import { BuildingBlockScope, DEFAULT_NODE_RUNTIME, synthGuard } from '@aws-cdk-blocks/core/cdk';
+import { markAddedChildrenBlocksOwned, registerSharedConfig } from '@aws-cdk-blocks/core/cdk/internal';
+import type { ScopeParent } from '@aws-cdk-blocks/core';
 import type { AppSettingOptions, InternalAppSettingOptions } from './types.js';
 import { validateAppSettingOptions } from './validation.js';
 
@@ -174,7 +174,7 @@ export class AppSetting<T = string> extends BuildingBlockScope {
 		registerSharedConfig(this, envKey, parameterName);
 	}
 
-	// Runtime-only methods throw during synth (see `synthGuard` in `@aws-blocks/core/cdk`).
+	// Runtime-only methods throw during synth (see `synthGuard` in `@aws-cdk-blocks/core/cdk`).
 	get(..._args: unknown[]): never { return synthGuard('AppSetting', 'get'); }
 	put(..._args: unknown[]): never { return synthGuard('AppSetting', 'put'); }
 }
@@ -209,7 +209,7 @@ function registerSecret(stack: cdk.Stack, parameterName: string, logRetention: R
 	// First secret in this stack — create all shared infrastructure
 	state = { params: [{ name: parameterName, keyId }] };
 	(stack as any)[SECRET_BULK_KEY] = state;
-	// Everything added to the stack below is AWS Blocks' own (marked at the end).
+	// Everything added to the stack below is CDK Blocks' own (marked at the end).
 	const stackChildrenBefore = new Set(stack.node.children);
 
 	const secretInitFn = new lambda.Function(stack, 'BlocksSecretInitFn', {
@@ -338,6 +338,6 @@ function registerSecret(stack: cdk.Stack, parameterName: string, logRetention: R
 	});
 	// The shared secret-init function, provider and custom resource sit at stack
 	// scope but belong to the block, so the service-principal trust check treats
-	// their roles as AWS Blocks roles rather than the app's.
+	// their roles as CDK Blocks roles rather than the app's.
 	markAddedChildrenBlocksOwned(stack, stackChildrenBefore);
 }

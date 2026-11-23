@@ -4,7 +4,7 @@
 import { describe, test } from 'node:test';
 import assert from 'node:assert';
 import { testBaseUrl } from './api-url.js';
-import { AuthErrors, isAuthError } from '@aws-blocks/bb-auth';
+import { AuthErrors, isAuthError } from '@aws-cdk-blocks/bb-auth';
 import type { api as apiType } from 'cdk-blocks';
 import { codePoller, type PollForCodeOptions } from './poll-for-code.js';
 import { getTestSupport } from './test-support.js';
@@ -40,7 +40,7 @@ interface RpcResponse {
  * technique).
  */
 async function rpcRaw(baseUrl: string, method: string, args: unknown[], cookie?: string): Promise<RpcResponse> {
-  const resp = await fetch(`${baseUrl}/aws-blocks/api`, {
+  const resp = await fetch(`${baseUrl}/cdk-blocks/api`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...(cookie ? { Cookie: cookie } : {}) },
     body: JSON.stringify({ jsonrpc: '2.0', method: `api.${method}`, params: args, id: 1 }),
@@ -501,7 +501,7 @@ export function basicAuthTests(getApi: () => typeof apiType) {
         // the only key": the store also holds other users' records, from the
         // Agent suite signing up users in a background process at the same
         // time (./background-suites.ts) and, locally, from earlier runs
-        // persisted in .bb-data/. Every record must be keyed by the username
+        // persisted in .cdk-blocks/local/data/. Every record must be keyed by the username
         // it holds, so a shared slot fails here whoever delivered last.
         const codeEntries = (await api.kvScan()).filter((e) => e.key.startsWith('__last-code:'));
         for (const { key, value } of codeEntries) {

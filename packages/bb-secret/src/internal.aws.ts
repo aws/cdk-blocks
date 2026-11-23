@@ -2,17 +2,17 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * AWS runtime entry for `@aws-blocks/bb-secret/internal`.
+ * AWS runtime entry for `@aws-cdk-blocks/bb-secret/internal`.
  *
- * This subpath is for AWS Blocks' own Building Blocks only. It is not part of
+ * This subpath is for CDK Blocks' own Building Blocks only. It is not part of
  * the public API and can change in any release.
  *
  * @internal
  */
 
-import { AppSetting } from '@aws-blocks/bb-app-setting';
-import { blocksError, computeScopeFullId, type ScopeParent } from '@aws-blocks/core';
-import { refreshConfig } from '@aws-blocks/core/internal';
+import { AppSetting } from '@aws-cdk-blocks/bb-app-setting';
+import { blocksError, computeScopeFullId, type ScopeParent } from '@aws-cdk-blocks/core';
+import { refreshConfig } from '@aws-cdk-blocks/core/internal';
 import { SecretErrors } from './errors.js';
 import { Secret } from './index.aws.js';
 import { type FrameworkKey, secretArnConfigKey } from './internal-shared.js';
@@ -60,7 +60,7 @@ export function frameworkKey(scope: ScopeParent, id: string): FrameworkKey {
 		if (value === null || value === '') {
 			throw blocksError(
 				SecretErrors.SecretNotFound,
-				`AWS Blocks key '${fullId}' has no value in Secrets Manager`,
+				`AWS CDK Blocks key '${fullId}' has no value in Secrets Manager`,
 			);
 		}
 		return value;

@@ -8,7 +8,7 @@
  */
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
-import { generateClientCode } from '@aws-blocks/blocks/scripts';
+import { generateClientCode } from 'aws-cdk-blocks/scripts';
 
 const awsBlocksDir = resolve(dirname(new URL(import.meta.url).pathname), '..');
 const foundationPath = join(awsBlocksDir, 'index.ts');
@@ -26,7 +26,7 @@ code = code.replace(
 );
 
 // Replace the auto-generated header and imports with Amplify-specific preamble
-const importLine = "import { ApiNamespaceClient as __BLOCKS_ApiNamespaceClient__ } from '@aws-blocks/blocks/client';";
+const importLine = "import { ApiNamespaceClient as __BLOCKS_ApiNamespaceClient__ } from 'aws-cdk-blocks/client';";
 const codeFromImports = code.slice(code.indexOf(importLine));
 
 const preamble = `// ============================================================
@@ -36,15 +36,15 @@ const preamble = `// ===========================================================
 // ============================================================
 
 import { fetchAuthSession } from 'aws-amplify/auth';
-import { registerMiddleware } from '@aws-blocks/blocks/client';
+import { registerMiddleware } from 'aws-cdk-blocks/client';
 import outputs from '../amplify_outputs.json';
 
 const BLOCKS_API_URL = outputs.custom?.blocks_api_url;
 if (!BLOCKS_API_URL) {
-  throw new Error('Blocks API URL not found in amplify_outputs.json. Did you deploy the backend?');
+  throw new Error('AWS CDK Blocks API URL not found in amplify_outputs.json. Did you deploy the backend?');
 }
 
-// Attach Cognito bearer token to every Blocks API call
+// Attach Cognito bearer token to every CDK Blocks API call
 registerMiddleware({
   async onRequest(req) {
     const session = await fetchAuthSession();

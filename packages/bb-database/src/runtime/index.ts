@@ -1,7 +1,7 @@
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { isWireSafeError } from '@aws-blocks/core';
+import { isWireSafeError } from '@aws-cdk-blocks/core';
 import type { DatabaseEngine, TransactionHandle } from '../common/engine.js';
 import { type SqlQuery, unwrapQuery } from '../common/sql.js';
 import type { StandardSchemaV1 } from '@standard-schema/spec';
@@ -179,7 +179,7 @@ async function runTransaction<T>(
 	}
 }
 
-// An ApiError, a branded Blocks error or one of DatabaseErrors passes through. Anything else (a driver
+// An ApiError, a branded CDK Blocks error or one of DatabaseErrors passes through. Anything else (a driver
 // error, a plain Error) becomes TransactionFailed so its text never leaves the server.
 function asTransactionError(e: unknown): Error {
 	const error = asError(e);

@@ -294,7 +294,7 @@ describe('create-blocks-app telemetry/file sink via trackCommand', () => {
       assert.strictEqual(result.status, 0, result.stderr);
       assert.ok(!existsSync(telemetryFile), 'File must not be written when the CDK user config disables telemetry');
       assert.ok(
-        !existsSync(join(home, '.blocks', 'telemetry', 'installation-id')),
+        !existsSync(join(home, '.cdk-blocks', 'telemetry', 'installation-id')),
         'installation-id must not be written',
       );
     } finally {
@@ -538,7 +538,7 @@ describe('create-blocks-app telemetry/opt-out persists no identifiers even with 
 
     try {
       assert.strictEqual(result.status, 0, result.stderr);
-      assert.ok(existsSync(join(home, '.blocks', 'telemetry', 'installation-id')), 'installation-id must be written');
+      assert.ok(existsSync(join(home, '.cdk-blocks', 'telemetry', 'installation-id')), 'installation-id must be written');
       assert.ok(existsSync(telemetryFile), '--telemetry-file must be written');
       assert.strictEqual(JSON.parse(readFileSync(telemetryFile, 'utf-8')).length, 1);
     } finally {
@@ -558,7 +558,7 @@ describe('create-blocks-app telemetry/opt-out persists no identifiers even with 
     const { trackCommand } = await import(moduleUrl);
     try {
       await trackCommand('create', async () => {
-        const d = join(homedir(), '.blocks');
+        const d = join(homedir(), '.cdk-blocks');
         mkdirSync(d, { recursive: true });
         writeFileSync(join(d, 'config.json'), JSON.stringify({ telemetry: { enabled: false } }));
         throw new Error('USER_COMMAND_FAILED');
@@ -602,11 +602,11 @@ describe('create-blocks-app telemetry/opt-out persists no identifiers even with 
     try {
       assert.strictEqual(result.status, 0, result.stderr);
       assert.ok(
-        !existsSync(join(home, '.blocks', 'telemetry', 'installation-id')),
+        !existsSync(join(home, '.cdk-blocks', 'telemetry', 'installation-id')),
         'installation-id must not be written',
       );
       assert.ok(!existsSync(telemetryFile), '--telemetry-file must not be written');
-      assert.ok(!result.stderr.includes('AWS Blocks collects usage data'), 'no first-run notice');
+      assert.ok(!result.stderr.includes('AWS CDK Blocks collects usage data'), 'no first-run notice');
     } finally {
       rmSync(home, { recursive: true, force: true });
     }
@@ -626,11 +626,11 @@ describe('create-blocks-app telemetry/opt-out persists no identifiers even with 
 
       try {
         assert.strictEqual(result.status, 0, result.stderr);
-        const idFile = join(home, '.blocks', 'telemetry', 'installation-id');
+        const idFile = join(home, '.cdk-blocks', 'telemetry', 'installation-id');
         assert.ok(!existsSync(idFile), 'installation-id must not be written');
         assert.ok(!existsSync(telemetryFile), '--telemetry-file must not be written');
         assert.doesNotMatch(result.stderr, /sending event to/, 'no event should be sent');
-        assert.ok(!result.stderr.includes('AWS Blocks collects usage data'), 'no first-run notice');
+        assert.ok(!result.stderr.includes('AWS CDK Blocks collects usage data'), 'no first-run notice');
       } finally {
         rmSync(home, { recursive: true, force: true });
       }
@@ -648,7 +648,7 @@ describe('create-blocks-app telemetry/first-run notice', () => {
     try {
       assert.strictEqual(result.status, 0, result.stderr);
       const notice = result.stderr;
-      assert.ok(notice.includes('AWS Blocks collects usage data to improve the product.'), notice);
+      assert.ok(notice.includes('AWS CDK Blocks collects usage data to improve the product.'), notice);
       // The endpoint sees the source IP of every request, so the notice must not
       // promise that no personal data reaches it, and must say so in full.
       assert.doesNotMatch(notice, /\bPII\b/);
@@ -670,7 +670,7 @@ describe('create-blocks-app telemetry/first-run notice', () => {
       assert.ok(notice.includes('cdk cli-telemetry --disable'), notice);
       assert.ok(notice.includes('export CDK_DISABLE_CLI_TELEMETRY=1'), notice);
       assert.ok(notice.includes('https://docs.aws.amazon.com/cdk/v2/guide/cli-telemetry.html#telemetry-opt-out'), notice);
-      assert.doesNotMatch(notice, /AWS_BLOCKS_DISABLE_TELEMETRY|blocks-telemetry/, 'the Blocks opt-out is gone');
+      assert.doesNotMatch(notice, /AWS_BLOCKS_DISABLE_TELEMETRY|blocks-telemetry/, 'the AWS CDK Blocks opt-out is gone');
     } finally {
       rmSync(home, { recursive: true, force: true });
     }
@@ -689,7 +689,7 @@ describe('create-blocks-app telemetry/first-run notice', () => {
     );
   });
 
-  it('states the same retention as the @aws-blocks/blocks README', () => {
+  it('states the same retention as the aws-cdk-blocks README', () => {
     // The README telemetry paragraph repeats the retention lines of the notice word for word.
     const readme = readFileSync(new URL('../../blocks/README.md', import.meta.url), 'utf-8');
     for (const sentence of [

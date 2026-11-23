@@ -6,7 +6,7 @@
  * `bb-auth-oidc/src/relay.ts` (same rules, so the native SDKs see the same
  * accept/reject decisions and the same `reason` strings).
  *
- * `POST /aws-blocks/auth/authorize-params/<id>` is unauthenticated, so a
+ * `POST /cdk-blocks/auth/authorize-params/<id>` is unauthenticated, so a
  * `relayTo` URI is checked against an allowlist to prevent open redirects:
  *
  * 1. Loopback (`127.0.0.1`, `[::1]`): http only, any port (RFC 8252 §7.3).
@@ -17,7 +17,7 @@
  * every entry point.
  */
 
-import { brandBlocksError } from '@aws-blocks/core';
+import { brandBlocksError } from '@aws-cdk-blocks/core';
 import type { RelayOrigin } from './types.js';
 
 /** Result of {@link validateRelay}. Failure arms carry a `reason` (on the wire). */
@@ -163,7 +163,7 @@ const EXECUTE_API_HOST_PATTERN = /^[a-z0-9]+\.execute-api\.[a-z0-9-]+\.amazonaws
 
 /**
  * Every host the backend serves over HTTPS, for the callback `request`: each
- * Blocks CloudFront front door's hosts (`BLOCKS_PUBLIC_HOSTS`, core-owned config
+ * CDK Blocks CloudFront front door's hosts (`BLOCKS_PUBLIC_HOSTS`, core-owned config
  * read by its literal key like `BLOCKS_PUBLIC_ORIGIN`: a door's CloudFront domain
  * and custom domains, wildcard aliases included), and the gateway's own
  * `execute-api` host when the request reached the backend through it over HTTPS.

@@ -6,7 +6,7 @@ import { basename } from 'node:path';
 /**
  * A stage that deploys a CloudFormation stack, and so has an outputs document.
  *
- * Named for the outputs rather than the deploy because `@aws-blocks/core`
+ * Named for the outputs rather than the deploy because `@aws-cdk-blocks/core`
  * already exports a `DeployStage` (the pipeline construct) from its CDK entry
  * point. Local development is absent on purpose: `npm run dev` never invokes
  * the CDK CLI, so it has no outputs document to name.
@@ -31,7 +31,7 @@ export const OUTPUTS_FILE: Readonly<Record<OutputsStage, string>> = Object.freez
 });
 
 /**
- * The output every Blocks backend stack publishes. It identifies the backend
+ * The output every CDK Blocks backend stack publishes. It identifies the backend
  * stack among the stacks of one deploy without knowing its name, which matters
  * because the name is the CDK app's choice rather than ours: `--all` writes the
  * edge and monitoring stacks into the same document.

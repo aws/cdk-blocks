@@ -1,7 +1,7 @@
-import { ApiNamespace, Scope } from '@aws-blocks/core';
-import { Auth } from '@aws-blocks/bb-auth';
-import { KVStore } from '@aws-blocks/bb-kv-store';
-import { Database, sql } from '@aws-blocks/bb-database';
+import { ApiNamespace, Scope } from '@aws-cdk-blocks/core';
+import { Auth } from '@aws-cdk-blocks/bb-auth';
+import { KVStore } from '@aws-cdk-blocks/bb-kv-store';
+import { Database, sql } from '@aws-cdk-blocks/bb-database';
 
 // Keep the Scope id a STABLE LOGICAL id — it must be byte-for-byte identical at
 // synth time and at Lambda runtime, since physical resource names (tables, IAM
@@ -31,7 +31,7 @@ const auth = new Auth(scope, 'auth', {
 export const api = new ApiNamespace(scope, 'api', (context) => ({
   // Public — no auth required
   async greet(name: string) {
-    return { message: `Hello from Blocks, ${name}!`, timestamp: Date.now() };
+    return { message: `Hello from CDK Blocks, ${name}!`, timestamp: Date.now() };
   },
 
   // Protected — requires signed-in user

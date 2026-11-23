@@ -25,7 +25,7 @@ import {
 	resolveApiWaf,
 } from './api-waf.js';
 
-const GATEWAY_URL = 'https://abc123.execute-api.us-east-1.amazonaws.com/prod/aws-blocks/api';
+const GATEWAY_URL = 'https://abc123.execute-api.us-east-1.amazonaws.com/prod/cdk-blocks/api';
 const REGIONAL_ACL = 'arn:aws:wafv2:us-east-1:111122223333:regional/webacl/mine/abcd';
 const CLOUDFRONT_ACL = 'arn:aws:wafv2:us-east-1:111122223333:global/webacl/mine/abcd';
 
@@ -211,7 +211,7 @@ describe('apiWaf placement (front-door aspect)', () => {
 		}
 	});
 
-	test('the marker is only offered for a Blocks-managed web ACL', () => {
+	test('the marker is only offered for a CDK Blocks-managed web ACL', () => {
 		assert.strictEqual(apiFrontDoorMarker(owner(undefined).stack), undefined);
 		assert.strictEqual(apiFrontDoorMarker(owner({ webAclArn: REGIONAL_ACL }).stack), undefined);
 	});

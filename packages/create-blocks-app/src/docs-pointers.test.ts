@@ -17,7 +17,7 @@ import { fileURLToPath } from 'node:url';
 
 const packageRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
 const repoRoot = join(packageRoot, '..', '..');
-const SKIP_DIRS = new Set(['node_modules', 'dist', 'cdk.out', '.bb-data', '.cdk-blocks-sandbox']);
+const SKIP_DIRS = new Set(['node_modules', 'dist', 'cdk.out', '.cdk-blocks', '.cdk-blocks-sandbox']);
 const TEXT = new Set(['.ts', '.tsx', '.js', '.mjs', '.md', '.json', '.html', '']);
 /**
  * The TypeScript apps of the native SDK examples, written like a scaffolded app. The Kotlin app's README is for
@@ -53,12 +53,12 @@ const lines = files.flatMap((file) =>
 );
 
 const BULLET =
-	"- **AWS Blocks docs:** `npm run docs` is the docs command for this app's Building Blocks and AWS Blocks APIs. It answers types, signatures and how a block behaves, so there's no need to open the packages' source unless necessary. With no arguments it lists the blocks; name one or more blocks or APIs to print their docs: `npm run docs KVStore Auth`. A name can be a block, an export, a type, a function, an option or a method (`ApiError`, `AuthState`, `submitAuthAction`, `ifFieldEquals`, `Secret.get`): it prints the import line, the declaration and the docs about it. `--section <topic>` prints the part of a block's docs about a topic (`npm run docs KVStore -- --section local` for how it behaves on your machine), `npm run docs:api KVStore` prints exact signatures, `npm run docs -- --exports [filter]` lists what you can import and from which entry, `npm run docs:search <term>` searches all the docs, and `npm run docs -- --help` shows every option.";
+	"- **AWS CDK Blocks docs:** `npm run docs` is the docs command for this app's Building Blocks and CDK Blocks APIs. It answers types, signatures and how a block behaves, so there's no need to open the packages' source unless necessary. With no arguments it lists the blocks; name one or more blocks or APIs to print their docs: `npm run docs KVStore Auth`. A name can be a block, an export, a type, a function, an option or a method (`ApiError`, `AuthState`, `submitAuthAction`, `ifFieldEquals`, `Secret.get`): it prints the import line, the declaration and the docs about it. `--section <topic>` prints the part of a block's docs about a topic (`npm run docs KVStore -- --section local` for how it behaves on your machine), `npm run docs:api KVStore` prints exact signatures, `npm run docs -- --exports [filter]` lists what you can import and from which entry, `npm run docs:search <term>` searches all the docs, and `npm run docs -- --help` shows every option.";
 describe('the docs pointers of a scaffolded app', () => {
 	it('describe the docs command in one AGENTS.md bullet', () => {
 		const guide = readFileSync(join(packageRoot, 'resources', 'AGENTS.md'), 'utf-8').split('\n');
 		assert.deepStrictEqual(
-			guide.filter((line) => line.startsWith('- **AWS Blocks docs')),
+			guide.filter((line) => line.startsWith('- **AWS CDK Blocks docs')),
 			[BULLET],
 		);
 	});
@@ -98,7 +98,9 @@ describe('the docs pointers of a scaffolded app', () => {
 
 	it('never send an agent to node_modules for docs or types', () => {
 		for (const { where, text } of lines.filter((l) => l.text.includes('node_modules'))) {
-			assert.doesNotMatch(text, /docs|README|\.d\.ts|@aws-blocks|API\.md/i, `${where}: ${text}`);
+			// No `@`: the umbrella that ships the docs is `node_modules/aws-cdk-blocks/...`,
+			// and dropping it still covers the scoped siblings.
+			assert.doesNotMatch(text, /docs|README|\.d\.ts|aws-cdk-blocks|API\.md/i, `${where}: ${text}`);
 		}
 	});
 });

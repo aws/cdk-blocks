@@ -1,7 +1,7 @@
 // Direct import from backend - types available in IDE, Proxy injected at runtime
 import { api, authApi } from 'cdk-blocks';
-import { isBlocksError } from '@aws-blocks/blocks/client';
-import { Authenticator, injectTheme, onAuthChange, StatusMessage, type StatusMessageHandle } from '@aws-blocks/blocks/ui';
+import { isBlocksError } from 'aws-cdk-blocks/client';
+import { Authenticator, injectTheme, onAuthChange, StatusMessage, type StatusMessageHandle } from 'aws-cdk-blocks/ui';
 
 injectTheme();
 
@@ -37,7 +37,7 @@ function clear(el: HTMLElement) {
 
 // Render a themed status line (success/error/idle) into `el`, driven by the
 // shared `StatusMessage` primitive — themed `--bb-*` tokens + a polite ARIA live
-// region, consistent with the Blocks UI components.
+// region, consistent with the CDK Blocks UI components.
 //
 // For a status-only container (pre-mounted in bindUi), the handle is still
 // mounted in `el`, so set() mutates the live region in place (e.g. repeated
@@ -511,4 +511,4 @@ async function forgetCurrentDevice() {
   }
 }
 
-console.log('AWS Blocks Auth loaded');
+console.log('AWS CDK Blocks Auth loaded');

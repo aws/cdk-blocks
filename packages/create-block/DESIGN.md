@@ -1,7 +1,7 @@
 # create-block — Design
 
-`@aws-blocks/create-block` scaffolds a new Building Block (`bb-*`) package and, in
-the AWS Blocks monorepo, wires it into every registration touchpoint. This
+`@aws-cdk-blocks/create-block` scaffolds a new Building Block (`bb-*`) package and, in
+the AWS CDK Blocks monorepo, wires it into every registration touchpoint. This
 documents the internals; see [`README.md`](./README.md) for usage.
 
 ## Goals
@@ -17,7 +17,7 @@ The CLI walks up from the working directory and picks a mode from what it finds:
 | Mode | Trigger | What it does |
 |---|---|---|
 | **contributor** | a `package.json` whose `workspaces` includes `packages/blocks` (i.e. this monorepo) | generates `packages/bb-<name>` and performs all six touchpoints below |
-| **customer** | a `package.json` that declares npm `workspaces` but is **not** the Blocks repo | generates `packages/bb-<name>`, registers it in the root `workspaces` (unless a `packages/*` glob already covers it), and `npm install`s so the app can import it — no publish, no app-code edits |
+| **customer** | a `package.json` that declares npm `workspaces` but is **not** the CDK Blocks repo | generates `packages/bb-<name>`, registers it in the root `workspaces` (unless a `packages/*` glob already covers it), and `npm install`s so the app can import it — no publish, no app-code edits |
 | **external** | anywhere else | generates a standalone `@<scope>/bb-<name>` package tagged `keywords: ["aws-blocks"]`, no workspace wiring |
 
 `findMonorepoRoot` / `findCustomerWorkspaceRoot` implement the detection;
@@ -43,7 +43,8 @@ what already landed. Each JSON/text edit records whether it actually changed
 anything (`… (already present)` otherwise). The touchpoints:
 
 1. `packages/blocks/src/index.ts` — runtime/mock re-export (via HTML markers)
-2. `packages/blocks/src/index.cdk.ts` — CDK re-export (via HTML markers)
+2. `packages/blocks/src/index.cdk.ts` — CDK re-export (via HTML markers), and
+   `packages/blocks/src/index.browser.ts` — the error constants for client code (via HTML markers)
 3. `packages/blocks/package.json` — `dependencies` + the `aws-blocks.vendorize` map
 4. `packages/blocks/tsconfig.json` — a project reference
 5. root `package.json` `workspaces` — append `packages/bb-<name>`
@@ -58,7 +59,7 @@ markers so re-running never double-adds.
 The templates pin monorepo-internal versions, which don't match the published
 registry. So:
 
-- **contributor** re-pins `@aws-blocks/*` deps to the monorepo's **current local**
+- **contributor** re-pins `@aws-cdk-blocks/*` deps to the monorepo's **current local**
   versions (`^x.y.z`, matching sibling BBs) so npm links the workspace copies.
 - **customer / external** re-pin them to the **latest published** versions
   (`npm view`, falling back to `latest` offline), and rewrite `prebuild` to a

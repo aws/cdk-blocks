@@ -12,10 +12,11 @@ dist/
 # TypeScript incremental build info (next build writes tsconfig.tsbuildinfo)
 *.tsbuildinfo
 
-# Blocks
+# CDK Blocks
 /.cdk-blocks-sandbox/
+/.cdk-blocks/local/
+/.bb-data/
 cdk.out/
-.bb-data/
 
 # Secrets and key material — never commit
 .env

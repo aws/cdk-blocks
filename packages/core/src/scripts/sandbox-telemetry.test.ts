@@ -144,7 +144,7 @@ new Scope('thing', { bbName: 'KVStore', bbVersion: '9.9.9' });`;
 			`${register}\nconsole.log('FAKE_BB_MOCK_LOADED');\nsetInterval(() => {}, 1000);\n`,
 		);
 		writeFileSync(join(bb, 'aws.mjs'), `${register}\n`);
-		// The CDK entry refuses to load without `--conditions=cdk`, like `@aws-blocks/*/cdk`.
+		// The CDK entry refuses to load without `--conditions=cdk`, like `@aws-cdk-blocks/*/cdk`.
 		writeFileSync(join(bb, 'cdk-guard.mjs'), `throw new Error('run with --conditions=cdk');\n`);
 		writeFileSync(join(bb, 'cdk.mjs'), `${register}\n`);
 		// The client-generation worker runs `node --import tsx` from the app directory.
@@ -256,7 +256,7 @@ await startSandbox({ backendPath: ${JSON.stringify(BACKEND_PATH)}, devCommand: $
 	it('the SUCCESS event reports the app’s blocks', () => {
 		assert.strictEqual(success.telemetry.length, 1, success.stdout);
 		const [event] = success.telemetry;
-		assert.deepStrictEqual(event.event.command, 'sandbox');
+		assert.deepStrictEqual(event.event.command, 'sandbox:deploy');
 		assert.deepStrictEqual(event.event.state, 'SUCCESS');
 		assert.deepStrictEqual(event.product.buildingBlocks, [{ name: 'KVStore', version: '9.9.9' }]);
 		assert.strictEqual(event.counters?.blocksCount, 1);

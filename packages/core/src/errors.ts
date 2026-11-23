@@ -118,7 +118,7 @@ export function isWireSafeError(e: unknown): e is Error {
  * SEPARATELY bundled copy of core, where `e instanceof ApiError` is false
  * because the two copies define distinct classes.
  *
- * A duplicated `@aws-blocks/core` is common in a real install: npm nests a
+ * A duplicated `@aws-cdk-blocks/core` is common in a real install: npm nests a
  * private copy under a dependency whenever versions do not dedupe, so an
  * `ApiError` built in one copy (e.g. `bb-kv-store`'s) reaches the RPC
  * serializer running in another copy (`blocks`'s). A plain `instanceof` check
@@ -211,20 +211,19 @@ export function blocksError(name: string, message: string): Error {
  * the human-facing `error` string.
  *
  * In browser code, submit the action with `submitAuthAction` (from
- * `@aws-blocks/blocks/ui`), which returns the same `AuthState` and also
+ * `aws-cdk-blocks/ui`), which returns the same `AuthState` and also
  * notifies `onAuthChange` / `AuthenticatedContent` subscribers. A direct
  * `authApi.setAuthState()` call notifies nothing on the page, so a UI that
  * renders from `onAuthChange` never sees the sign-in.
  *
- * To import `AuthErrors` in browser code, list `@aws-blocks/bb-auth` in your
- * app's own `dependencies`: the browser entry of `@aws-blocks/blocks` does not
- * re-export it. The string name, `'NotAuthorizedException'`, works without it.
+ * In browser code, import `AuthErrors` and `hasAuthError` from `aws-cdk-blocks`:
+ * its browser entry exports both, so the import is the same as on the server.
+ * The string name, `'NotAuthorizedException'`, works as well.
  *
  * @example
  * ```typescript
- * import { hasAuthError } from '@aws-blocks/blocks/client';
- * import { submitAuthAction } from '@aws-blocks/blocks/ui';
- * import { AuthErrors } from '@aws-blocks/bb-auth';
+ * import { AuthErrors, hasAuthError } from 'aws-cdk-blocks';
+ * import { submitAuthAction } from 'aws-cdk-blocks/ui';
  *
  * const next = await submitAuthAction(authApi, { action: 'signIn', username, password });
  * if (hasAuthError(next, AuthErrors.NotAuthorized)) {

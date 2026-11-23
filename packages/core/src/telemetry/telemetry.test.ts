@@ -112,8 +112,8 @@ describe('telemetry/opt-out persists no identifiers even with --telemetry-file',
 
     try {
       assert.strictEqual(result.status, 0, result.stderr);
-      assert.ok(existsSync(join(home, '.blocks', 'telemetry', 'installation-id')), 'installation-id must be written');
-      assert.ok(existsSync(join(project, '.blocks', 'config.json')), 'project config.json must be written');
+      assert.ok(existsSync(join(home, '.cdk-blocks', 'telemetry', 'installation-id')), 'installation-id must be written');
+      assert.ok(existsSync(join(project, '.cdk-blocks', 'config.json')), 'project config.json must be written');
       assert.ok(existsSync(telemetryFile), '--telemetry-file must be written');
       assert.strictEqual(JSON.parse(readFileSync(telemetryFile, 'utf-8')).length, 1);
     } finally {
@@ -139,12 +139,12 @@ describe('telemetry/opt-out persists no identifiers even with --telemetry-file',
 
       try {
         assert.strictEqual(result.status, 0, result.stderr);
-        const idFile = join(home, '.blocks', 'telemetry', 'installation-id');
+        const idFile = join(home, '.cdk-blocks', 'telemetry', 'installation-id');
         assert.ok(!existsSync(idFile), 'installation-id must not be written');
-        assert.ok(!existsSync(join(project, '.blocks', 'config.json')), 'project config.json must not be written');
+        assert.ok(!existsSync(join(project, '.cdk-blocks', 'config.json')), 'project config.json must not be written');
         assert.ok(!existsSync(telemetryFile), '--telemetry-file must not be written');
         assert.doesNotMatch(result.stderr, /sending event to/, 'no event should be sent');
-        assert.ok(!result.stderr.includes('AWS Blocks collects usage data'), 'no first-run notice');
+        assert.ok(!result.stderr.includes('AWS CDK Blocks collects usage data'), 'no first-run notice');
       } finally {
         rmSync(home, { recursive: true, force: true });
         rmSync(project, { recursive: true, force: true });
@@ -182,11 +182,11 @@ describe('telemetry/trackCommand honors a mid-run opt-out', () => {
     try {
       assert.strictEqual(result.status, 0, result.stderr);
       assert.ok(
-        !existsSync(join(home, '.blocks', 'telemetry', 'installation-id')),
+        !existsSync(join(home, '.cdk-blocks', 'telemetry', 'installation-id')),
         'installation-id must not be written',
       );
       assert.ok(!existsSync(telemetryFile), '--telemetry-file must not be written');
-      assert.ok(!result.stderr.includes('AWS Blocks collects usage data'), 'no first-run notice');
+      assert.ok(!result.stderr.includes('AWS CDK Blocks collects usage data'), 'no first-run notice');
     } finally {
       rmSync(home, { recursive: true, force: true });
       rmSync(project, { recursive: true, force: true });
@@ -806,7 +806,7 @@ describe('telemetry/identifiers first-run notice', () => {
       cwd: __dirname,
     });
 
-    assert.ok(result.stderr.includes('AWS Blocks collects usage data to improve the product.'));
+    assert.ok(result.stderr.includes('AWS CDK Blocks collects usage data to improve the product.'));
     assert.ok(result.stderr.includes('CDK_DISABLE_CLI_TELEMETRY=1'));
     assert.ok(result.stdout.trim().length > 0, 'Should output an installation ID');
 
@@ -853,14 +853,14 @@ describe('telemetry/identifiers first-run notice', () => {
     assert.ok(notice.includes('cdk cli-telemetry --disable'), notice);
     assert.ok(notice.includes('export CDK_DISABLE_CLI_TELEMETRY=1'), notice);
     assert.ok(notice.includes('https://docs.aws.amazon.com/cdk/v2/guide/cli-telemetry.html#telemetry-opt-out'), notice);
-    assert.doesNotMatch(notice, /AWS_BLOCKS_DISABLE_TELEMETRY|blocks-telemetry/, 'the Blocks opt-out is gone');
+    assert.doesNotMatch(notice, /AWS_BLOCKS_DISABLE_TELEMETRY|blocks-telemetry/, 'the AWS CDK Blocks opt-out is gone');
 
     rmSync(tmp, { recursive: true, force: true });
   });
 
   it('does NOT print first-run notice when installation-id file already exists', () => {
     const tmp = join(tmpdir(), `blocks-test-nonotice-${Date.now()}`);
-    const telemetryDir = join(tmp, '.blocks', 'telemetry');
+    const telemetryDir = join(tmp, '.cdk-blocks', 'telemetry');
     mkdirSync(telemetryDir, { recursive: true });
     const existingId = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
     writeFileSync(join(telemetryDir, 'installation-id'), existingId, 'utf-8');
@@ -890,6 +890,12 @@ describe('telemetry/identifiers first-run notice', () => {
 describe('telemetry/--telemetry-file flag', () => {
   const originalArgv = [...process.argv];
   const originalEnv = { ...process.env };
+
+  // Telemetry is on in this file (see the top), so a test here that does not set its
+  // own endpoint would send its event to the real collection endpoint.
+  beforeEach(() => {
+    process.env.BLOCKS_TELEMETRY_ENDPOINT = DEAD_ENDPOINT;
+  });
 
   afterEach(() => {
     process.argv = [...originalArgv];
@@ -1233,7 +1239,7 @@ describe('telemetry/--telemetry-file flag', () => {
     // Consented, because D-018 means an opted-out run writes no file to append to.
     const result = spawnTelemetryChild(script, [new URL('./client.js', import.meta.url).href], {
       // A temp cwd, not __dirname: a consented run persists a project id into
-      // <cwd>/.blocks/config.json, and `files: ["dist"]` would ship it in the tarball.
+      // <cwd>/.cdk-blocks/config.json, and `files: ["dist"]` would ship it in the tarball.
       cwd: spawnCwd,
       home: spawnHome,
       timeout: 20_000,

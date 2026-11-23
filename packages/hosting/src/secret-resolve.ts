@@ -4,8 +4,8 @@
 /**
  * CDK-aware resolution glue for the `secret()` / `config()` markers, plus BYO
  * (bring-your-own) `ISecret` / `IParameter` handles. Turns an inert marker (or an
- * existing CDK handle) into wired infrastructure — reused by the Blocks `Hosting`
- * block, a standalone hosting app, and `@aws-blocks/pipeline`.
+ * existing CDK handle) into wired infrastructure — reused by the CDK Blocks `Hosting`
+ * block, a standalone hosting app, and `@aws-cdk-blocks/pipeline`.
  *
  * The store is derived from the marker's kind ({@link storeForKind}): `secret`
  * → Secrets Manager, `config` → SSM Parameter Store. Each kind uses its own

@@ -1,6 +1,6 @@
 # AppSetting — Design
 
-**Package:** `@aws-blocks/bb-app-setting`
+**Package:** `@aws-cdk-blocks/bb-app-setting`
 **Type:** Primitive (new infrastructure)
 **AWS Service:** SSM Parameter Store (String + SecureString)
 
@@ -15,7 +15,7 @@ Secrets Manager
 ([*Where should I store my application data?*](https://docs.aws.amazon.com/systems-manager/latest/userguide/systems-manager-parameter-store.html)).
 Treat `AppSetting(secret: true)` as a free, encrypted fallback for a low-value
 secret only. See [`bb-secret/DESIGN.md`](../bb-secret/DESIGN.md#when-to-use-secret-vs-appsettingsecret-true)
-for the full comparison. The user-facing docs phrase this in Blocks terms and
+for the full comparison. The user-facing docs phrase this in AWS CDK Blocks terms and
 link to the AWS page rather than naming the services inline.
 
 ## Infrastructure (CDK)
@@ -73,8 +73,8 @@ The 4 KB (4096 bytes) size limit applies to the **JSON-encoded** value of non-se
 
 ## Mock Implementation
 
-- Data stored in `.bb-data/settings/{scope.fullId}/value.json`.
-- Data persists across dev server restarts. Customers can wipe with `rm -rf .bb-data`.
+- Values share `.cdk-blocks/local/data/settings.json`, keyed by the setting's `fullId`.
+- Data persists across dev server restarts. Customers can wipe with `rm -rf .cdk-blocks/local/data .bb-data`.
 - `get()` returns the stored value from disk, or the initial `value` from constructor if no file exists.
 - `put()` writes the value to disk immediately.
 - Schema validation on `put()` when configured, throws `ValidationFailedException`.

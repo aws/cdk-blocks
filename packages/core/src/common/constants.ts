@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Shared constants used across the Blocks framework.
+ * Shared constants used across the CDK Blocks framework.
  *
  * Centralizes magic strings so directory names and conventions
  * can be updated in one place.
@@ -25,7 +25,7 @@ export const BLOCKS_SANDBOX_DIR = '.cdk-blocks-sandbox';
  * the config is uploaded to, the invalidation paths, the no-cache path, the liveness
  * probe, and the placeholder write whose on-disk path becomes that S3 key. Anything
  * touching the developer's own disk reads {@link BLOCKS_SANDBOX_DIR} instead.
- * `@aws-blocks/hosting` does not depend on this package, so its matching S3 exclude
+ * `@aws-cdk-blocks/hosting` does not depend on this package, so its matching S3 exclude
  * repeats the value as a literal and is pinned by test instead.
  */
 export const BLOCKS_SANDBOX_SERVED_DIR = '.blocks-sandbox';
@@ -44,6 +44,20 @@ export const BLOCKS_SANDBOX_SERVED_DIR = '.blocks-sandbox';
  * value, or the migration stops finding the state it exists to rescue.
  */
 export const LEGACY_SANDBOX_DIR = '.blocks-sandbox';
+
+/**
+ * The hidden config folder's pre-rename name, read only where its absence would
+ * fail silently: `getStackId`, because the secret and config prefixes answer an
+ * unresolved id with unscoped names rather than failing. Never written.
+ *
+ * Telemetry's `getProjectId` also reads it, so an upgraded app keeps its project
+ * id instead of being counted twice. Consent does not: #1606 removed the
+ * CDK Blocks opt-out and consent now comes from CDK's own setting.
+ *
+ * The `${''}` split keeps a rename pass over this file from rewriting the value
+ * into the new name, which is the mistake `check:rename-traps` trap 2 exists for.
+ */
+export const LEGACY_BLOCKS_DIR = `.blocks${''}`;
 
 /** Default backend entry point directory name. */
 export const BLOCKS_BACKEND_DIR = 'cdk-blocks';

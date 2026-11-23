@@ -1,7 +1,7 @@
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { ApiNamespace, Scope, KVStore } from '@aws-blocks/blocks';
+import { ApiNamespace, Scope, KVStore } from 'aws-cdk-blocks';
 import { SQSClient, SendMessageCommand } from '@aws-sdk/client-sqs';
 import { Queue } from '@guide/bb-queue';
 import { z } from 'zod';
@@ -36,7 +36,7 @@ const users = new KVStore(scope, 'users', {
 // ── Pattern 3: custom BB ─────────────────────────────────────────────────────
 const work = new Queue(scope, 'work');
 
-// ── Pattern 1: raw CDK in Blocks (env var injected by index.cdk.ts) ─────────
+// ── Pattern 1: raw CDK in CDK Blocks (env var injected by index.cdk.ts) ─────────
 const rawSqs = new SQSClient({});
 
 export const api = new ApiNamespace(scope, 'api', () => ({

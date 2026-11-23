@@ -1,6 +1,6 @@
 # Task: Async Word Counter
 
-Build an async word counter in this AWS Blocks app. A user submits some text; the counting happens in a **background job**. A submission starts as `"processing"` and flips to `"done"` with its word count once the job finishes. Results are persisted and survive a reload.
+Build an async word counter in this CDK Blocks app. A user submits some text; the counting happens in a **background job**. A submission starts as `"processing"` and flips to `"done"` with its word count once the job finishes. Results are persisted and survive a reload.
 
 The core of this task is **using the framework**: submissions are enqueued and read through an **`api` namespace** whose methods run on the server, do the counting in a **background job block**, and persist each job in a **key/value block** keyed by job id. The page is a thin client that polls that API.
 
@@ -12,7 +12,7 @@ The workspace has already been scaffolded. Begin by reading README.md (and any A
 
 ### The `api` namespace (primary surface)
 
-Expose an **`api` namespace** (a `POST /aws-blocks/api` JSON-RPC endpoint) with these methods:
+Expose an **`api` namespace** (a `POST /cdk-blocks/api` JSON-RPC endpoint) with these methods:
 
 1. **`api.enqueue(text)`** — enqueues a background word-count job for `text` and returns the new job's id as `{ "id": <string> }` (a non-empty job id). It must:
    - do the counting in a **background job** (the AsyncJob block) — **not** inline in the request handler;

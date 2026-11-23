@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { createHash } from 'node:crypto';
-import { escapeRegExp, sanitizeConfigKey } from '@aws-blocks/core/bb-utils';
-import { DEFAULT_DB_CONNECTION_NAME, dbConnectionParameterName } from '@aws-blocks/core/db-naming';
+import { escapeRegExp, sanitizeConfigKey } from '@aws-cdk-blocks/core/bb-utils';
+import { DEFAULT_DB_CONNECTION_NAME, dbConnectionParameterName } from '@aws-cdk-blocks/core/db-naming';
 import type { ClusterType } from './types.js';
 
 export const MIGRATION_LAMBDA_TIMEOUT_MINUTES = 10;
@@ -115,6 +115,16 @@ const DB_ROLE_PREFIX = 'blocks_app_';
 
 /** Local mode: the role a block's statements run as in PGlite, with the grants the deployed app role gets. */
 export const LOCAL_APP_ROLE = `${DB_ROLE_PREFIX}local`;
+
+/**
+ * The placeholder a migration file writes for the role the app's statements run as. Every occurrence is
+ * replaced before the file runs, with the quoted name: the app role the migration Lambda creates on a cluster
+ * the block provisions (`blocks_app_{cluster}`, {@link sanitizeDbRoleName}), `"blocks_app_local"` in local
+ * mode, and the connection role on an existing database. One file then grants to the app role in every place
+ * it runs: `GRANT authenticated TO ${app_role} WITH INHERIT FALSE, SET TRUE;`.
+ */
+// biome-ignore lint/suspicious/noTemplateCurlyInString: the placeholder a migration file writes, not a template
+export const APP_ROLE_PLACEHOLDER = '${app_role}';
 
 // PostgreSQL identifiers and RDS cluster identifiers share the 63-character limit.
 const PG_NAME_MAX = 63;

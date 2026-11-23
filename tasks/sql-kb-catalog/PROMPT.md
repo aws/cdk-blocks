@@ -1,6 +1,6 @@
 # Task: Product Catalog + FAQ Search
 
-Build a product catalog with an FAQ search panel in this AWS Blocks app. Products live in a real SQL table (add + list). A separate panel answers questions by searching over a small folder of FAQ documents.
+Build a product catalog with an FAQ search panel in this CDK Blocks app. Products live in a real SQL table (add + list). A separate panel answers questions by searching over a small folder of FAQ documents.
 
 The core of this task is **using the framework**: products are added and listed through an **`api` namespace** backed by the **relational database block**, and FAQ answers come from the **knowledge-base block**. The page is a thin client over that API.
 
@@ -12,7 +12,7 @@ The workspace has already been scaffolded. Begin by reading README.md (and any A
 
 ### The `api` namespace (primary surface)
 
-Expose an **`api` namespace** (the framework's server-side RPC surface — a `POST /aws-blocks/api` JSON-RPC endpoint) with these methods:
+Expose an **`api` namespace** (the framework's server-side RPC surface — a `POST /cdk-blocks/api` JSON-RPC endpoint) with these methods:
 
 1. **`api.addProduct(name)`** — `INSERT`s a product row into the **SQL table** via the relational database block (PGlite locally) and returns the created row `{ id, name }` (`id` a number). A blank/whitespace-only or non-string `name` is rejected with a JSON-RPC **error** envelope (no row inserted).
 2. **`api.listProducts()`** — returns every product as `[{ id, name }]`, read back from the SQL table, in a stable order (oldest first / ascending `id`). Because rows live in real SQL, they persist across reloads and process restarts.
