@@ -223,6 +223,36 @@ describe('HostingConstruct — CloudFront invalidation on on-demand revalidation
 		assert.match(params[0][1].Properties?.Name as string, /^\/app-a\/hosting\/[0-9a-f]+\/distribution-id$/);
 	});
 
+	it('keeps the parameter name valid for a stack named aws… or ssm… (Systems Manager rejects those prefixes)', () => {
+		const nameIn = (stackName: string): string => {
+			const stack = new Stack(new App({ context: { sandboxMode: 'true' } }), stackName, {
+				env: { account: '111111111111', region: 'us-west-2' },
+			});
+			new CdnInvalidationConstruct(stack, 'CdnInvalidation', {
+				distribution: Distribution.fromDistributionAttributes(stack, 'Dist', {
+					distributionId: 'E2EXAMPLE123',
+					domainName: 'd111111abcdef8.cloudfront.net',
+				}),
+				server: new LambdaFunction(stack, 'Server', {
+					runtime: Runtime.NODEJS_22_X,
+					handler: 'index.handler',
+					code: Code.fromInline('export const handler = async () => ({});'),
+				}),
+			});
+			const params = resources(Template.fromStack(stack), 'AWS::SSM::Parameter');
+			assert.equal(params.length, 1);
+			return params[0][1].Properties?.Name as string;
+		};
+		for (const stackName of ['AwsWeb', 'aws-site-prod', 'SSM-portal', 'ssmPortal']) {
+			const name = nameIn(stackName);
+			assert.doesNotMatch(name, /^\/?(aws|ssm)/i, `${stackName}: ${name}`);
+			assert.match(name, new RegExp(`^/cdk-blocks/hosting/${stackName}/[0-9a-f]+/distribution-id$`));
+		}
+		// Any other stack name leads, so under `defaults.appIdentity` (whose stack
+		// names start with the app id) the name stays under the app's prefix.
+		assert.match(nameIn('appa-site'), /^\/appa-site\/hosting\/[0-9a-f]+\/distribution-id$/);
+	});
+
 	it('passes the basePath to the server', () => {
 		const { template } = synth(manifest({}, { basePath: '/docs' }));
 		assert.equal(serverEnv(template)[CDN_INVALIDATION_BASE_PATH_ENV], '/docs');

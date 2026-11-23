@@ -78,9 +78,14 @@ export class CdnInvalidationConstruct extends Construct {
 		// that name carries the app's prefix, which is the only place the app's
 		// permissions let it create and read parameters. A nested stack's own
 		// name is a deploy-time token, so its parent's name is used instead.
+		// Systems Manager rejects a parameter name prefixed with `aws` or `ssm`
+		// (case-insensitive), so such a stack name goes under `/cdk-blocks/hosting/`
+		// instead (an app id never starts with either, so no app's does).
 		let root = stack;
 		while (root.nestedStackParent) root = root.nestedStackParent;
-		const parameterName = `/${root.stackName}/hosting/${this.node.addr}/distribution-id`;
+		const parameterName = /^(aws|ssm)/i.test(root.stackName)
+			? `/cdk-blocks/hosting/${root.stackName}/${this.node.addr}/distribution-id`
+			: `/${root.stackName}/hosting/${this.node.addr}/distribution-id`;
 		this.parameter = new StringParameter(this, 'DistributionId', {
 			parameterName,
 			// A hierarchical name (it starts with `/`), stated so the ARN is
