@@ -39,10 +39,21 @@ new HostingConstruct(stack, 'Hosting', { manifest });
 | `nextjsAdapter` | `{ projectDir, configPath?, skipBuild? }` | A Next.js app, built with OpenNext. `configPath` is a custom `open-next.config.ts`, relative to `projectDir`. |
 | `nuxtAdapter`, `nitroAdapter` | `{ projectDir, preset?, buildCommand?, skipBuild? }` | A Nuxt app, or another Nitro app. `preset` overrides the Nitro preset. |
 | `astroAdapter` | `{ projectDir, buildCommand?, skipBuild?, bodySizeLimit? }` | An Astro app. `bodySizeLimit` is the largest request body in bytes (default 20 MB). |
-| `sveltekitAdapter` | `{ projectDir, buildCommand?, skipBuild?, bodySizeLimit? }` | A SvelteKit app. `bodySizeLimit` as for Astro. |
+| `sveltekitAdapter` | `{ projectDir, buildCommand?, skipBuild?, bodySizeLimit? }` | A SvelteKit 2 app (see [SvelteKit: the supported version](#sveltekit-the-supported-version)). `bodySizeLimit` as for Astro. |
 | `spaAdapter` | `projectDir, { buildOutputDir?, spaFallback? }` | An already built single-page app in `dist/`, `build/` or `out/`. `spaFallback: false` declares a multi-page static site. |
 
 `skipBuild: true` reuses an existing build output.
+
+`astroAdapter` applies the `redirects:` table of `astro.config` at the front
+door. A source that ends in a rest parameter becomes a wildcard redirect, with
+the matched tail spliced into the destination: `'/blog/[...slug]':
+'/posts/[...slug]'` sends `/blog/a/b` to `/posts/a/b` and `/blog` to `/posts`.
+Every other redirect with a route parameter (a single `[id]`, a parameter
+before the last segment or inside one, several parameters) is left to Astro's
+router: the server answers it in `output: 'server'`, and Astro's generated
+redirect pages in `output: 'static'`. A rest-parameter redirect whose prefix
+also has pages or `public/` files of its own (`src/pages/blog/index.astro`) is
+left to Astro as well, since Astro serves those pages before the redirect.
 
 ### Entry points
 
@@ -82,8 +93,8 @@ prop (on `HostingConstruct`, or on `Hosting` from `@aws-cdk-blocks/core`):
 | `frontDoor` | What serves the app |
 |---|---|
 | omitted / `'cloudfront'` / `{ features }` | The global CloudFront CDN (default): edge cache, WAF, custom domain, streaming, skew protection. |
-| `{ kind: 'alb' }` | A regional Application Load Balancer (no CDN): asset-proxy Lambda, SSR/image Lambda targets, same-origin API forwarder; regional WAF, access logs and alarms; HTTPS at your domain with `certificate` + `features.domain`. SSR responses are buffered. |
-| `{ kind: 'apiGateway', api?: 'http' \| 'rest' }` | Amazon API Gateway (no CDN, no VPC, scale-to-zero). `'http'` (default) buffers SSR responses. `'rest'` streams them, but needs a custom `domain`: its own URL carries the `/prod` stage, which the app's root-relative links miss, so synth fails without one (`RestFrontDoorNeedsDomainError`). |
+| `{ kind: 'alb' }` | A regional Application Load Balancer (no CDN): asset-proxy Lambda, SSR/image Lambda targets, same-origin API forwarder; regional WAF, access logs and alarms; HTTPS at your domain with `certificate` + `features.domain`. SSR responses are buffered. No edge cache: `s-maxage` and `stale-while-revalidate` store nothing (see [Caching](#the-alb-and-api-gateway-doors-rules-and-limits)). |
+| `{ kind: 'apiGateway', api?: 'http' \| 'rest' }` | Amazon API Gateway (no CDN, no VPC, scale-to-zero). `'http'` (default) buffers SSR responses. `'rest'` streams them, but needs a custom `domain`: its own URL carries the `/prod` stage, which the app's root-relative links miss, so synth fails without one (`RestFrontDoorNeedsDomainError`). No edge cache: `s-maxage` and `stale-while-revalidate` store nothing (see [Caching](#the-alb-and-api-gateway-doors-rules-and-limits)). |
 | `{ kind: 'stacked', edge: 'cloudfront', router: 'alb' }` | A CloudFront edge in front of a full ALB router (`Hosting` from `@aws-cdk-blocks/core` only): static routes come straight from S3 at the edge, the API and dynamic routes go through the ALB, which admits only the edge. |
 | `'none'` | No front door: a public S3 website bucket (HTTP only, static sites only; the client calls the API cross-origin). |
 | `{ kind: 'custom', door }` | Your own door (see [Bring your own front door](#bring-your-own-front-door)). |
@@ -343,7 +354,12 @@ semantics, using the same matching code:
   A spliced target's leading slashes or backslashes collapse to one slash,
   so `/old//evil.example` never becomes `Location: //evil.example`. Each
   redirect source routes to the asset proxy through an ALB listener rule,
-  an HTTP API route or a REST resource;
+  an HTTP API route or a REST resource. A Nuxt / Nitro `redirect` route
+  rule sends what Nitro sends: `'/blog/**': { redirect: '/posts/**' }`
+  redirects `/blog/a/b` to `/posts/a/b`, a destination without `/**` is
+  sent as written, and the status defaults to 307. A rule the door can't
+  reproduce (a destination ending in a single `*`) is left to the Nitro
+  server;
 - header rules: every matching rule is added to a successful response (not to
   a redirect or an error, as at the CloudFront edge);
 - error pages: a missing static file answers with the 404 page (status 404),
@@ -353,11 +369,54 @@ semantics, using the same matching code:
   AWS CDK Blocks' default "404 — Page Not Found" page, as on the CloudFront door.
   An SPA keeps its `index.html` fallback.
 
+**Compression.** Only static files are compressed on these doors (by the
+asset proxy, above), with one exception: a Next.js server on Lambda
+(`compute.type: 'lambda'`) behind `apiGateway` with `api: 'rest'` gzips its
+own streamed responses for clients that accept gzip, and adds
+`Vary: Accept-Encoding`. Nothing else compresses server-rendered (SSR) or API
+responses: there is no CDN in front to do it, so they reach the browser as
+the server wrote them. To send them compressed, compress in the server:
+gzip (or Brotli) the body when the request's `Accept-Encoding` allows it, and
+set `Content-Encoding` and `Vary: Accept-Encoding` on the response (for
+example in a response middleware or hook of your framework). This doesn't
+apply to Next.js on Lambda: OpenNext's streaming wrapper sets
+`Content-Encoding` itself and replaces the one your app sets, so a body the
+app compresses would be compressed twice. On the CloudFront door, CloudFront
+compresses server responses that carry a `Content-Length`, and a Next.js
+server on Lambda (`compute.type: 'lambda'`, with OpenNext's default
+`aws-lambda-streaming` wrapper) gzips its own streamed responses for viewers
+that accept gzip. A Next.js Web Function streams without a `Content-Length`,
+so its server responses are not compressed yet.
+
 Responses the door sends straight to a function or the backend don't pass
 through those proxies: server-rendered (SSR) and image-optimization responses,
 and on API Gateway the API (proxied natively). Synth names exactly what is not
 applied (`@aws-cdk-blocks/hosting:DoorRulesNotApplied`). The CloudFront door and
 the stacked door's edge apply the rules to every response.
+
+**Caching.** These doors have no edge cache: nothing between the browser and
+the server stores a response. A route that sets `s-maxage` or
+`stale-while-revalidate` (from app code, a header rule, or Nitro
+`routeRules`) has no shared copy across visitors: each visitor's requests
+reach the server (the browser's own cache still applies to `max-age`), and
+its `Cache-Control` reaches the browser unchanged, where `s-maxage` means
+nothing. Only a server-side cache spares the render. There is no
+stale copy to serve on an error either (`stale-if-error`), and the SSR cache
+guard has no shared cache to protect. Per framework:
+
+| Framework | Behind the ALB and API Gateway doors |
+|---|---|
+| Nuxt / Nitro | `routeRules` `swr` and `cache` still cache server-side in Hosting's S3 cache, so a cached route is served from the server function without re-rendering; `defineCachedEventHandler` uses that cache too when a route rule turns it on, otherwise it caches in memory per instance. No edge copy. |
+| Next.js | ISR (`revalidate`) still regenerates through OpenNext's incremental cache (unless `incrementalRegeneration: false`), but every request reaches the server function. No edge copy. |
+| Astro, SvelteKit | No server cache: every request renders. |
+
+Synth warns once per app when its header rules ask a shared cache to store a
+route (`s-maxage` above zero, or `stale-while-revalidate` / `stale-if-error`
+on a `public` or `s-maxage` response, and neither `private` nor `no-store`;
+the Nitro adapter emits these for `swr` and `cache.maxAge` route rules), naming the
+routes (`@aws-cdk-blocks/hosting:NoEdgeCache`). It can't see a `Cache-Control`
+the server sets at run time. For edge caching, use the CloudFront door or the
+stacked door.
 
 **Size and time limits.** The asset proxy returns each file base64-encoded (a
 third larger; gzipped first when compressible) in its Lambda response, so a
@@ -473,6 +532,15 @@ Annotations.of(stack).acknowledgeWarning('@aws-cdk-blocks/hosting:PlainHttpFront
 - **Static routes come from S3.** The edge serves the app's static routes
   from the private assets bucket (origin access control); only the API and
   the dynamic routes (server rendering, image optimization) go to the ALB.
+  The static routes include the files the framework copies from its public
+  folder (`robots.txt`, favicons, downloads), so they are cached at the edge
+  and skip the ALB's 1 MB response limit (within the edge's behavior budget;
+  over it, single files give way first, so hashed bundles such as
+  `/_astro/*` keep their S3 behavior). An Astro `public/` folder stays with
+  the server when a page could render under it: a same-named page or folder
+  in `src/pages`, a route an integration injects under it, or any top-level
+  dynamic page such as `[...slug].astro`. Its files are then subject to the
+  limit.
   The app's redirects, header rules and error pages apply at the edge to
   every response. A new build never hits the previous build's cached files,
   and the cutover waits for the build's uploads, the resolved runtime config
@@ -537,10 +605,20 @@ it is not an in-place update.
 - **The address changes.** The new door has a new URL (`HostingUrl`,
   `BLOCKS_PUBLIC_ORIGIN`, the CORS origin), so existing sessions (cookies are
   scoped to the old host) and bookmarks to the old address stop working.
+- **CloudFront → ALB or API Gateway loses the edge cache.** Routes the
+  CloudFront door served from its cache (`s-maxage`, `stale-while-revalidate`,
+  Next.js ISR pages, Nuxt `swr` routes) reach the server on every request
+  (see [Caching](#the-alb-and-api-gateway-doors-rules-and-limits)), so plan
+  for the extra server load. `HostingPresets.preview` uses the API Gateway
+  door, so a preview stack doesn't show how the CloudFront door caches.
 - **CloudFront → ALB or stacked** deletes the default distribution and its
   alarms; the ALB door's (and the router's) own alarms are on unless
   `monitoring: { enabled: false }`, and its access logs are off unless you set
   them.
+- **CloudFront → ALB or API Gateway** stops compressing server-rendered and
+  API responses (static files are still gzipped by the asset proxy, and a
+  Next.js server on Lambda behind `api: 'rest'` still gzips its own); see
+  "Compression" in [the ALB and API Gateway doors](#the-alb-and-api-gateway-doors-rules-and-limits).
 - **A custom domain moving between doors** (for example the CloudFront door's
   `domain` to an API Gateway or ALB door) creates Route 53 records of the same
   name under new logical IDs, which collides with the old ones while both
@@ -690,6 +768,23 @@ const blocksStack = await BlocksStack.create(app, stackName, {
   until then Lambda rejects the delete, so wait a few hours after the deploy
   that replaced it and try again. That rejection also protects a version that
   another distribution still uses.
+
+## SvelteKit: the supported version
+
+The SvelteKit adapter supports **SvelteKit 2 only**: `@sveltejs/kit`
+`>=2.0.0 <3.0.0`, built with `@sveltejs/adapter-node` 5, with the SvelteKit
+config in `svelte.config.js`.
+
+- SvelteKit 3, which `npx sv create` scaffolds today, is not supported yet.
+  Synth refuses it with `UnsupportedSvelteKitVersionError` before it runs the
+  app's build. Support is tracked in
+  [#984](https://github.com/aws/cdk-blocks/issues/984).
+- To deploy a project scaffolded with SvelteKit 3, pin the SvelteKit 2
+  toolchain and move the SvelteKit config back to `svelte.config.js`:
+
+  ```bash
+  npm install -D @sveltejs/kit@^2 @sveltejs/adapter-node@^5 @sveltejs/vite-plugin-svelte@^5 vite@^6
+  ```
 
 ## SvelteKit: the server's dependencies
 
@@ -1044,13 +1139,43 @@ are cached as its `Cache-Control` says. The guard sends
   and the response is shared-cacheable: `s-maxage`, `public`, `max-age` without
   `private`, a future `Expires`, no caching headers while `ssrDefaultTtl > 0`,
   or an error status CloudFront caches without caching headers (404, 414 and
-  500 to 504).
+  500 to 504); or
+- behind the CloudFront door or the stacked door, the response is
+  shared-cacheable and its `Vary` names a request header that the server-route
+  cache key does not hold, or is `Vary: *`. CloudFront ignores `Vary`, so it
+  would store one copy and serve it for every value of that header (for
+  example a page rendered from `Accept-Language`, served in the first
+  visitor's language to everyone). `Accept-Encoding` is always in the key.
+  The Next.js router headers (`RSC`, `Next-Router-State-Tree`,
+  `Next-Router-Prefetch`, `Next-Router-Segment-Prefetch`, `Next-Action`) count
+  as keyed too: the CloudFront door's key holds them as request headers, and
+  the stacked door's holds the query string, whose `_rsc` parameter Next.js
+  derives from them and `Next-Url`. On the CloudFront door `cacheKeyHeaders`
+  are keyed as well. `Vary: Cookie` alone never leads to a rewrite: cookies
+  follow the cookie rule above (and are all in the key behind the stacked
+  door). The response keeps its `Vary`
+  header for the browser, and the server logs once per header name why the
+  guard rewrote it. The ALB, API Gateway and custom doors put no CloudFront
+  cache the guard knows in front of the server, so `Vary` is not read there.
 
 Responses that are already `private`/`no-store`, or `no-cache` without
 `s-maxage`, are left as they are. To keep a credentialed route cacheable, list
 its credential in `cacheKeyCookies`/`cacheKeyHeaders` so the cache is keyed per
 credential. Any route that otherwise varies per user should still emit
 `Cache-Control: private`.
+
+To edge-cache a route that varies on a request header, add the header to the
+cache key on the CloudFront door, so one copy is cached per value:
+
+```ts
+frontDoor: { features: { cacheKeyHeaders: ['accept-language'] } }
+```
+
+Behind the stacked door the server-route cache key holds no request headers
+(only the query string, the Next.js `_rsc` parameter included, and every
+cookie), so a route that varies on a header other than `Accept-Encoding`,
+`Cookie` or the Next.js router headers is sent as `private, no-store`; put the
+value in the path or the query string to cache it.
 
 Client-side analytics and consent cookies (`_ga`, `_gid`, `_fbp`, a consent
 manager's cookie) are not in the cache key, so by default a visitor carrying one
@@ -1065,8 +1190,8 @@ frontDoor: { features: { cacheKeyCookies: ['session'], cacheGuardIgnoredCookies:
 ```
 
 Behind the stacked door the server-route cache key holds every
-cookie, so cookies never lead to a rewrite there; `Authorization` and
-`Set-Cookie` still do.
+cookie, so cookies (and `Vary: Cookie`) never lead to a rewrite there;
+`Authorization`, `Set-Cookie` and a `Vary` header outside the key still do.
 
 CloudFront caches the 500, 501, 502, 503 and 504 responses of an origin for the
 error caching minimum TTL and, except for 501, does so whatever their
@@ -1075,8 +1200,9 @@ stacked door) therefore sets that TTL to 0 for those statuses,
 keeping any error page configured for them.
 
 The guard models CloudFront's own caching inputs only: `CDN-Cache-Control` and
-`Surrogate-Control` are not CloudFront TTL inputs, and CloudFront ignores `Vary`
-for the cache key, so the guard does not read them.
+`Surrogate-Control` are not CloudFront TTL inputs, so the guard does not read
+them. It reads `Vary` only to find responses CloudFront would share across
+values of a header outside the key (above); it never adds a header to the key.
 
 CloudFront uses `max-age` as its edge TTL when `s-maxage` is absent, so a bare
 `max-age` is cached at the edge and counts as shared-cacheable. A credentialed
@@ -1511,6 +1637,7 @@ synth. `error.name` and `error.code` hold the name in the table, and
 | `UnsupportedComputeFrontDoorError` | `compute.type: 'web-function'` behind a door other than CloudFront. |
 | `UnsupportedFrontDoorError` | `frontDoor` is not a front door, `'none'` is set for an app with a server, or a custom door fails the wiring check. |
 | `UnsupportedFrontDoorSettingError` | The door kind doesn't implement a setting. |
+| `UnsupportedSvelteKitVersionError` | The installed `@sveltejs/kit` is not SvelteKit 2 (`>=2.0.0 <3.0.0`). Thrown before the app's build runs. |
 | `UnsupportedRoutePatternError` | ALB: one pattern has more than six wildcards. API Gateway: a backend route has a wildcard other than one trailing `/*`. |
 | `WafRegionError` | A CloudFront-scoped WAF is enabled in a known region outside us-east-1 and region validation isn't skipped. |
 | `WebFunctionPolicyAlreadySetError` | `allowCloudFrontInvoke()` was called twice on the same Web Function. |

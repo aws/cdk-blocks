@@ -76,6 +76,7 @@ import {
 import {
   assertCacheGuardIgnoredCookies,
   isDefaultTtlPositive,
+  SSR_CACHE_GUARD_ROUTER_HEADERS,
   type SsrCacheGuardConfig,
   withSsrCacheGuard,
   withSsrCacheGuardNodeOption,
@@ -929,13 +930,33 @@ export class HostingConstruct extends Construct {
     // names the selected door's server-route cache policy keys on, and
     // whether a response with no Cache-Control is edge-cached. The
     // CloudFront-over-ALB door's server-route policy keys on every cookie.
+    // CloudFront ignores `Vary`, so the guard also needs the request headers
+    // that policy keys on: the CloudFront door's SSR policy keys on the
+    // Next.js router headers and `cacheKeyHeaders`; the CloudFront-over-ALB
+    // door's keys on no header but on the whole query string, which holds
+    // Next.js's `_rsc` (derived from the router headers, `Next-Url` included).
+    // `Vary: Cookie` is left to the cookie rule on both. The other doors put
+    // no CloudFront cache in front of the server.
     assertCacheGuardIgnoredCookies(f.cacheKeyCookies, f.cacheGuardIgnoredCookies);
+    const varyKeyedHeaders = stackedRouter
+      ? [...SSR_CACHE_GUARD_ROUTER_HEADERS, 'next-url']
+      : resolved.kind === 'cloudfront'
+        ? [...SSR_CACHE_GUARD_ROUTER_HEADERS, ...(f.cacheKeyHeaders ?? [])]
+        : undefined;
     const ssrCacheGuardConfig: SsrCacheGuardConfig = {
       cacheKeyCookies: f.cacheKeyCookies,
       ignoredCookies: f.cacheGuardIgnoredCookies,
       cacheKeyHeaders: f.cacheKeyHeaders,
       defaultTtlPositive: isDefaultTtlPositive(f.ssrDefaultTtl),
       allCookiesKeyed: stackedRouter,
+      varyKeyedHeaders,
+      ...(resolved.kind === 'cloudfront' && !stackedRouter
+        ? {
+            varyHint:
+              'To cache one copy per value, add the header to frontDoor.features.cacheKeyHeaders; ' +
+              'otherwise send `Cache-Control: private` for that response.',
+          }
+        : {}),
     };
     // The computes the manifest routes requests to, other than the image
     // function: they render server responses (e.g. a Next.js split function
@@ -2902,6 +2923,13 @@ const resolveHostingFrontDoor = (props: HostingConstructProps): ResolvedHostingF
  *   given `Host` as `x-forwarded-host` instead (see `withDoorEventShim`), so a
  *   server that builds redirects or absolute URLs from it never uses a host
  *   the client chose.
+ * - `edgeCache`: a shared cache in front of the server stores responses the
+ *   app marks shared-cacheable (`s-maxage`, `stale-while-revalidate`). Behind
+ *   a door without one, those routes reach the server on every request; synth
+ *   warns (`@aws-cdk-blocks/hosting:NoEdgeCache`) when the app's header rules
+ *   ask for it. The warning covers only doors that run a server (ALB and API
+ *   Gateway); the S3 website door (`'none'`) has no edge cache either, but
+ *   serves static files only, so it doesn't warn.
  *
  * A bring-your-own door declares only `streaming`, through `serverResponse`
  * (default `'streaming'`); the rest are its own to wire (and `cf.recordWired`
@@ -2914,6 +2942,7 @@ export type DoorCapabilities = {
   readonly wildcardRoutes?: boolean;
   readonly appliesRules?: boolean;
   readonly forwardedHost?: boolean;
+  readonly edgeCache?: boolean;
 };
 
 /**
@@ -2922,23 +2951,43 @@ export type DoorCapabilities = {
  * @internal Framework-only.
  */
 export const doorCapabilitiesFor = (frontDoor: HostingConstructProps['frontDoor']): DoorCapabilities => {
-  if (frontDoor === 'none') return { streaming: false, wildcardRoutes: false, appliesRules: false, forwardedHost: false };
+  if (frontDoor === 'none') {
+    return { streaming: false, wildcardRoutes: false, appliesRules: false, forwardedHost: false, edgeCache: false };
+  }
   if (typeof frontDoor !== 'object' || frontDoor === null) {
-    return { streaming: true, wildcardRoutes: true, appliesRules: true, forwardedHost: true };
+    return { streaming: true, wildcardRoutes: true, appliesRules: true, forwardedHost: true, edgeCache: true };
   }
   switch (frontDoor.kind) {
     case 'alb':
-      return { streaming: albDoor.serverResponse === 'streaming', wildcardRoutes: true, appliesRules: false, forwardedHost: false };
+      return {
+        streaming: albDoor.serverResponse === 'streaming',
+        wildcardRoutes: true,
+        appliesRules: false,
+        forwardedHost: false,
+        edgeCache: false,
+      };
     case 'stackedRouter':
       // The edge in front applies the rules and sets the forwarded host; the ALB under it invokes the server.
-      return { streaming: albDoor.serverResponse === 'streaming', wildcardRoutes: true, appliesRules: true, forwardedHost: true };
+      return {
+        streaming: albDoor.serverResponse === 'streaming',
+        wildcardRoutes: true,
+        appliesRules: true,
+        forwardedHost: true,
+        edgeCache: true,
+      };
     case 'apiGateway':
-      return { streaming: (frontDoor.api ?? 'http') === 'rest', wildcardRoutes: false, appliesRules: false, forwardedHost: false };
+      return {
+        streaming: (frontDoor.api ?? 'http') === 'rest',
+        wildcardRoutes: false,
+        appliesRules: false,
+        forwardedHost: false,
+        edgeCache: false,
+      };
     case 'custom':
       // `door` is validated (with a clear error) by the time the door is built.
       return { streaming: (frontDoor.door?.serverResponse ?? 'streaming') === 'streaming' };
     default:
-      return { streaming: true, wildcardRoutes: true, appliesRules: true, forwardedHost: true };
+      return { streaming: true, wildcardRoutes: true, appliesRules: true, forwardedHost: true, edgeCache: true };
   }
 };
 
