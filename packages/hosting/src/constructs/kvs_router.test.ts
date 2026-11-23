@@ -1493,9 +1493,9 @@ void describe('response fn — G12/G13 skew cookie set semantics', () => {
       { uri: '/builds/build-XYZ/about/index.html', headers: { 'x-blocks-viewer-uri': { value: '/about' } } },
       { statusCode: 304, headers: {}, cookies: {} },
     );
-    assert.ok(out.cookies['__dpl'], '__dpl cookie should be set on an HTML 304');
-    assert.equal(out.cookies['__dpl'].value, 'build-XYZ');
-    assert.match(out.cookies['__dpl'].attributes, /Max-Age=86400/);
+    assert.ok(out.cookies.__dpl, '__dpl cookie should be set on an HTML 304');
+    assert.equal(out.cookies.__dpl.value, 'build-XYZ');
+    assert.match(out.cookies.__dpl.attributes, /Max-Age=86400/);
   });
 
   void it('does NOT set __dpl on a 304 for a non-HTML asset', async () => {
@@ -1505,7 +1505,7 @@ void describe('response fn — G12/G13 skew cookie set semantics', () => {
       { uri: '/builds/build-XYZ/data.json', headers: { 'x-blocks-viewer-uri': { value: '/data.json' } } },
       { statusCode: 304, headers: {}, cookies: {} },
     );
-    assert.ok(!out.cookies['__dpl'], 'no cookie on a non-HTML 304');
+    assert.ok(!out.cookies.__dpl, 'no cookie on a non-HTML 304');
   });
 
   void it('NEVER sets __dpl when skew disabled (maxAge=0), even on 200 HTML', async () => {
