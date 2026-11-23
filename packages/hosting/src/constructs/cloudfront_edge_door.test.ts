@@ -298,6 +298,10 @@ describe('cloudFrontEdgeDoor — behaviors, caching, rules', () => {
     assert.deepEqual(config.DefaultCacheBehavior.ResponseHeadersPolicyId, { Ref: id });
     const sec = policies[id]?.Properties.ResponseHeadersPolicyConfig.SecurityHeadersConfig;
     assert.deepEqual(sec.ContentSecurityPolicy, { ContentSecurityPolicy: csp, Override: true });
+    // The other security headers are fixed values that replace the server's.
+    assert.equal(sec.FrameOptions.Override, true);
+    assert.equal(sec.StrictTransportSecurity.Override, true);
+    assert.equal(sec.ReferrerPolicy.Override, true);
   });
 
   it("the app's error pages answer from S3 under this build's prefix", () => {
