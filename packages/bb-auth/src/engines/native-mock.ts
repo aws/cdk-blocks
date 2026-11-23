@@ -849,7 +849,9 @@ export class MockNativeEngine implements NativeEngine {
 	}
 
 	async updatePassword(input: { accessToken: string; oldPassword: string; newPassword: string }): Promise<void> {
-		// Cognito validates `ProposedPassword` before the token or the previous password.
+		// Cognito validates `PreviousPassword` and `ProposedPassword` before the
+		// token or the comparison. An empty old password (a passwordless user) is skipped.
+		this.store.enforcePasswordFormat(input.oldPassword);
 		this.store.enforcePasswordFormat(input.newPassword);
 		const { user } = this.store.userForAccessToken(input.accessToken);
 		if (user.password !== input.oldPassword) {

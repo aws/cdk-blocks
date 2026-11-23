@@ -213,8 +213,10 @@ export function serviceError(name: string, message: string): Error {
 /** @internal */
 export const userNotFound = (): Error => serviceError(AuthErrors.UserNotFound, 'User does not exist.');
 
-/** One character of Java's `\s` (Cognito's validator), which is ASCII-only. See `MockStore.enforcePasswordFormat`. */
+/** One character Cognito refuses at either end of a password (ASCII only). See `MockStore.enforcePasswordFormat`. */
 const ASCII_WHITESPACE = /^[ \t\n\v\f\r]$/;
+/** A character Cognito refuses anywhere in a password. See `MockStore.enforcePasswordFormat`. */
+const LINE_BREAK = /[\n\r]/;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Parsing (tolerant)
@@ -710,22 +712,33 @@ export class MockStore {
 	}
 
 	/**
-	 * Refuse a password that begins or ends with whitespace, as Cognito does:
-	 * the `Password` / `ProposedPassword` / `TemporaryPassword` member of
+	 * Refuse a password in the format Cognito refuses: the `Password` /
+	 * `ProposedPassword` / `PreviousPassword` / `TemporaryPassword` member of
 	 * `SignUp`, `ConfirmForgotPassword`, `ChangePassword`,
 	 * `AdminSetUserPassword` and `AdminCreateUser` must match
 	 * `^[\S]+.*[\S]+$`, and a request that does not is answered with
 	 * `InvalidParameterException` before the pool's policy is consulted.
-	 * Whitespace inside the password is allowed. The password is never
-	 * trimmed: trimming would store a password the user did not type.
+	 * The password is never trimmed: trimming would store a password the user
+	 * did not type.
 	 *
-	 * `\S` here is Java's (Cognito's validator): it excludes only the ASCII
-	 * whitespace characters space, `\t`, `\n`, `\v`, `\f` and `\r`.
+	 * What Cognito does, checked against the live service: the first and last
+	 * character must not be an ASCII space, `\t`, `\n`, `\v`, `\f` or `\r`,
+	 * and the password must not contain `\n` or `\r` anywhere. Other inner
+	 * whitespace is allowed, and so is non-ASCII whitespace (U+00A0, U+2003,
+	 * U+0085, U+2028, U+2029) anywhere. An empty string is skipped: the
+	 * password is optional for a passwordless user.
 	 */
 	enforcePasswordFormat(password: string): void {
 		if (typeof password !== 'string' || password.length === 0) return;
-		if (ASCII_WHITESPACE.test(password[0]) || ASCII_WHITESPACE.test(password[password.length - 1])) {
-			throw serviceError(AuthErrors.InvalidParameter, 'Password must not begin or end with whitespace.');
+		if (
+			ASCII_WHITESPACE.test(password[0]) ||
+			ASCII_WHITESPACE.test(password[password.length - 1]) ||
+			LINE_BREAK.test(password)
+		) {
+			throw serviceError(
+				AuthErrors.InvalidParameter,
+				'Password must not begin or end with whitespace, or contain a line break.',
+			);
 		}
 	}
 

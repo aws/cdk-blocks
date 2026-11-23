@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Mock ↔ AWS parity for **a password that begins or ends with whitespace**.
+ * Mock ↔ AWS parity for **a password that begins or ends with whitespace,
+ * or contains a line break**.
  * Cognito's `Password` / `ProposedPassword` / `TemporaryPassword` members
  * (`SignUp`, `ConfirmForgotPassword`, `ChangePassword`, `AdminSetUserPassword`,
  * `AdminCreateUser`) must match `^[\S]+.*[\S]+$`, so Cognito answers such a
@@ -30,8 +31,19 @@ const GOOD = 'Passw0rd!long';
 /** Cognito's answer for a `Password` member outside its pattern. */
 const COGNITO_TEXT =
 	"1 validation error detected: Value at 'password' failed to satisfy constraint: Member must satisfy regular expression pattern: ^[\\S]+.*[\\S]+$";
-/** Each would pass the default policy if it were not for the surrounding whitespace. */
-const SURROUNDED = [` ${GOOD}`, `${GOOD} `, `\t${GOOD}`, `${GOOD}\n`];
+/**
+ * Each would pass the default policy if it were not for the whitespace at an
+ * end, or the line break inside (which Cognito's `.` does not match).
+ */
+const REFUSED = [
+	` ${GOOD}`,
+	`${GOOD} `,
+	`\t${GOOD}`,
+	`${GOOD}\n`,
+	'Passw0rd\n!long',
+	'Passw0rd\r!long',
+	'Passw0rd\r\n!long',
+];
 let n = 0;
 const root = (): ScopeParent => ({ id: `paritypwfmt${process.pid}x${++n}` });
 
@@ -54,8 +66,8 @@ function localAuth(options: CognitoAuthOptions = {}) {
 	return { auth, last };
 }
 
-describe('parity: a password with leading or trailing whitespace is an invalid parameter', () => {
-	for (const password of SURROUNDED) {
+describe('parity: a password with whitespace at an end or a line break inside is an invalid parameter', () => {
+	for (const password of REFUSED) {
 		test(`signUp with ${JSON.stringify(password)}`, async () => {
 			const local = localAuth();
 			const mock = await failure(local.auth.signUp('alice', password));
@@ -92,12 +104,16 @@ describe('parity: a password with leading or trailing whitespace is an invalid p
 
 		assert.deepStrictEqual(mock, aws);
 		assert.strictEqual(mock.name, AuthErrors.InvalidParameter);
-		// The code was not spent and the old password still works.
+		// The stored password is unchanged, and the code was not spent.
+		assert.strictEqual(
+			(await new Browser().request((ctx) => local.auth.signIn('alice', GOOD, ctx))).status,
+			'signedIn',
+		);
 		await local.auth.confirmResetPassword('alice', code, `${GOOD}2`);
 	});
 });
 
-describe('local engine: the whitespace rule on every password Cognito patterns', () => {
+describe('local engine: the format rule on every password Cognito patterns', () => {
 	test('updatePassword refuses the new password and keeps the old one', async () => {
 		const local = localAuth();
 		await local.auth.signUp('bob', GOOD, { attributes: { email: 'bob@example.com' } });
@@ -106,6 +122,8 @@ describe('local engine: the whitespace rule on every password Cognito patterns',
 		await b.request((ctx) => local.auth.signIn('bob', GOOD, ctx));
 		const e = await failure(b.request((ctx) => local.auth.updatePassword(ctx, GOOD, `${GOOD} `)));
 		assert.strictEqual(e.name, AuthErrors.InvalidParameter);
+		const inner = await failure(b.request((ctx) => local.auth.updatePassword(ctx, GOOD, 'Passw0rd\n!long')));
+		assert.strictEqual(inner.name, AuthErrors.InvalidParameter);
 		assert.strictEqual(
 			(await new Browser().request((ctx) => local.auth.signIn('bob', GOOD, ctx))).status,
 			'signedIn',
@@ -122,17 +140,34 @@ describe('local engine: the whitespace rule on every password Cognito patterns',
 		await auth.admin.createUser('carol', { temporaryPassword: GOOD });
 		const set = await failure(auth.admin.setUserPassword('carol', `${GOOD}\t`, { permanent: true }));
 		assert.strictEqual(set.name, AuthErrors.InvalidParameter);
+		// The stored (temporary) password is unchanged: it still opens the new-password challenge.
+		const r = await new Browser().request((ctx) => auth.signIn('carol', GOOD, ctx));
+		assert.ok(r.status === 'continueSignIn' && r.nextStep.name === 'CONFIRM_SIGN_IN_WITH_NEW_PASSWORD_REQUIRED');
 	});
 
-	test('whitespace inside a password is allowed', async () => {
+	test('updatePassword refuses an old password in that format, before the comparison', async () => {
 		const local = localAuth();
-		const inner = 'Correct Horse 1!';
-		await local.auth.signUp('dave', inner, { attributes: { email: 'dave@example.com' } });
-		await local.auth.confirmSignUp('dave', local.last('signUp'));
-		assert.strictEqual(
-			(await new Browser().request((ctx) => local.auth.signIn('dave', inner, ctx))).status,
-			'signedIn',
-		);
+		await local.auth.signUp('fay', GOOD, { attributes: { email: 'fay@example.com' } });
+		await local.auth.confirmSignUp('fay', local.last('signUp'));
+		const b = new Browser();
+		await b.request((ctx) => local.auth.signIn('fay', GOOD, ctx));
+		// Cognito checks `PreviousPassword`'s format first: InvalidParameter, not NotAuthorized.
+		const e = await failure(b.request((ctx) => local.auth.updatePassword(ctx, ` ${GOOD}`, `${GOOD}2`)));
+		assert.strictEqual(e.name, AuthErrors.InvalidParameter);
+	});
+
+	test('other whitespace inside a password is allowed', async () => {
+		const local = localAuth();
+		for (const [i, inner] of ['Correct Horse 1!', 'Correct\tHorse 1!', 'Correct\u2028Horse 1!'].entries()) {
+			const name = `dave${i}`;
+			await local.auth.signUp(name, inner, { attributes: { email: `${name}@example.com` } });
+			await local.auth.confirmSignUp(name, local.last('signUp'));
+			assert.strictEqual(
+				(await new Browser().request((ctx) => local.auth.signIn(name, inner, ctx))).status,
+				'signedIn',
+				JSON.stringify(inner),
+			);
+		}
 	});
 
 	test('a non-ASCII space is not whitespace to Cognito’s validator', async () => {
