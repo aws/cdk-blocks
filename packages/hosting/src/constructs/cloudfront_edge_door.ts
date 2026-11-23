@@ -483,8 +483,14 @@ const planEdgeBehaviors = (
     wanted.push([pattern, target]);
   };
   for (const path of origins.api?.paths ?? []) add(path, 'api');
+  // The custom error responses point at these paths, and only S3 serves them
+  // (the router has no route for `/builds/<id>/…`), so they never give way.
+  const errorPagePaths = new Set<string>();
   for (const r of customErrorResponses(app.errorPages, { pathPrefix: buildPrefix(input), hasCompute: Boolean(origins.server), pageKeys: true })) {
-    if (r.responsePagePath) add(r.responsePagePath, 's3');
+    if (r.responsePagePath) {
+      errorPagePaths.add(r.responsePagePath);
+      add(r.responsePagePath, 's3');
+    }
   }
   // The catch-all is implicit in the route table: the server when there is
   // one, else the static assets (the router's default target, too).
@@ -513,11 +519,12 @@ const planEdgeBehaviors = (
     // first, so a prefix serving many files (`/_astro/*`) keeps its S3
     // behavior. Dropping an S3 behavior is always safe: its requests reach a
     // later behavior or the router default, and the router serves the file.
+    // The error pages are the exception (the router can't serve them), so they stay.
     let list = [...wanted];
     let kept = fit(list);
     for (let i = list.length - 1; i >= 0 && kept.length > MAX_EDGE_BEHAVIORS; i--) {
       const [p, t] = list[i];
-      if (t !== 's3' || p.includes('*')) continue;
+      if (t !== 's3' || p.includes('*') || errorPagePaths.has(p)) continue;
       list = [...list.slice(0, i), ...list.slice(i + 1)];
       kept = fit(list);
     }
