@@ -7,8 +7,8 @@
  * Registers a RawRoute that 302-redirects to the CloudWatch Dashboard URL.
  * The URL is derived, not injected: each instance computes its own dashboard
  * name exactly as the CDK layer does (the `dashboardName` option, else
- * `fullId`) and builds the console URL from it and the compute's `AWS_REGION`,
- * so an app with several dashboards gets one URL per dashboard.
+ * `fullId`) and builds the console URL from it and the compute's region
+ * (`AWS_REGION`, else `AWS_DEFAULT_REGION`), so an app with several dashboards gets one URL per dashboard.
  */
 import type { ScopeParent } from '@aws-cdk-blocks/core';
 import { Scope, registerSdkIdentifiers } from '@aws-cdk-blocks/core';
@@ -33,8 +33,9 @@ export type {
  */
 export class Dashboard extends Scope {
 	/**
-	 * CloudWatch Dashboard console URL of this dashboard, derived from `AWS_REGION`
-	 * and {@link Dashboard.dashboardName}. Null when `AWS_REGION` is not set.
+	 * CloudWatch Dashboard console URL of this dashboard, derived from the region
+	 * (`AWS_REGION`, else `AWS_DEFAULT_REGION`) and {@link Dashboard.dashboardName}.
+	 * Null when neither is set.
 	 */
 	readonly url: string | null;
 
@@ -59,8 +60,9 @@ export class Dashboard extends Scope {
 		// Same derivation as the CDK layer's resolveConfig, so this names the deployed dashboard.
 		this.dashboardName = deriveDashboardName(id, options?.dashboardName, this.fullId);
 		// The compute runs in the stack's region, so AWS_REGION is the region the
-		// CDK layer's `AWS::Region` URL resolves to.
-		const region = process.env.AWS_REGION;
+		// CDK layer's `AWS::Region` URL resolves to. Fall back to AWS_DEFAULT_REGION
+		// as bb-container-compute's bootstrap does (src/bootstrap.mjs).
+		const region = process.env.AWS_REGION || process.env.AWS_DEFAULT_REGION;
 		this.url = region ? dashboardConsoleUrl(region, this.dashboardName) : null;
 		registerSdkIdentifiers(this.fullId, { dashboardName: this.dashboardName });
 

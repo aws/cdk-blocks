@@ -34,7 +34,8 @@ export function deriveDashboardName(id: string, dashboardName?: string, fullId?:
  * The CloudWatch console URL of the dashboard `dashboardName` in `region`.
  *
  * The CDK layer passes the `AWS::Region` token; the AWS runtime passes the
- * compute's `AWS_REGION`, which is the region of the stack that deployed it.
+ * compute's `AWS_REGION` (else `AWS_DEFAULT_REGION`), which is the region of the
+ * stack that deployed it.
  *
  * @param region - AWS region (a literal or a CDK token).
  * @param dashboardName - The dashboard name from {@link deriveDashboardName}.

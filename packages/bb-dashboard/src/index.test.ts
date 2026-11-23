@@ -690,7 +690,7 @@ describe('mountDashboardRoute', () => {
 		}
 	});
 
-	it('handler returns 302 redirect when fallback URL is provided', async () => {
+	it('handler 302s to the URL it was mounted with', async () => {
 		mountDashboardRoute(null as any, '/cdk-blocks/dashboard', 'https://fallback.example.com/dashboard');
 		const routes = getRegisteredRoutes();
 		const route = routes.find(r => r.path === '/cdk-blocks/dashboard')!;

@@ -44,12 +44,17 @@ async function hit(path: string): Promise<{ status: number; location: string | n
 }
 
 describe('several Dashboards on the AWS runtime', () => {
-	const saved = { region: process.env.AWS_REGION, legacy: process.env.BB_DASHBOARD_URL };
+	const saved = {
+		region: process.env.AWS_REGION,
+		defaultRegion: process.env.AWS_DEFAULT_REGION,
+		legacy: process.env.BB_DASHBOARD_URL,
+	};
 
 	beforeEach(() => {
 		Scope._resetRegistry();
 		clearRouteRegistry();
 		process.env.AWS_REGION = REGION;
+		delete process.env.AWS_DEFAULT_REGION;
 		// The value an earlier release's config would leave behind: one app-wide
 		// key holding the URL of whichever dashboard registered it last. A dashboard
 		// must not redirect to it.
@@ -59,6 +64,7 @@ describe('several Dashboards on the AWS runtime', () => {
 	afterEach(() => {
 		for (const [key, value] of [
 			['AWS_REGION', saved.region],
+			['AWS_DEFAULT_REGION', saved.defaultRegion],
 			['BB_DASHBOARD_URL', saved.legacy],
 		] as const) {
 			if (value === undefined) delete process.env[key];
@@ -98,8 +104,18 @@ describe('several Dashboards on the AWS runtime', () => {
 		assert.equal(named.url, consoleUrl('my-ops-board'));
 	});
 
+	it('falls back to AWS_DEFAULT_REGION when AWS_REGION is not set', async () => {
+		delete process.env.AWS_REGION;
+		process.env.AWS_DEFAULT_REGION = REGION;
+		const { Dashboard } = await import('./index.aws.js');
+		const dash = new Dashboard(new Scope('app'), 'main');
+		assert.equal(dash.url, consoleUrl('app-main'));
+		assert.deepEqual(await hit('/cdk-blocks/dashboard'), { status: 302, location: consoleUrl('app-main') });
+	});
+
 	it('url is null and the route returns 503 when no region is set', async () => {
 		delete process.env.AWS_REGION;
+		delete process.env.AWS_DEFAULT_REGION;
 		const { Dashboard } = await import('./index.aws.js');
 		const dash = new Dashboard(new Scope('app'), 'main');
 		assert.equal(dash.url, null);

@@ -241,10 +241,10 @@ Row 3 (y=18): [Log Volume (24w, 6h)]
 Unless `routePath` is `false`, the Dashboard registers a `GET` RawRoute:
 
 1. **CDK layer:** Builds the console URL from the `AWS::Region` token and the dashboard name, outputs it as a CfnOutput, and registers the RawRoute (on the Dashboard) for route validation. It passes **no** config to the runtime: an app may have several dashboards, and a single app-wide key would hold only the last one's URL.
-2. **Runtime layer:** Derives the same URL itself — the dashboard name exactly as the CDK layer derives it (`dashboardName` option, else `fullId`; shared helpers in `src/naming.ts`) and the compute's `AWS_REGION`, which is the stack's region — and registers a `RawRoute` on the Dashboard with a handler that redirects to that dashboard's own URL:
+2. **Runtime layer:** Derives the same URL itself — the dashboard name exactly as the CDK layer derives it (`dashboardName` option, else `fullId`; shared helpers in `src/naming.ts`) and the compute's region (`AWS_REGION`, else `AWS_DEFAULT_REGION`), which is the stack's region — and registers a `RawRoute` on the Dashboard with a handler that redirects to that dashboard's own URL:
    ```typescript
    // Internally equivalent to:
-   const region = process.env.AWS_REGION;
+   const region = process.env.AWS_REGION || process.env.AWS_DEFAULT_REGION;
    this.url = region ? dashboardConsoleUrl(region, this.dashboardName) : null;
    const url = this.url;
    new RawRoute(this, 'dashboard-redirect', {
@@ -252,7 +252,7 @@ Unless `routePath` is `false`, the Dashboard registers a `GET` RawRoute:
      method: 'GET',
      handler: async (ctx) => {
        if (!url) {
-         // No AWS_REGION, so no URL: answer 503 with a JSON body that points at `npx cdk deploy`.
+         // No region, so no URL: answer 503 with a JSON body that points at `npx cdk deploy`.
          ctx.response.status = 503;
          ctx.response.headers.set('Content-Type', 'application/json');
          ctx.response.send({ message, hint, localObservability });

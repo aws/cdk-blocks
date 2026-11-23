@@ -63,7 +63,7 @@ new Dashboard(scope: ScopeParent, id: string, options?: DashboardOptions)
 
 | Name | Type | Description |
 |------|------|-------------|
-| `url` | `string \| null` | This dashboard's CloudWatch console URL (CfnOutput). `string` on the CDK construct; on the AWS runtime, derived from `AWS_REGION` and `dashboardName`; `null` in the default/mock type until deployed |
+| `url` | `string \| null` | This dashboard's CloudWatch console URL (CfnOutput). `string` on the CDK construct; on the AWS runtime, derived from the region (`AWS_REGION`, else `AWS_DEFAULT_REGION`) and `dashboardName`; `null` in the default/mock type until deployed |
 | `dashboardName` | `string` | The resolved dashboard name (the `dashboardName` option, else the block's `fullId`), the same in every layer |
 
 ### Options

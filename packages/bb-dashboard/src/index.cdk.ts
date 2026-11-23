@@ -138,7 +138,7 @@ export class Dashboard extends Scope {
 
 		// No config is passed to the runtime: the AWS runtime derives this same URL
 		// from its own dashboard name (the `dashboardName` option, else `fullId`) and
-		// the compute's AWS_REGION, so each of an app's dashboards (DESIGN.md) keeps
+		// the compute's AWS_REGION (else AWS_DEFAULT_REGION), so each of an app's dashboards (DESIGN.md) keeps
 		// its own URL at runtime as well as at synth.
 
 		// Register the redirect route so the Lambda handler dispatches it.
