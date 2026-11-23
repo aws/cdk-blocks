@@ -11,7 +11,7 @@
  *
  * Each `stubIdp()` provider gets its own issuer, mounted as `RawRoute`s:
  *
- * | Method | Path (under `/aws-blocks/auth/idp/<id>`) | |
+ * | Method | Path (under `/cdk-blocks/auth/idp/<id>`) | |
  * |---|---|---|
  * | GET  | `/.well-known/openid-configuration` | discovery document |
  * | GET  | `/jwks.json` | the ES256 public key |
@@ -38,7 +38,7 @@
  * **No per-process state is needed to verify anything.** The signing key, the
  * code-signing key and the refresh-token key are all derived (HKDF-SHA256)
  * from the `Auth` block's session secret (on AWS the `session-secret`
- * framework key, in Secrets Manager or SSM per `defaults.secretsStore`; locally `.bb-data/<fullId>/state.json`), with a per-provider
+ * framework key, in Secrets Manager or SSM per `defaults.secretsStore`; locally `.cdk-blocks/local/data/<fullId>/state.json`), with a per-provider
  * label. So every Lambda instance (and every dev-server restart) signs with
  * the same key and serves the same JWKS: a token minted by one instance
  * verifies on another, and an authorize answered by one instance redeems at
@@ -48,7 +48,7 @@
  * deployment's own secret, not a constant in this file, nobody can mint a
  * code or token for a user the stub did not sign in.
  *
- * The user directory: the provider's inline `users` → `.bb-data/<fullId>/users.json`
+ * The user directory: the provider's inline `users` → `.cdk-blocks/local/data/<fullId>/users.json`
  * (the `bb-auth-oidc` fixture file) → one deterministic default user.
  *
  * Not a security boundary — a test double. `bb-auth-oidc`'s keys and refresh
@@ -71,8 +71,8 @@ import {
 } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { BlocksContext } from '@aws-blocks/core';
-import { constantTimeEquals } from '@aws-blocks/core/bb-utils';
+import type { BlocksContext } from '@aws-cdk-blocks/core';
+import { constantTimeEquals } from '@aws-cdk-blocks/core/bb-utils';
 import { type JWK, jwtVerify, SignJWT } from 'jose';
 import { escapeHtml } from '../federation-routes.js';
 import type { StubIdpSettings, StubUser } from '../types.js';
@@ -334,7 +334,7 @@ export function redirectUriRejectionReason(uri: string): string | null {
 interface StubInstance {
 	providerId: string;
 	settings: StubIdpSettings;
-	/** `.bb-data/<fullId>/` for the `users.json` fixture; `undefined` when deployed. */
+	/** `.cdk-blocks/local/data/<fullId>/` for the `users.json` fixture; `undefined` when deployed. */
 	dataDir: () => string | undefined;
 	client: StubClientRegistration;
 	/** The issuer URL for a request (see `stubIssuerUrl`). */
@@ -403,10 +403,10 @@ interface AuthorizeRequest {
  * - the app base, `appBaseUrl(ctx)` (`BLOCKS_PUBLIC_ORIGIN`, else this request's
  *   origin plus stage) — what the direct engine builds its `redirect_uri` from,
  *   and the base `/logout` checks `post_logout_redirect_uri` against;
- * - the stub's own issuer base (the issuer URL minus its `/aws-blocks/auth/idp/<id>`
+ * - the stub's own issuer base (the issuer URL minus its `/cdk-blocks/auth/idp/<id>`
  *   path): locally this request's origin, deployed the API Gateway URL the CDK
  *   layer registered — the server the native SDKs (Kotlin, Swift, Dart) build
- *   their relay `redirect_uri` from (`<server>/aws-blocks/auth/callback`).
+ *   their relay `redirect_uri` from (`<server>/cdk-blocks/auth/callback`).
  *
  * Compared exactly, as a real IdP compares a registered redirect URI.
  */
@@ -443,7 +443,7 @@ function parseAuthorizeRequest(
 	) {
 		ctx.response.status = 400;
 		ctx.response.headers.set('Content-Type', 'text/plain');
-		ctx.response.send('AWS Blocks stub IdP: missing or invalid authorize request (PKCE S256 is required)');
+		ctx.response.send('AWS CDK Blocks stub IdP: missing or invalid authorize request (PKCE S256 is required)');
 		return null;
 	}
 	// RFC 6749 §4.1.2.1: an unknown client or an unregistered redirect URI is
@@ -462,7 +462,7 @@ function parseAuthorizeRequest(
 		json(ctx, 400, {
 			error: 'invalid_request',
 			error_description:
-				'redirect_uri is not registered for this client. The AWS Blocks stub IdP accepts only the ' +
+				'redirect_uri is not registered for this client. The AWS CDK Blocks stub IdP accepts only the ' +
 				`app's own sign-in callback (redirects.callbackPath): ${registered.join(', ')}.`,
 		});
 		return null;
@@ -525,11 +525,11 @@ function renderLoginPage(providerId: string, users: StubUser[], req: AuthorizeRe
 		)
 		.join('');
 	return (
-		'<!DOCTYPE html><html><head><meta charset="utf-8"><title>Sign in — AWS Blocks stub IdP</title>' +
+		'<!DOCTYPE html><html><head><meta charset="utf-8"><title>Sign in — AWS CDK Blocks stub IdP</title>' +
 		'<style>body{font-family:system-ui,sans-serif;max-width:400px;margin:4rem auto;padding:0 1rem;color:#1a1a1a}' +
 		'h1{font-size:1.25rem}button{padding:8px 16px;cursor:pointer;border:0;border-radius:6px;background:#1a1a1a;color:#fff}</style>' +
 		'</head><body>' +
-		'<h1>AWS Blocks stub IdP: sign in</h1>' +
+		'<h1>CDK Blocks stub IdP: sign in</h1>' +
 		`<p style="color:#666;font-size:14px">Local sign-in for <strong>${escapeHtml(providerId)}</strong>. No real credentials.</p>` +
 		`<form method="POST" action="${escapeHtml(action)}">` +
 		options +
@@ -813,7 +813,7 @@ function handleLogout(ctx: BlocksContext, client: StubClientRegistration): void 
 			json(ctx, 400, {
 				error: 'invalid_request',
 				error_description:
-					'post_logout_redirect_uri is not registered for this client. The AWS Blocks stub IdP accepts ' +
+					'post_logout_redirect_uri is not registered for this client. The AWS CDK Blocks stub IdP accepts ' +
 					`only the app origin plus redirects.postSignOutPath or redirects.signOutPath (${client.postLogoutPaths
 						.map((path) => `${base}${path}`)
 						.join(', ')}).`,
@@ -825,7 +825,7 @@ function handleLogout(ctx: BlocksContext, client: StubClientRegistration): void 
 	}
 	ctx.response.status = 200;
 	ctx.response.headers.set('Content-Type', 'text/html; charset=utf-8');
-	ctx.response.send('<!DOCTYPE html><html><body><p>Signed out of the AWS Blocks stub IdP.</p></body></html>');
+	ctx.response.send('<!DOCTYPE html><html><body><p>Signed out of the AWS CDK Blocks stub IdP.</p></body></html>');
 }
 
 /** What {@link createStubIdp} needs to serve one `stubIdp()` provider. */
@@ -835,7 +835,7 @@ export interface StubIdpConfig {
 	/** The provider's `stubIdp` settings. */
 	settings: StubIdpSettings;
 	/**
-	 * `.bb-data/<fullId>/`, resolved per request so `users.json` edits apply
+	 * `.cdk-blocks/local/data/<fullId>/`, resolved per request so `users.json` edits apply
 	 * without a restart. The deployed stub has none (`() => undefined`).
 	 */
 	dataDir: () => string | undefined;

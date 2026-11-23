@@ -1,22 +1,21 @@
-# @aws-blocks/create-block
+# @aws-cdk-blocks/create-block
 
-Scaffold a new AWS Blocks Building Block (`bb-*`) — inside the AWS Blocks monorepo,
+Scaffold a new AWS CDK Blocks Building Block (`bb-*`) — inside the AWS CDK Blocks monorepo,
 inside your own workspace, or as a standalone package.
 
 ```bash
-npm create @aws-blocks/block@latest SearchIndex
-# or, inside the aws-blocks monorepo:
+npm create @aws-cdk-blocks/block@latest SearchIndex
+# or, inside the cdk-blocks monorepo:
 npm run new:bb -- SearchIndex
 ```
 
-Run `create-block --help` for the full, authoritative reference (options, modes,
-what gets generated, and next steps). A summary:
+`create-block --help` prints every option and the next steps.
 
 ## Modes (auto-detected)
 
 | Mode | When | Result |
 |---|---|---|
-| **contributor** | inside the aws-blocks monorepo | generates `packages/bb-<name>` and wires it into `@aws-blocks/blocks`, the root `workspaces`, the comprehensive test app, and a changeset |
+| **contributor** | inside the cdk-blocks monorepo | generates `packages/bb-<name>` and wires it into `aws-cdk-blocks`, the root `workspaces`, the comprehensive test app, and a changeset |
 | **customer** | inside your own npm-workspaces repo | generates `packages/bb-<name>`, registers it in your root `workspaces`, and `npm install`s so your app can import it — no publish; your app code is untouched |
 | **external** | anywhere else | generates a standalone `@<scope>/bb-<name>` package (`keywords: ["aws-blocks"]`), no workspace wiring |
 
@@ -35,7 +34,7 @@ what gets generated, and next steps). A summary:
 
 ## What it generates
 
-A **primitive** Building Block: a `Scope` subclass with one strongly-typed API,
+A Building Block: a `Scope` subclass with one strongly-typed API,
 backed by the four conditional-export entries — `index.mock.ts` (local dev +
 tests), `index.aws.ts` (deployed Lambda runtime), `index.cdk.ts` (CDK synth), and
 `index.browser.ts` (browser stub) — plus `types.ts`, `errors.ts`, `README.md`,

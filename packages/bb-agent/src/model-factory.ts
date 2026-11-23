@@ -3,9 +3,9 @@
 
 // Strands runtime is loaded lazily inside createStrandsModel(); only types are
 // imported here. See loadStrands() in agent.ts and issue #153.
-import { installClientUserAgent } from '@aws-blocks/core';
+import { installClientUserAgent } from '@aws-cdk-blocks/core';
 import type { Model, BaseModelConfig } from '@strands-agents/sdk';
-import type { ChildLogger } from '@aws-blocks/bb-logger';
+import type { ChildLogger } from '@aws-cdk-blocks/bb-logger';
 // `./providers/canned` and `./providers/throwing` extend Strands' `Model`, so importing
 // them would evaluate `@strands-agents/sdk` at load time — hence they're also loaded
 // lazily inside createStrandsModel(). See issue #153.
@@ -203,7 +203,7 @@ function formatUserAgentChain(chain: [string, string][]): string {
 const warnedDeprecatedGuardrails = new WeakSet<ModelConfig>();
 
 /**
- * Maps Blocks' ModelConfig to the corresponding Strands model provider.
+ * Maps CDK Blocks' ModelConfig to the corresponding Strands model provider.
  * The developer configures one unified ModelConfig shape — this factory
  * translates it to BedrockModel, OpenAIModel, or CannedProvider internally.
  *

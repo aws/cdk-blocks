@@ -274,7 +274,7 @@ export type CdnConstructProps = {
    */
   serverOrigin?: HostingServerOriginConfig;
   /**
-   * Rate limit of the distribution's Blocks-managed web ACL (requests per
+   * Rate limit of the distribution's CDK Blocks-managed web ACL (requests per
    * 5-minute window per IP). When set, each server-origin REST API stage gets
    * a REGIONAL web ACL with the same rules and this limit, with its logs in
    * CloudWatch Logs. `HostingConstruct` sets it when `waf.enabled` builds a
@@ -538,7 +538,7 @@ export class CdnConstruct extends Construct {
     const acceptLegacy = serverOriginOpts.acceptLegacyVerifyHeader === true;
     if (acceptLegacy) {
       Annotations.of(this).addWarningV2(
-        '@aws-blocks/hosting:AcceptLegacyVerifyHeader',
+        '@aws-cdk-blocks/hosting:AcceptLegacyVerifyHeader',
         'Remove frontDoor.features.serverOrigin.acceptLegacyVerifyHeader after this deploy. While it is set, the ' +
           'server origin also accepts the origin-verify value derived from the stack name and construct path, and ' +
           'the SSR REST API stage gets no web ACL until the next deploy.',
@@ -573,7 +573,7 @@ export class CdnConstruct extends Construct {
       };
     };
     // A REGIONAL web ACL on each server-origin stage, mirroring the
-    // distribution's Blocks-managed web ACL (set only when it has one).
+    // distribution's CDK Blocks-managed web ACL (set only when it has one).
     let originWaf: ServerOriginWaf | undefined;
     const protectStage = (api: RestApi, deferWaf: boolean): void => {
       if (serverOriginOpts.accessLogging) {
@@ -1445,9 +1445,9 @@ export class CdnConstruct extends Construct {
         : []),
       ...(hasCompute
         ? [
-            // 500: Don't cache Lambda 500s — they're likely transient.
-            // Image-opt Lambda returns 500 for missing images; caching
-            // that error would serve stale errors to all users.
+            // 500: Don't cache Lambda 500s — they're likely transient, and
+            // caching one would serve a stale error to all users. (A missing
+            // source image is a 404 from the image-opt Lambda, not a 500.)
             // 502/503/504: not cached either (see withServerErrorsNotCached).
             {
               httpStatus: 500,

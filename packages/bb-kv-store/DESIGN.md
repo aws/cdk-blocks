@@ -2,11 +2,11 @@
 
 Design document for KVStore. For usage, see [README.md](./README.md).
 
-**Package:** `@aws-blocks/bb-kv-store`
+**Package:** `@aws-cdk-blocks/bb-kv-store`
 **Type:** Primitive (new infrastructure)
 **AWS Service:** DynamoDB (one table per store: a partition key, an optional sort key, optional global secondary indexes)
 
-KVStore is the one NoSQL block of AWS Blocks. It is one package, one class, and one error constant. A store has three forms that differ only in their options. The forms share one table layout, so a store moves between the first two forms with no new table. The block replaces the earlier `KVStore` and the former `DistributedTable` block. The [design decisions](#design-decisions) record what came from each.
+KVStore is the one NoSQL block of AWS CDK Blocks. It is one package, one class, and one error constant. A store has three forms that differ only in their options. The forms share one table layout, so a store moves between the first two forms with no new table. The block replaces the earlier `KVStore` and the former `DistributedTable` block. The [design decisions](#design-decisions) record what came from each.
 
 | Form | Options | Key of the store | Table key schema |
 |---|---|---|---|
@@ -32,7 +32,7 @@ The block owns every top-level attribute name that starts with `_bkv_` ("Blocks 
 
 `put` also rejects a value that has a field named `__proto__`, at any depth, with `ValidationFailedException`. DynamoDB cannot store that field name: the DynamoDB document client drops the field without an error, so the mock would keep a field that the AWS runtime loses. Both runtimes reject it in `buildItem`, before any I/O, so the same value gives the same stored item or the same error in both.
 
-The layout is implemented once, in `src/item.ts`, and both runtimes call it: `normalizeKey`, `mergeKeyIntoValue`, `buildItem`, `readItem`, the condition planners, and the cursor codec. The mock persists the exact DynamoDB items to `.bb-data/{fullId}/store.json`, in a file with a version (`{ "version": 2, "items": [...] }`), so a mock file shows what DynamoDB would hold.
+The layout is implemented once, in `src/item.ts`, and both runtimes call it: `normalizeKey`, `mergeKeyIntoValue`, `buildItem`, `readItem`, the condition planners, and the cursor codec. The mock persists the exact DynamoDB items to `.cdk-blocks/local/data/{fullId}/store.json`, in a file with a version (`{ "version": 2, "items": [...] }`), so a mock file shows what DynamoDB would hold.
 
 ## Key model
 
@@ -135,6 +135,10 @@ A stack delete never reaches `GetTemplate`, so a `GetTemplate` failure cannot bl
 | `dynamodb:CreateTable` | no | yes |
 | `dynamodb:Scan` | no | yes |
 | `dynamodb:BatchWriteItem` | no | yes |
+| `dynamodb:ListTagsOfResource`, `dynamodb:TagResource` | no | yes |
+| `dynamodb:DescribeTimeToLive`, `dynamodb:UpdateTimeToLive` | no | yes |
+| `dynamodb:DescribeContinuousBackups`, `dynamodb:UpdateContinuousBackups` | no | yes |
+| `kms:DescribeKey`, `kms:CreateGrant`, `kms:Decrypt`, `kms:Encrypt`, `kms:ReEncrypt*`, `kms:GenerateDataKey*` (the customer key of a store only, through DynamoDB only: `kms:ViaService`) | no | only for a store with a customer-managed key |
 | `cloudformation:DescribeStacks`, `cloudformation:GetTemplate` (own stack only, `onEvent` role only) | yes | yes |
 
 A production deployment can add and remove GSIs only through `UpdateTable`. The GSI manager Lambda function cannot drop or recreate the table, scan its data, or batch-write items. So a misconfigured custom resource cannot delete production data.
@@ -143,16 +147,26 @@ A production deployment can add and remove GSIs only through `UpdateTable`. The 
 
 A sandbox deployment drops the table and creates it again. This fast path avoids the limit of one GSI change at a time:
 
-1. Scan all items of the existing table into memory.
-2. Delete the table.
-3. Wait until the deletion is complete.
-4. Create a new table with all desired GSIs. DynamoDB accepts several GSIs when it creates a table.
-5. Wait until the table and all GSIs are ACTIVE.
-6. Write all items back with `BatchWriteItem`.
+1. Read the settings of the existing table: server-side encryption, user tags, TTL, point-in-time recovery, the stream and the table class. If a read fails, the handler stops before it deletes anything.
+2. Scan all items of the existing table into memory.
+3. Delete the table.
+4. Wait until the deletion is complete.
+5. Create a new table with all desired GSIs, with the same encryption, tags, stream and table class. DynamoDB accepts several GSIs when it creates a table.
+6. Wait until the table and all GSIs are ACTIVE.
+7. Turn TTL (on the same attribute) and point-in-time recovery (with the same recovery period) back on, if they were on. DynamoDB sets both only on an ACTIVE table, and refuses point-in-time recovery for a short time after the table is created, so the handler retries it. A failure in this step is reported after step 8, so it does not cost the items.
+8. Write all items back with `BatchWriteItem`, 25 at a time. A new on-demand table throttles a fast restore of large items; `BatchWriteItem` then succeeds and returns the items it did not write. The handler sends those again, with a wait that doubles from 0.1 s to 5 s, up to 12 attempts for a batch.
+
+So the new table has the settings that the CDK layer gave the old one: the AWS-managed key or the customer key of `encryption`, TTL on `_bkv_ttl` or the `ttl` field, the stack tags, and point-in-time recovery when it is on. DescribeTable reports a key ARN for the AWS-managed key too, so the CDK layer passes the ARN of a customer key in the `EncryptionKeyArn` property of the custom resource (sandbox only). Tags whose key starts with `aws:`, such as `aws:cloudformation:stack-name`, cannot be set by a caller, so the new table does not have them. A new table also has a new stream ARN, so a consumer of the old stream must subscribe again.
+
+The handler copies the settings of the live table, so a table that has lost them would stay without them. `1.0.0-rc.0` recreated tables with only their keys and indexes, and left such tables behind. In sandbox the CDK layer therefore also passes what it declares in the `DeclaredSettings` property: the TTL attribute, and point-in-time recovery with its recovery period. A live table that lacks one of them, or has no KMS encryption (the CDK layer always sets the AWS-managed key or a customer key), gets it on the new table. The handler checks this also when the indexes already match, and then runs the fast path for the settings alone. If it cannot read the settings in that case, it leaves the table as it is.
+
+The GSI manager role uses a customer key through DynamoDB to create the table and to copy its items. A key from `KVStore.fromKmsKey()` must allow that role in its key policy, either by name or by a statement that delegates to account IAM. With a key policy that does not allow the role at all, the scan of step 2 is denied: nothing is deleted, and the index change does not deploy.
+
+A table with deletion protection (`protection: 'locked'`) is never deleted. Its GSIs change one at a time through `UpdateTable`, as in production.
 
 The fast path takes seconds where one change at a time takes minutes to hours, but it **destroys the table and creates it again**. The handler uses it only when `SandboxMode` is `true`. The CDK layer sets `SandboxMode` from the `sandboxMode` context variable, which it reads with `isSandboxContext()` from core. The IAM policy of a production deployment does not grant the permissions that the fast path needs. So the fast path cannot run in production, even with `SandboxMode` set by mistake.
 
-**Data loss risk in sandbox:** Data can be lost in two cases. The Lambda function times out during the scan of step 1 on a very large table, or the restore of step 6 fails partway. A sandbox is a short-lived development environment, so the risk is acceptable there. It is the reason that production never uses the fast path.
+**Data loss risk in sandbox:** Data can be lost in three cases. The Lambda function times out after the delete of step 3 on a very large table, CreateTable in step 5 fails, or the restore of step 8 fails partway: a write is refused, or a batch still has unprocessed items after its last attempt, in which case the handler fails and reports how many items were not written back. A sandbox is a short-lived development environment, so the risk is acceptable there. It is the reason that production never uses the fast path.
 
 ## Infrastructure (CDK)
 
@@ -173,7 +187,7 @@ A store fixes its key when the table is created. A changed `key` option on a dep
 
 ### Durability and encryption
 
-Point-in-Time Recovery comes from the option of the block first, and then from the stack-wide `defaults.pointInTimeRecovery`. `BlocksPresets` turns it on under `production` and off under `sandbox`. Server-side encryption does **not** come from a preset. `BlocksDefaults` has no encryption field, so SSE defaults to the AWS-managed `aws/dynamodb` key under every preset, and only the `encryption` option of a store changes it. `resolveDynamoDbProtection` in `@aws-blocks/core/cdk/internal` resolves both, for every DynamoDB table that AWS Blocks provisions.
+Point-in-Time Recovery comes from the option of the block first, and then from the stack-wide `defaults.pointInTimeRecovery`. `BlocksPresets` turns it on under `production` and off under `sandbox`. Server-side encryption does **not** come from a preset. `BlocksDefaults` has no encryption field, so SSE defaults to the AWS-managed `aws/dynamodb` key under every preset, and only the `encryption` option of a store changes it. `resolveDynamoDbProtection` in `@aws-cdk-blocks/core/cdk/internal` resolves both, for every DynamoDB table that CDK Blocks provisions.
 
 - **`pointInTimeRecovery?: boolean | { retentionDays: number }`:** `true` turns on continuous backups with the default 35-day window of DynamoDB. `{ retentionDays: n }` turns on PITR and sets the window to `n` days, from 1 to 35. A value outside that range gives a warning at synth, and the default window applies. `false` turns PITR off. When the option is omitted, `defaults.pointInTimeRecovery` applies. The template has a `PointInTimeRecoverySpecification` only when PITR is on.
 - **`encryption?: 'aws-managed' | 'customer-managed' | ExternalKmsKeyRef`:** `'aws-managed'`, the default, uses the `aws/dynamodb` key. `'customer-managed'` provisions a dedicated CMK for each table. `KVStore.fromKmsKey(arn)` uses a CMK that you own, so several tables can share one key. An unrecognized value fails the synth with an error that lists the valid values. It never falls back to `'aws-managed'`, so a request for a customer-managed key cannot be downgraded with no error.
@@ -187,7 +201,7 @@ Release 0.4.0 or earlier keys its table by `pk` and keeps the value as JSON text
 
 **The AWS runtime** (`legacy/aws.ts`) reads with `GetItem` and `Scan`, writes with `PutItem`, and deletes with `DeleteItem`. The layout is in `legacy/layout.ts`: a value is `JSON.parse` of the `value` attribute, and an item whose `value` is not JSON text is a `ValidationFailed` error that names the key. The key check, the cursor, the page logic (`requestResults` in `item.ts`), and the expiry filter are those of `KVStore`, over a key model with `pk` and `ttl`.
 
-**The mock** (`legacy/mock.ts`) holds the same items as the table: `loadReleaseFile` in `mock-file.ts` reads the data file of the old store, `.bb-data/{fullId}/store.json`, as items in the layout of release 0.4.0. So the mock and the AWS runtime share the reader, the key check, the cursor, and the expiry filter, and a cursor of one reads on in the other. An entry is read as release 0.4.0 reads it, and an entry that release 0.4.0 leaves out is left out. The load keeps an expired item, so `includeExpired` works as on AWS. The load does not change the file.
+**The mock** (`legacy/mock.ts`) holds the same items as the table: `loadReleaseFile` in `mock-file.ts` reads the data file of the old store, `.cdk-blocks/local/data/{fullId}/store.json`, as items in the layout of release 0.4.0. So the mock and the AWS runtime share the reader, the key check, the cursor, and the expiry filter, and a cursor of one reads on in the other. An entry is read as release 0.4.0 reads it, and an entry that release 0.4.0 leaves out is left out. The load keeps an expired item, so `includeExpired` works as on AWS. The load does not change the file.
 
 If the app ran once on this release with the old line unchanged, the mock of `KVStore` loaded that directory first. It converted `store.json`, or it could not convert it and set it aside. Both leave the file of release 0.4.0 as a copy, `store.json.bak` (the loader of `KVStore` keeps that copy before it converts), and `loadReleaseFile` reads the copy. It does not turn a converted file back: a conversion under the options of the old line (`ttl: true`) does not keep the expiry where a read can find it. What that `KVStore` wrote to the converted file is not read. A `put` or a `delete` writes `store.json` as a version 1 file.
 
@@ -199,11 +213,11 @@ If the app ran once on this release with the old line unchanged, the mock of `KV
 
 ## Mock implementation
 
-- Data is stored in `.bb-data/{scope.fullId}/store.json` through `getMockDataDir()` from core, as `{ "version": 2, "items": [...] }`, where each entry of `items` is the exact DynamoDB item. The file format and its loader are in `src/mock-file.ts` (D-KV-19).
+- Data is stored in `.cdk-blocks/local/data/{scope.fullId}/store.json` through `getMockDataDir()` from core, as `{ "version": 2, "items": [...] }`, where each entry of `items` is the exact DynamoDB item. The file format and its loader are in `src/mock-file.ts` (D-KV-19).
 - The loader converts the two earlier formats, and keeps a copy of a version 1 `store.json` as `store.json.bak` before the store writes the file again. Version 1 is the `store.json` of `KVStore` before the merge: an object of key to JSON string, or of key to `{ value, ttl }`. The other is the `data.json` of `DistributedTable`, which the loader reads when the directory has no `store.json`. A conversion uses the layout of a write and is all or nothing. The store then writes `store.json` in the current format. A `data.json` stays where it is.
 - An entry of a current-format file that is not an item of the store (a corrupt entry) is left out. The mock keeps a copy of the file as `store.json.bak` and reports it once at warn level.
 - A file in any other shape is renamed to a `.bak` file and reported once at warn level, and the store starts empty. The mock does not write over a file that it cannot read.
-- Data persists across dev server restarts. Customers can delete it with `rm -rf .bb-data`.
+- Data persists across dev server restarts. Customers can delete it with `rm -rf .cdk-blocks/local/data .bb-data`.
 - The mock drops an item whose expiry has passed when it loads its file, so the file does not grow with expired items. This takes the place of the background deletion that DynamoDB does.
 - `scan` sorts the items by base key once and reuses that order until the next write.
 - Every write stores a copy of the item made with `marshall` then `unmarshall` from `@aws-sdk/util-dynamodb`, with the options the AWS runtime passes to its DocumentClient (`MARSHALL_OPTIONS` in `src/item.ts`). A value that DynamoDB cannot store (an empty Set, a `Date`, `NaN`, a class instance, an integer above `Number.MAX_SAFE_INTEGER`) fails locally with the marshaller's error. A value that the marshaller converts reads back converted: a `Map` as an object, `-0` as `0`, a `bigint` as a number, and `undefined` dropped at any depth. Every read returns a copy, so changing an object after `put` or changing a returned value never changes the stored item.
@@ -300,7 +314,7 @@ The default choice (`'coerce'` over `'off'`) is recorded as a cross-cutting deci
 
 ### D-KV-11: Secure-by-default durability and encryption, from the stack `BlocksDefaults`, with one `protection` option
 
-The durability settings come from the stack-wide `BlocksDefaults` (`BlocksPresets` in `@aws-blocks/core/cdk`): `defaults.removalPolicy`, `defaults.deletionProtection`, and `defaults.pointInTimeRecovery`. Under `BlocksPresets.production` a table defaults to PITR **on**, deletion protection **on**, and `RemovalPolicy.RETAIN`. Under `BlocksPresets.sandbox` PITR and deletion protection are off and the removal policy is `DESTROY`, so a short-lived stack stays cheap and `sandbox:destroy` removes it with one command. SSE defaults to the AWS-managed KMS key. A store overrides each default with `protection`, `pointInTimeRecovery`, or `encryption`, and the option of a store always wins.
+The durability settings come from the stack-wide `BlocksDefaults` (`BlocksPresets` in `@aws-cdk-blocks/core/cdk`): `defaults.removalPolicy`, `defaults.deletionProtection`, and `defaults.pointInTimeRecovery`. Under `BlocksPresets.production` a table defaults to PITR **on**, deletion protection **on**, and `RemovalPolicy.RETAIN`. Under `BlocksPresets.sandbox` PITR and deletion protection are off and the removal policy is `DESTROY`, so a short-lived stack stays cheap and `sandbox:destroy` removes it with one command. SSE defaults to the AWS-managed KMS key. A store overrides each default with `protection`, `pointInTimeRecovery`, or `encryption`, and the option of a store always wins.
 
 **Why one `protection` option and not separate `deletionProtection` and `removalPolicy` options.** Deletion protection and the removal policy answer one question: can this table be destroyed? Two options can contradict each other. `deletionProtection: true` with `removalPolicy: 'destroy'` tells CloudFormation to call `DeleteTable` on stack delete while DynamoDB refuses the delete, and the stack stops in `DELETE_FAILED`. One option with three values cannot express that combination:
 
@@ -370,7 +384,7 @@ The checks live in `src/item.ts` and the messages in `src/errors.ts`, shared by 
 
 **Decision:** Each public method that reads options passes them through one function, `presentOptions` in `src/item.ts`, which takes out every option whose value is `null`. The rule holds for every option of every method, in both runtimes. The option types do not include `null`. The exceptions are the two value checks: `ifValueEquals: null` compares with a stored `null`, and `ifFieldEquals: null` is `InvalidQueryException`.
 
-**Rationale:** JSON has no `undefined`. An API method that forwards its arguments into the options of a store (`store.scan({ limit, cursor })`) can get `null` for an argument that the client left out. The RPC client of `@aws-blocks/core` leaves trailing `undefined` arguments out of a request, which covers the usual case. This rule covers an `undefined` before a later argument, and a caller that is not that client. Before, `cursor`, `limit` and `index` each had their own check and the other options had none: `expiresAt: null` was an error. One function gives one rule.
+**Rationale:** JSON has no `undefined`. An API method that forwards its arguments into the options of a store (`store.scan({ limit, cursor })`) can get `null` for an argument that the client left out. The RPC client of `@aws-cdk-blocks/core` leaves trailing `undefined` arguments out of a request, which covers the usual case. This rule covers an `undefined` before a later argument, and a caller that is not that client. Before, `cursor`, `limit` and `index` each had their own check and the other options had none: `expiresAt: null` was an error. One function gives one rule.
 
 The value checks are excluded because they guard a write. `get` returns `null` for a missing key, so `put(key, next, { ifValueEquals: await store.get(key) })` must be a conflict for a missing key. If `null` counted as absent there, the write would run with no condition.
 

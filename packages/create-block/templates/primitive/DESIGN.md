@@ -6,7 +6,7 @@ AWS implementations. Delete the guidance below once filled in.
 ## Infrastructure (CDK)
 
 `index.cdk.ts` provisions this block's resources (named off `this.fullId` so the
-runtime can derive the same name) and grants the shared Blocks Lambda access.
+runtime can derive the same name) and grants the shared AWS CDK Blocks Lambda access.
 Every runtime method is stubbed with `synthGuard` so a top-level call during
 synth fails loudly.
 
@@ -18,7 +18,7 @@ synth fails loudly.
 ## Mock Implementation
 
 `index.mock.ts` implements the same surface locally (in-memory or on-disk under
-`.bb-data/{fullId}/`) so `npm run dev` and tests need no AWS account.
+`.cdk-blocks/local/data/{fullId}/`) so `npm run dev` and tests need no AWS account.
 
 ### Mock vs AWS Behavior Differences
 

@@ -1,15 +1,24 @@
-# @aws-blocks/admin-ui
+# @aws-cdk-blocks/admin-ui
 
-The Blocks Admin UI — a local dashboard for Blocks applications covering deployments, logs, resources, environments, and cost.
+Use the CDK Blocks dashboard to inspect resources, deployments, logs, and environments in your AWS CDK Blocks application.
 
 ## How it runs
 
-Users never install this package directly. Running `npm run dashboard` in a Blocks app invokes core's `dashboard.ts`, which:
+From the app directory, launch the dashboard with:
 
-1. Lazily resolves `@aws-blocks/admin-ui` from the app (offering a one-time install if missing — the dashboard is opt-in and adds no weight for users who don't want it),
+```sh
+node --input-type=module -e "import { dashboard } from 'aws-cdk-blocks/scripts'; await dashboard()"
+```
+
+A fresh tab starts in **local**. Browse the app's blocks and local data without credentials or a deployed
+stack. Selecting a cloud stage enables AWS reads; the tab remembers that selection on reload.
+
+The templates do not define an `npm run dashboard` script. The launcher:
+
+1. resolves `@aws-cdk-blocks/admin-ui` from the app, offering a one-time `npm install --save-dev` in an interactive terminal if it is missing (the package is not a dependency of core),
 2. generates a crypto-random session token for the process,
 3. boots this package's server (`src/server/start.ts`): a Next.js handler wrapped in a `node:http` server bound to `127.0.0.1`, rejecting any `/api` request without the token, and
-4. opens `http://127.0.0.1:4400/#token=…` in the browser. The SPA reads the token from the fragment (never sent to the server) and presents it as an `Authorization` header.
+4. opens `http://127.0.0.1:4400/#token=…` in the browser (the first free port from 4400, or set `await dashboard({ port: 5000 })` in the launch command). The SPA reads the token from the fragment (never sent to the server) and presents it as an `Authorization` header.
 
 ## Architecture
 
@@ -21,8 +30,7 @@ Dashboard API (versioned route handlers under app/api/v1/)
   │  delegates to
   ▼
 DataProvider (src/server/data-provider.ts — swappable)
-  └─ LocalDataProvider: .blocks state + AWS calls with local credentials
-     (a future in-account provider swaps in without touching SPA or routes)
+  └─ LocalDataProvider: .cdk-blocks state + AWS calls with local credentials
 ```
 
 The SPA never talks to AWS directly. The HTTP contract lives in `src/contract/v1.ts` and is the only coupling between UI and backend.
@@ -39,5 +47,5 @@ npm test       # node --test on the compiled server modules
 ```
 
 The dev server binds loopback on purpose. With the read opt-in set there is no
-authentication at all, and every read queries AWS with your own credentials, so it
+authentication for reads, and cloud reads use your own AWS credentials, so it
 must not be reachable from another machine. Writes never take the opt-in.

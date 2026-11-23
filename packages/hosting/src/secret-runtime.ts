@@ -181,7 +181,7 @@ async function resolveValue(kind: ValueKind, key: string): Promise<unknown> {
  * `secret('...')` calls and generates a `.d.ts` that augments it. To do it manually:
  *
  * ```ts
- * declare module '@aws-blocks/hosting' {
+ * declare module '@aws-cdk-blocks/hosting' {
  *   interface HostingSecretRegistry {
  *     STRIPE_KEY: string;
  *   }
@@ -237,7 +237,7 @@ export type ConfigValueOf<K extends ConfigKey> = keyof HostingConfigRegistry ext
  * Resolve a **secret** (AWS Secrets Manager) at runtime.
  *
  * **Local development.** Reads `process.env.KEY` first, so a local env file supplies
- * the value with no AWS call: `.env.local` for the Blocks backend, which is the file
+ * the value with no AWS call: `.env.local` for the CDK Blocks backend, which is the file
  * `npm run dev` and `npm run sandbox` load (`.env` is not loaded there). Next.js SSR
  * code under `next dev` also sees `.env`, because Next loads it. On a deployed
  * function it falls through to fetching the wired secret from Secrets Manager.

@@ -12,10 +12,11 @@ dist/
 # TypeScript incremental build info (next build writes tsconfig.tsbuildinfo)
 *.tsbuildinfo
 
-# Blocks
+# CDK Blocks
 /.cdk-blocks-sandbox/
+/.cdk-blocks/local/
+/.bb-data/
 cdk.out/
-.bb-data/
 
 # Secrets and key material — never commit
 .env
@@ -45,6 +46,6 @@ Thumbs.db
 *.log
 npm-debug.log*
 
-aws-blocks/client.js
-aws-blocks/blocks.spec.json
+cdk-blocks/client.js
+cdk-blocks/blocks.spec.json
 .hosting/

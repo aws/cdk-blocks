@@ -1,9 +1,9 @@
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import type { ScopeParent } from '@aws-blocks/core';
-import { BuildingBlockScope, registerConfig, synthGuard } from '@aws-blocks/core/cdk';
-import { markBlocksOwned } from '@aws-blocks/core/cdk/internal';
+import type { ScopeParent } from '@aws-cdk-blocks/core';
+import { BuildingBlockScope, registerConfig, synthGuard } from '@aws-cdk-blocks/core/cdk';
+import { markBlocksOwned } from '@aws-cdk-blocks/core/cdk/internal';
 import * as cdk from 'aws-cdk-lib';
 import { connectionParameterName } from './constants.js';
 import { ClusterInfra, ownedDsqlClusterLogicalId } from './deploy/cluster-infra.js';
@@ -74,7 +74,7 @@ export class DatabaseCluster extends BuildingBlockScope {
 	constructor(scope: ScopeParent, id: string, options: DatabaseClusterOptions) {
 		super(id, { parent: scope, vpc: VPC_REQUIREMENTS });
 		// Part of the `Database` block but not a block: it passes no `bbName`, so mark it for the
-		// service-principal trust check, which then treats its roles as AWS Blocks roles.
+		// service-principal trust check, which then treats its roles as CDK Blocks roles.
 		markBlocksOwned(this);
 		const resolved = resolveClusterOptions(options, this.fullId);
 		this.type = resolved.type;

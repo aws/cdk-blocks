@@ -22,7 +22,7 @@ ENV = {
     'PATH': '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin', 'HOME': '/home/node',
     'NPM_CONFIG_USERCONFIG': '/etc/bench-npmrc', 'NPM_CONFIG_GLOBALCONFIG': '/etc/bench-npm-globalrc',
     'NPM_CONFIG_CACHE': '/home/node/.npm', 'AWS_EC2_METADATA_DISABLED': 'true',
-    'BLOCKS_DISABLE_TELEMETRY': '1', 'CI': '1', 'BENCH_PHASE': str(PHASE),
+    'CDK_DISABLE_CLI_TELEMETRY': '1', 'CI': '1', 'BENCH_PHASE': str(PHASE),
 }
 server = None
 server_log = None
@@ -93,12 +93,13 @@ try:
     stop()
     if server_log:
         server_log.close()
-    # Heuristic: Blocks mocks persist under .bb-data, so verifier records stored anywhere else
-    # (own files, browser storage) fail here. A backend writing its own files inside .bb-data
-    # would still pass; the ApiNamespace import check and the prompt cover the rest.
+    # Heuristic: CDK Blocks mocks persist under .cdk-blocks/local/data, so verifier records stored anywhere
+    # else (own files, browser storage) fail here. A backend writing its own files inside
+    # .cdk-blocks/local/data would still pass; the ApiNamespace import check and the prompt cover the
+    # rest.
     stage = 'blocks_persistence'
     titles = [item['title'] for item in json.loads(Path('/var/lib/harbor-verifier/state.json').read_text())['items']]
-    assert titles and not stored_in_blocks(Path('/app/todo-app'), titles), 'records missing from .bb-data'
+    assert titles and not stored_in_blocks(Path('/app/todo-app'), titles), 'records missing from .cdk-blocks/local/data'
     result['checks']['blocks_persistence'] = True
     stage = 'server_restart'
     start()

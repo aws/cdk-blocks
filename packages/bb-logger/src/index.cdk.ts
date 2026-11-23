@@ -1,8 +1,8 @@
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import type { ScopeParent } from '@aws-blocks/core';
-import { Scope } from '@aws-blocks/core/cdk';
+import type { ScopeParent } from '@aws-cdk-blocks/core';
+import { Scope } from '@aws-cdk-blocks/core/cdk';
 import * as cdk from 'aws-cdk-lib';
 import { ChildLoggerImpl, DEFAULT_LOG_LEVEL, resolveLevel, writeLog } from './emitter.js';
 import type { ChildLogger, LoggingOptions, LogLevel } from './types.js';
@@ -56,7 +56,7 @@ export class Logger extends Scope implements ChildLogger {
 		// easy to miss in synth output, a CDK warning is listed with the others.
 		if (unknown) {
 			cdk.Annotations.of(this).addWarningV2(
-				'@aws-blocks/bb-logger:unknownLevel',
+				'@aws-cdk-blocks/bb-logger:unknownLevel',
 				`Unknown log level ${describeLevel(options?.level)}; using '${DEFAULT_LOG_LEVEL}'`,
 			);
 		}

@@ -202,10 +202,10 @@ function NavEmptyState({ status }: { status: NavStatus }) {
 			<div className="space-y-1 px-1">
 				<p className="text-xs text-warn-fg">
 					{status.code === 'NOT_A_BLOCKS_PROJECT'
-						? 'Not a Blocks project'
+						? 'Not a CDK Blocks project'
 						: status.code === 'PARSE_FAILED'
 							? 'Could not parse the block declarations'
-							: 'Blocks unavailable'}
+							: 'CDK Blocks unavailable'}
 				</p>
 				{status.message && <p className="text-[11px] leading-snug text-fg-dim">{status.message}</p>}
 			</div>
@@ -214,7 +214,7 @@ function NavEmptyState({ status }: { status: NavStatus }) {
 
 	return (
 		<p className="px-1 text-[11px] leading-snug text-fg-dim">
-			Nothing is declared in <code className="font-mono">aws-blocks/</code> yet. A block declared in a file outside
+			Nothing is declared in <code className="font-mono">cdk-blocks/</code> yet. A block declared in a file outside
 			that directory is not scanned.
 		</p>
 	);
@@ -299,7 +299,7 @@ export function InventoryNav() {
 
 	return (
 		<div ref={scrollerRef} className="max-h-[calc(100vh-8rem)] overflow-y-auto pb-2">
-			<nav aria-label="Blocks and resources" className="space-y-3">
+			<nav aria-label="CDK Blocks and resources" className="space-y-3">
 				{status.kind === 'ready' ? (
 					<>
 						{/*

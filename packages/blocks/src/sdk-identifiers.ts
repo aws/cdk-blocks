@@ -7,24 +7,24 @@
  * These overloads provide compile-time return-type narrowing so that
  * `getSdkIdentifiers(myKvStore)` returns `{ tableName: string }` instead of
  * a generic `Record<string, string>`. The runtime implementation simply
- * delegates to the base function in `@aws-blocks/core`.
+ * delegates to the base function in `@aws-cdk-blocks/core`.
  *
  * @module
  */
 
-import type { Agent } from '@aws-blocks/bb-agent';
-import type { AppSetting } from '@aws-blocks/bb-app-setting';
-import type { AsyncJob } from '@aws-blocks/bb-async-job';
-import type { Auth } from '@aws-blocks/bb-auth';
-import type { CronJob } from '@aws-blocks/bb-cron-job';
-import type { Dashboard } from '@aws-blocks/bb-dashboard';
-import type { Database, DatabaseCluster } from '@aws-blocks/bb-database';
-import type { FileBucket } from '@aws-blocks/bb-file-bucket';
-import type { KnowledgeBase } from '@aws-blocks/bb-knowledge-base';
-import type { KVStore } from '@aws-blocks/bb-kv-store';
-import type { Logger } from '@aws-blocks/bb-logger';
-import type { Realtime } from '@aws-blocks/bb-realtime';
-import { getSdkIdentifiers as _getSdkIdentifiers } from '@aws-blocks/core';
+import type { Agent } from '@aws-cdk-blocks/bb-agent';
+import type { AppSetting } from '@aws-cdk-blocks/bb-app-setting';
+import type { AsyncJob } from '@aws-cdk-blocks/bb-async-job';
+import type { Auth } from '@aws-cdk-blocks/bb-auth';
+import type { CronJob } from '@aws-cdk-blocks/bb-cron-job';
+import type { Dashboard } from '@aws-cdk-blocks/bb-dashboard';
+import type { Database, DatabaseCluster } from '@aws-cdk-blocks/bb-database';
+import type { FileBucket } from '@aws-cdk-blocks/bb-file-bucket';
+import type { KnowledgeBase } from '@aws-cdk-blocks/bb-knowledge-base';
+import type { KVStore } from '@aws-cdk-blocks/bb-kv-store';
+import type { Logger } from '@aws-cdk-blocks/bb-logger';
+import type { Realtime } from '@aws-cdk-blocks/bb-realtime';
+import { getSdkIdentifiers as _getSdkIdentifiers } from '@aws-cdk-blocks/core';
 
 /**
  * Retrieve the typed SDK identifiers for a Building Block instance.
@@ -38,8 +38,8 @@ import { getSdkIdentifiers as _getSdkIdentifiers } from '@aws-blocks/core';
  *
  * @example
  * ```typescript
- * import { getSdkIdentifiers } from '@aws-blocks/blocks';
- * import { KVStore } from '@aws-blocks/bb-kv-store';
+ * import { getSdkIdentifiers } from 'aws-cdk-blocks';
+ * import { KVStore } from '@aws-cdk-blocks/bb-kv-store';
  *
  * const store = new KVStore(scope, 'users', {});
  * const { tableName } = getSdkIdentifiers(store); // ← typed as { tableName: string }
@@ -62,12 +62,16 @@ export function getSdkIdentifiers(bb: Auth<any>): {
 	hostedUiClientId?: string;
 };
 // `Database` always registers the cluster it runs on and its schema. The endpoint and region exist
-// only in Lambda: the local build runs on PGlite and has neither.
+// only in Lambda: the local build runs on PGlite and has neither. `roleName` is the PostgreSQL role the
+// block connects as on a cluster it provisions (`blocks_app_{cluster}` on AWS, `blocks_app_local` locally);
+// a block on `DatabaseCluster.fromExisting()` or a `LegacyDatabaseCluster` connects as the role of its
+// connection and has none. A migration names that role with `${app_role}`.
 export function getSdkIdentifiers(bb: Database): {
 	clusterId: string;
 	schemaName: string;
 	clusterEndpoint?: string;
 	region?: string;
+	roleName?: string;
 };
 export function getSdkIdentifiers(bb: DatabaseCluster): { clusterEndpoint: string; region?: string };
 export function getSdkIdentifiers(bb: KnowledgeBase): { kbId: string };

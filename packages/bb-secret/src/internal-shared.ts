@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Pieces of `@aws-blocks/bb-secret/internal` shared by every runtime variant.
+ * Pieces of `@aws-cdk-blocks/bb-secret/internal` shared by every runtime variant.
  * No AWS SDK or CDK imports, so the browser, mock, AWS and CDK entries can all
  * load it.
  *
@@ -10,7 +10,7 @@
  */
 
 /**
- * A key that AWS Blocks generates for one of its own Building Blocks (for
+ * A key that CDK Blocks generates for one of its own Building Blocks (for
  * example the `Realtime` connection token key). Returned by `frameworkKey()`.
  *
  * @internal
@@ -34,7 +34,7 @@ export interface FrameworkKey {
  *
  * @internal
  */
-export const SSM_SECRETS_STORE_WARNING_ID = '@aws-blocks/bb-secret:SsmSecretsStoreOutsideSandbox';
+export const SSM_SECRETS_STORE_WARNING_ID = '@aws-cdk-blocks/bb-secret:SsmSecretsStoreOutsideSandbox';
 
 /**
  * The config key under which the CDK `Secret` registers its ARN and the runtime `Secret` reads it.

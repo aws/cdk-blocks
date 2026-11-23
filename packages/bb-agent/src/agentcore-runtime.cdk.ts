@@ -12,7 +12,7 @@
  * compute abstraction (should one land) without touching call sites — the Agent just constructs
  * it and hands over references to the BBs the loop uses.
  *
- * The loop runs INSIDE this runtime AS the shared Blocks execution role (the same role the Lambda
+ * The loop runs INSIDE this runtime AS the shared CDK Blocks execution role (the same role the Lambda
  * handler runs as), so it inherits every Building Block's grants — including the Realtime publish
  * permissions already granted to the handler, so it streams chunks to the browser via the Realtime
  * BB with no extra grant. The container loads the full app config (via the injected config-bucket
@@ -28,9 +28,9 @@ import { join } from 'node:path';
 import * as cdk from 'aws-cdk-lib';
 import { AgentCoreRuntime as AgentCoreRuntimeVersion, AgentRuntimeArtifact, Runtime } from 'aws-cdk-lib/aws-bedrockagentcore';
 import { Effect, PolicyStatement, Role, ServicePrincipal } from 'aws-cdk-lib/aws-iam';
-import { getBlocksRoot, getConfigLocation, registerConfig, Scope } from '@aws-blocks/core/cdk';
-import { sourceScopedConditions } from '@aws-blocks/core/cdk/internal';
-import type { ScopeParent } from '@aws-blocks/core';
+import { getBlocksRoot, getConfigLocation, registerConfig, Scope } from '@aws-cdk-blocks/core/cdk';
+import { sourceScopedConditions } from '@aws-cdk-blocks/core/cdk/internal';
+import type { ScopeParent } from '@aws-cdk-blocks/core';
 import { bundleAgentCoreAsset } from './agentcore-bundle.js';
 
 /** References the agent loop needs, handed in by the Agent CDK constructor. */
@@ -64,7 +64,7 @@ export class AgentCoreRuntime extends Scope {
 		const stack = cdk.Stack.of(this);
 		const root = getBlocksRoot(this);
 
-		// Run the loop AS the shared Blocks execution role (`role: this.executionRole`) — the same
+		// Run the loop AS the shared CDK Blocks execution role (`role: this.executionRole`) — the same
 		// role the Lambda handler runs as. Because every Building Block grants its runtime permissions
 		// to this role (a tool that uses KVStore/tables/etc. grants there too), the AgentCore
 		// container inherits them all automatically — no bespoke, under-granted role, and no need to
@@ -102,7 +102,7 @@ export class AgentCoreRuntime extends Scope {
 			// and fail loud if that ever changes.
 			if (!(role instanceof Role)) {
 				throw new Error(
-					'AgentCore Runtime requires the shared Blocks execution role to be a concrete iam.Role to add its assume-role trust',
+					'AgentCore Runtime requires the shared AWS CDK Blocks execution role to be a concrete iam.Role to add its assume-role trust',
 				);
 			}
 			role.assumeRolePolicy?.addStatements(

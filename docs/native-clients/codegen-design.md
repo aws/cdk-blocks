@@ -1,12 +1,12 @@
 # Native Client Codegen — Design
 
-This is the design rationale for how Blocks serves typed native clients (Swift, Kotlin, Dart) from a TypeScript API. It documents *why* the pipeline is shaped the way it is. For *how to write APIs that codegen well*, see [`schema-generation-guide-for-devs.md`](./schema-generation-guide-for-devs.md).
+This is the design rationale for how AWS CDK Blocks serves typed native clients (Swift, Kotlin, Dart) from a TypeScript API. It documents *why* the pipeline is shaped the way it is. For *how to write APIs that codegen well*, see [`schema-generation-guide-for-devs.md`](./schema-generation-guide-for-devs.md).
 
 ---
 
 ## Context
 
-Blocks' client-facing surface is `ApiNamespace` — a method-dispatch protocol over JSON-RPC 2.0. Every call goes to a single endpoint:
+CDK Blocks' client-facing surface is `ApiNamespace` — a method-dispatch protocol over JSON-RPC 2.0. Every call goes to a single endpoint:
 
 ```
 POST /api HTTP/1.1
@@ -15,7 +15,7 @@ Content-Type: application/json
 { "jsonrpc": "2.0", "method": "api.kvGet", "params": ["myKey"], "id": 1 }
 ```
 
-The wire error contract follows Blocks' core JSON-RPC implementation: reserved JSON-RPC errors use the standard negative codes (`-32700`, `-32600`, `-32601`, `-32602`, `-32603`), while application `ApiError`s use the positive HTTP status code as `error.code` and carry the structured name in `error.data.name` when available.
+The wire error contract follows CDK Blocks' core JSON-RPC implementation: reserved JSON-RPC errors use the standard negative codes (`-32700`, `-32600`, `-32601`, `-32602`, `-32603`), while application `ApiError`s use the positive HTTP status code as `error.code` and carry the structured name in `error.data.name` when available.
 
 The TypeScript web client gets type safety for free — `client.js` is generated alongside the server. Native clients (Swift, Kotlin, Dart) need their own codegen pipeline.
 
@@ -28,11 +28,11 @@ The Model Context Protocol faces the same problem: a JSON-RPC based protocol wit
 3. **Platform SDKs** (`swift-sdk`, `kotlin-sdk`) — hand-written against the spec, handle transport and message framing
 4. **App-specific usage** sits on top of the platform SDK
 
-Blocks differs from MCP in one place: MCP's protocol is fixed (tools, resources, prompts are standard interfaces), so the platform SDK alone is sufficient. Blocks' `ApiNamespace` methods are **application-specific** — each app has different methods. This adds one layer:
+CDK Blocks differs from MCP in one place: MCP's protocol is fixed (tools, resources, prompts are standard interfaces), so the platform SDK alone is sufficient. CDK Blocks' `ApiNamespace` methods are **application-specific** — each app has different methods. This adds one layer:
 
 ```
-MCP:     platform SDK  ←  app uses directly
-Blocks:  platform SDK  ←  generated typed facade  ←  app uses
+MCP:             platform SDK  ←  app uses directly
+CDK Blocks:  platform SDK  ←  generated typed facade  ←  app uses
 ```
 
 The generated facade is thin: typed method wrappers that call into the platform SDK's transport primitive. The SDK owns the wire.
@@ -80,11 +80,11 @@ The question this document answers: **what format does the codegen layer read?**
 
 ## Decision: OpenRPC over fabricated OpenAPI
 
-The format is OpenRPC 1.3.2, emitted as `aws-blocks/blocks.spec.json`. The alternative considered was OpenAPI 3.1 with fabricated paths.
+The format is OpenRPC 1.3.2, emitted as `cdk-blocks/blocks.spec.json`. The alternative considered was OpenAPI 3.1 with fabricated paths.
 
 ### Why not OpenAPI
 
-OpenAPI requires a `paths` section. Blocks' API has one path (`POST /api`). To give a generator per-method operations, the build step would have to fabricate one fake path per method:
+OpenAPI requires a `paths` section. CDK Blocks' API has one path (`POST /api`). To give a generator per-method operations, the build step would have to fabricate one fake path per method:
 
 ```yaml
 # Fabricated — these paths do not exist on the server.
@@ -104,14 +104,14 @@ The generator reads `operationId` as the method name and the request/response sc
 
 ### Why OpenRPC
 
-Blocks' wire protocol already conforms to JSON-RPC 2.0 (`rpc.ts` handles encoding/decoding). OpenRPC is the natural description format for a JSON-RPC service:
+CDK Blocks' wire protocol already conforms to JSON-RPC 2.0 (`rpc.ts` handles encoding/decoding). OpenRPC is the natural description format for a JSON-RPC service:
 
 - The generator reads `method.name`, `method.params[].schema`, and `method.result.schema` directly
 - No REST structure to navigate, no fake paths to fabricate
 - A real spec with a JSON Schema you can validate against
 - Existing tooling for documentation rendering (OpenRPC playground/inspector)
 
-OpenRPC's existing generators (`open-rpc/generator`) target TypeScript, Go, Python, and Rust — not Swift, Kotlin, or Dart. Blocks still builds its own generator regardless. But the generator reads a standard format instead of a bespoke one.
+OpenRPC's existing generators (`open-rpc/generator`) target TypeScript, Go, Python, and Rust — not Swift, Kotlin, or Dart. CDK Blocks still builds its own generator regardless. But the generator reads a standard format instead of a bespoke one.
 
 ### Single-file format
 
@@ -150,9 +150,9 @@ The OpenRPC document is emitted as a single self-contained file (`blocks.spec.js
 }
 ```
 
-### Blocks-specific extensions
+### CDK Blocks-specific extensions
 
-Two `x-blocks-*` extension fields cover the gaps where standard OpenRPC doesn't capture Blocks semantics: `x-blocks-transferable` and `x-blocks-type-args` (on result schemas for Realtime / FileBucket / OIDC handles).
+Two `x-blocks-*` extension fields cover the gaps where standard OpenRPC doesn't capture CDK Blocks semantics: `x-blocks-transferable` and `x-blocks-type-args` (on result schemas for Realtime / FileBucket / OIDC handles).
 
 The full reference, including the tag table for native codegen authors, lives in [`schema-generation-guide-for-devs.md` § Spec extensions reference](./schema-generation-guide-for-devs.md#spec-extensions-reference).
 
@@ -293,7 +293,7 @@ The trade-off is one parallel definition layer per method (the schema). Schemas 
 The OpenRPC document is emitted at build time, alongside the existing `client.js` codegen. The mechanism is shared: dynamically import the backend, discover `ApiNamespace` exports via `API_NAMESPACE_MARKER`, introspect methods, and emit the document. See `packages/core/src/scripts/generate-spec.ts` for the implementation.
 
 ```
-aws-blocks/
+cdk-blocks/
 	blocks.spec.json        # all namespaces, all methods
 ```
 
@@ -333,16 +333,16 @@ The spec is a build input with the same trust as the backend source it is genera
 
 ```mermaid
 flowchart LR
-  App[Hand-written<br/>ApiNamespace code] --> TS[aws-blocks/*.ts]
-  TS -- "npm run spec" --> Spec[aws-blocks/blocks.spec.json<br/>local, gitignored]
+  App[Hand-written<br/>ApiNamespace code] --> TS[cdk-blocks/*.ts]
+  TS -- "npm run spec" --> Spec[cdk-blocks/blocks.spec.json<br/>local, gitignored]
   Sandbox[.cdk-blocks-sandbox/config.json<br/>or config.&lt;stage&gt;.json] -- servers URL --> Spec
   Spec -- local file read --> Dart[blocks_codegen]
   Spec -- local file read --> Swift[BlocksCodegen plugins]
   Spec -- local file read --> Kotlin[Gradle codegen task]
 ```
 
-- **Generated locally.** `generate-spec-cli.ts` (via `npm run spec` in scaffolded apps) imports the backend entry and writes `aws-blocks/blocks.spec.json`. It is run explicitly, not as part of `npm run dev` or deploy.
-- **Gitignored in apps.** Every `create-blocks-app` template, and the entries `create-blocks-app` adds when initializing an existing directory, ignore `aws-blocks/blocks.spec.json`. (This repo commits a few specs as Swift test fixtures under `native/swift/Tests/`.)
+- **Generated locally.** `generate-spec-cli.ts` (via `npm run spec` in scaffolded apps) imports the backend entry and writes `cdk-blocks/blocks.spec.json`. It is run explicitly, not as part of `npm run dev` or deploy.
+- **Gitignored in apps.** Every `create-blocks-app` template, and the entries `create-blocks-app` adds when initializing an existing directory, ignore `cdk-blocks/blocks.spec.json`. (This repo commits a few specs as Swift test fixtures under `native/swift/Tests/`.)
 - **Not served by the deployed API.** No runtime or CDK code reads or bundles the spec, and the JSON-RPC handler has no discovery method that returns it.
 - **Read from a local path, no network fetch.** Dart reads `*.spec.json` build assets (`builder.dart`) or `--spec <path>` (CLI); the Swift plugins pass the target's `blocks.spec.json` file to the generator, which reads it with `FileManager`; the Kotlin task reads `cdkBlocks.apiSpec` (default `rootProject/blocks.spec.json`) with `readText()`.
 

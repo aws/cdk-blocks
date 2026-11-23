@@ -49,7 +49,7 @@ describe('defaults.appIdentity: every Building Block stays inside the app', () =
       execFileSync(
         'npx',
         [
-          'cdk', 'synth', '--app', 'npx tsx -C cdk aws-blocks/index.cdk.ts', '--output', outdir, '--quiet',
+          'cdk', 'synth', '--app', 'npx tsx -C cdk cdk-blocks/index.cdk.ts', '--output', outdir, '--quiet',
           '--context', 'sandboxMode=true', '--context', 'blocksPermissionsBoundary=apps-boundary',
           '--context', `blocksAppId=${APP_ID}`, '--context', 'blocksAppStrict=true',
           // On a shared platform each app's bootstrap qualifier is its app id.
@@ -122,8 +122,8 @@ describe('defaults.appIdentity: every Building Block stays inside the app', () =
   });
 
   /**
-   * The resource types the platform's policies match by the `app` tag (core README,
-   * "Running many apps in one AWS account"), and the property each keeps tags in.
+   * The resource types the platform's policies match by the `app` tag (core's
+   * `SHARED-ACCOUNT.md`), and the property each keeps tags in.
    * An untagged one fails the deploy under the shared execution policy, or can't
    * be told apart from another app's.
    */

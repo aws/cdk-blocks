@@ -5,7 +5,7 @@
  * The built-in default 404 page behind every front door.
  *
  * A multi-page static site (no server, no SPA fallback) that ships no
- * `404.html` and sets no `errorPages.notFound` gets AWS Blocks' default
+ * `404.html` and sets no `errorPages.notFound` gets CDK Blocks' default
  * "404 — Page Not Found" page at HTTP 404 for a missing path. The CloudFront
  * door wires it as a CloudFront error response; the ALB and API Gateway doors
  * serve it from their asset proxy; a bring-your-own door receives it as
@@ -136,7 +136,7 @@ describe('the default 404 page behind every front door', () => {
     });
     const hosting = new HostingConstruct(stack, 'Hosting', { manifest: mpa(), frontDoor: { kind: 'stackedRouter' } });
     assert.deepEqual(hosting.doorInput.app.errorPages, { notFound: NOT_FOUND_PAGE_KEY });
-    // The edge, built on the router's DoorInput as `@aws-blocks/core`'s `Hosting` builds it.
+    // The edge, built on the router's DoorInput as `@aws-cdk-blocks/core`'s `Hosting` builds it.
     const router = hosting.frontDoor;
     buildFrontDoor(
       stack,

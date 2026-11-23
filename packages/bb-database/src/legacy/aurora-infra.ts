@@ -7,7 +7,7 @@
 // Do not change a construct id, a property or a default here. The migration function of the earlier block is
 // not declared; the block's own migration resources take its place.
 
-import type { VpcContext } from '@aws-blocks/core/cdk';
+import type { VpcContext } from '@aws-cdk-blocks/core/cdk';
 import * as cdk from 'aws-cdk-lib';
 import * as ec2 from 'aws-cdk-lib/aws-ec2';
 import * as iam from 'aws-cdk-lib/aws-iam';
@@ -178,7 +178,7 @@ export function materializeLegacyAurora(
 	// `enableDataApi: true` and is reached exclusively over the RDS Data API
 	// (HTTPS via the Secrets Manager + RDS Data interface endpoints), never a raw
 	// Postgres socket. A 5432 ingress rule would imply a direct DB connection path
-	// that nothing in Blocks uses. Egress stays closed for the same reason.
+	// that nothing in CDK Blocks uses. Egress stays closed for the same reason.
 	const securityGroup = new ec2.SecurityGroup(scope, `${name}Sg`, {
 		vpc,
 		description: `Security group for ${name} Aurora cluster`,
@@ -262,7 +262,7 @@ export function materializeLegacyAurora(
 		backup: { retention: backupRetention },
 		// Export the PostgreSQL engine log to CloudWatch Logs. Retention follows the
 		// stack-wide `defaults.logRetention` when provided (the same knob every other
-		// Blocks-managed log group reads); when omitted, CloudWatch keeps the log
+		// CDK Blocks-managed log group reads); when omitted, CloudWatch keeps the log
 		// group at the account default retention.
 		//
 		// Setting `cloudwatchLogsRetention` makes CDK add a `LogRetention` custom

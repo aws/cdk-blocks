@@ -16,8 +16,8 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { after, before, describe, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { type BlocksDefaults, BlocksPresets, Scope } from '@aws-blocks/core/cdk';
-import { ComputeBase, initializeVpc } from '@aws-blocks/core/cdk/internal';
+import { type BlocksDefaults, BlocksPresets, Scope } from '@aws-cdk-blocks/core/cdk';
+import { ComputeBase, initializeVpc } from '@aws-cdk-blocks/core/cdk/internal';
 import * as cdk from 'aws-cdk-lib';
 import { Match, Template } from 'aws-cdk-lib/assertions';
 import * as ec2 from 'aws-cdk-lib/aws-ec2';
@@ -177,7 +177,7 @@ describe('LambdaCompute', () => {
 
 	test('throws when created outside a BlocksStack/BlocksBackend', () => {
 		// With no real BlocksStack/BlocksBackend in the tree or as the ambient
-		// owner (a plain cdk.Stack exposes none of backendHandlerPath / a Blocks
+		// owner (a plain cdk.Stack exposes none of backendHandlerPath / a CDK Blocks
 		// identity), the compute cannot derive its entry or BLOCKS_STACK_NAME and
 		// fails at construction.
 		const app = new cdk.App();

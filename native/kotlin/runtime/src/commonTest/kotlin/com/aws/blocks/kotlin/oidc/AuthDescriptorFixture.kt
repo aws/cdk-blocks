@@ -13,16 +13,16 @@ import kotlinx.serialization.json.putJsonArray
 import kotlinx.serialization.json.putJsonObject
 
 /** The server the descriptor fixtures resolve their routes against. */
-internal val fixtureServer = BlocksServer("local", "http://localhost:3001/aws-blocks/api")
+internal val fixtureServer = BlocksServer("local", "http://localhost:3001/cdk-blocks/api")
 
 /**
- * The `oidc/client` descriptor an AWS Blocks `Auth` block's `createOidcApi().getClient()` returns
+ * The `oidc/client` descriptor a CDK Blocks `Auth` block's `createOidcApi().getClient()` returns
  * for routes under [base], the directory of `redirects.callbackPath`, and sign-out at [signOutPath].
  * [sessionPath] is sent as the backend sends it; pass `null` for a backend from before it did.
  */
 internal fun authBlockDescriptor(
     providers: List<String>,
-    base: String = "/aws-blocks/auth",
+    base: String = "/cdk-blocks/auth",
     signOutPath: String = "$base/signout",
     sessionPath: String? = "$base/session",
     callbackPath: String = "$base/callback",
@@ -51,7 +51,7 @@ internal fun authBlockDescriptor(
 internal fun authBlockClient(
     http: HttpClient,
     providers: List<String>,
-    base: String = "/aws-blocks/auth",
+    base: String = "/cdk-blocks/auth",
     signOutPath: String = "$base/signout",
     sessionPath: String? = "$base/session",
     server: BlocksServer = fixtureServer,

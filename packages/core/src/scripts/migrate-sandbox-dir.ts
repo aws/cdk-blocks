@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Copy an app's sandbox state forward after the directory rename (D-030).
+ * Copy an app's sandbox state forward after the directory rename (D-031).
  *
  * The directory holding per-deploy state was renamed to `.cdk-blocks-sandbox`; the
  * name it had before is {@link LEGACY_SANDBOX_DIR}. An app that upgrades still has
@@ -122,7 +122,7 @@ export function migrateLegacySandboxDir(projectRoot?: string): void {
 
 	console.error(
 		`ℹ️  Copied this app's sandbox state from ${LEGACY_SANDBOX_DIR}/ to ${BLOCKS_SANDBOX_DIR}/ (${copied.join(', ')}). ` +
-			`The old directory is left as it is; you can delete it once no older AWS Blocks version runs in this checkout.`,
+			`The old directory is left as it is; you can delete it once no older AWS CDK Blocks version runs in this checkout.`,
 	);
 }
 

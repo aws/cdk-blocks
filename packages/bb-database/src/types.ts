@@ -1,7 +1,7 @@
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import type { ChildLogger } from '@aws-blocks/bb-logger';
+import type { ChildLogger } from '@aws-cdk-blocks/bb-logger';
 import type { StandardSchemaV1 } from '@standard-schema/spec';
 import type { SqlQuery } from './common/sql.js';
 
@@ -16,6 +16,10 @@ import type { SqlQuery } from './common/sql.js';
  *   configuration: all of PostgreSQL (triggers, PL/pgSQL, extensions, Row Level
  *   Security, transactions of any size), created in seconds, scales to zero,
  *   reached over its public endpoint with IAM authentication. No VPC.
+ *   Locally, PGlite creates the contrib extensions that both it and Aurora
+ *   have (`citext`, `pgcrypto`, `pg_trgm`, `hstore`, `uuid-ossp` and more; the
+ *   README's Local mode section lists them). One it lacks, such as `vector`,
+ *   fails locally.
  *
  * The value names the engine, so every stop and limit can say which database
  * it comes from.
@@ -67,7 +71,7 @@ export interface ExistingClusterOptions {
 	 * SecureString `/<stackName>-<name>`, so each stage has its own value;
 	 * `npm run db -- connect --name <name> --stage <stage>` stores it. In local
 	 * mode the block reads the value that `npm run db -- connect --name <name>`
-	 * stored under `.bb-data/`.
+	 * stored under `.cdk-blocks/local/data/`.
 	 */
 	name?: string;
 	/**
@@ -241,7 +245,7 @@ export type DatabaseClusterOptions = DsqlClusterOptions | AuroraClusterOptions;
 export interface DatabaseBlockOptions {
 	/**
 	 * Directory of `.sql` migration files for this block, relative to the project
-	 * root. Defaults to `./aws-blocks/migrations/{id}`, which may be absent; an
+	 * root. Defaults to `./cdk-blocks/migrations/{id}`, which may be absent; an
 	 * explicit path must exist.
 	 */
 	migrationsPath?: string;

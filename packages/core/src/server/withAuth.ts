@@ -74,7 +74,7 @@ const providers: Array<{ name: string; detect: CookieProvider }> = [];
  *
  * @example
  * ```typescript
- * import { registerCookieProvider } from '@aws-blocks/blocks/server';
+ * import { registerCookieProvider } from 'aws-cdk-blocks/server';
  *
  * // SvelteKit provider
  * registerCookieProvider('sveltekit', async () => {
@@ -117,9 +117,9 @@ registerCookieProvider('nextjs', async () => {
 // `useEvent()` from `nitropack/runtime` — but we deliberately do NOT use
 // it here, and reach into `unctx.getContext('nitro-app')` directly instead.
 //
-// WHY (do not "fix" this back to `nitropack/runtime`): `@aws-blocks/core`
+// WHY (do not "fix" this back to `nitropack/runtime`): `@aws-cdk-blocks/core`
 // is framework-agnostic. `withAuth` is re-exported through
-// `@aws-blocks/blocks/server` and gets transitively imported by Next.js
+// `aws-cdk-blocks/server` and gets transitively imported by Next.js
 // apps (and any other framework). `nitropack/runtime`'s entrypoint pulls
 // in `#nitro-internal-virtual/*` subpath imports that ONLY resolve inside
 // a Nitro build — webpack/Next.js can't resolve them and the consumer's
@@ -172,7 +172,7 @@ registerCookieProvider('nuxt', async () => {
       nuxtAsyncContextWarned = true;
       // eslint-disable-next-line no-console
       console.warn(
-        '[@aws-blocks/core] withAuth: Nuxt/Nitro detected but the request context is not available. ' +
+        '[@aws-cdk-blocks/core] withAuth: Nuxt/Nitro detected but the request context is not available. ' +
           "Add `nitro: { experimental: { asyncContext: true } }` to nuxt.config.ts so withAuth() can read cookies from the active request. " +
           'See https://nuxt.com/docs/guide/going-further/experimental-features#asynccontext',
       );
@@ -209,7 +209,7 @@ async function detectFrameworkCookies(): Promise<string | undefined> {
  *
  * @example
  * ```typescript
- * import { clearCookieProviders, registerCookieProvider } from '@aws-blocks/blocks/server';
+ * import { clearCookieProviders, registerCookieProvider } from 'aws-cdk-blocks/server';
  *
  * // In test setup
  * clearCookieProviders();
@@ -259,7 +259,7 @@ export interface WithAuthOptions {
  *
  * In SSR server components, browser cookies aren't automatically forwarded
  * to API calls. This wrapper reads cookies and makes them available to
- * all Blocks API calls within the callback via `AsyncLocalStorage`.
+ * all CDK Blocks API calls within the callback via `AsyncLocalStorage`.
  *
  * **Resolution order:**
  * 1. Explicit `cookies` parameter (framework-agnostic)
@@ -276,7 +276,7 @@ export interface WithAuthOptions {
  * | Next.js | `next/headers` | Works out of the box. |
  * | Nuxt/Nitro | Nitro async context (via `unctx`) | Requires `nitro: { experimental: { asyncContext: true } }` in `nuxt.config.ts`. With the flag off the provider returns `undefined` and emits a one-time warning naming the missing config. |
  *
- * @param fn - Async function containing Blocks API calls that need auth.
+ * @param fn - Async function containing CDK Blocks API calls that need auth.
  * @param cookies - Optional explicit cookie string. If omitted, auto-detects
  *   from the request context or registered providers. Pass this for frameworks
  *   without a registered provider (or use `registerCookieProvider` to add one).
@@ -286,7 +286,7 @@ export interface WithAuthOptions {
  * @example
  * ```typescript
  * // Next.js — auto-detects cookies from next/headers (built-in provider)
- * import { withAuth } from '@aws-blocks/blocks/server';
+ * import { withAuth } from 'aws-cdk-blocks/server';
  *
  * const posts = await withAuth(() => api.listMyPosts());
  *
@@ -326,7 +326,7 @@ export interface WithAuthOptions {
  * // });
  * //
  * // server/api/posts.get.ts
- * import { withAuth } from '@aws-blocks/blocks/server';
+ * import { withAuth } from 'aws-cdk-blocks/server';
  *
  * export default defineEventHandler(async () => {
  *   return withAuth(() => api.listMyPosts());

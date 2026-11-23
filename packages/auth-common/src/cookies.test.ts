@@ -3,8 +3,8 @@
 
 import { test, describe } from 'node:test';
 import assert from 'node:assert';
-import type { BlocksContext } from '@aws-blocks/core';
-import { isBlocksError } from '@aws-blocks/core';
+import type { BlocksContext } from '@aws-cdk-blocks/core';
+import { isBlocksError } from '@aws-cdk-blocks/core';
 import { AuthErrors } from './errors.js';
 import {
 	resolveCookieSecurity,
@@ -17,7 +17,7 @@ import {
 
 /**
  * Run `fn` as if on deployed compute: the two variables synth stamps on every
- * Blocks-configured compute, which `getDeploymentType()` reads.
+ * CDK Blocks-configured compute, which `getDeploymentType()` reads.
  */
 function withDeployedEnv(fn: () => void): void {
 	const keys = ['BLOCKS_CONFIG_BUCKET', 'BLOCKS_CONFIG_KEY'] as const;

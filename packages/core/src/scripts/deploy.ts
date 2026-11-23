@@ -234,7 +234,7 @@ export function makeInvalidationProbe(
 export async function deploy(options: DeployOptions) {
   // A closed terminal (SIGHUP, then EIO) or output pipe must not end the deploy (see ignoreClosedOutput).
   ignoreClosedOutput();
-  // Structured deploy history (.blocks/deploy-history.jsonl) is the primary
+  // Structured deploy history (.cdk-blocks/deploy-history.jsonl) is the primary
   // source for the dashboard's deployments view: IN_PROGRESS at start, one
   // terminal record (same id) at the end. Best-effort, never fails a deploy.
   const recorder = createDeployRecorder(options.projectRoot, 'production');
@@ -286,7 +286,7 @@ async function runDeploy(options: DeployOptions) {
     // never by importing the backend here: an in-process import loads the local
     // mock layer, whose runtimes (PGlite, CronJob schedulers, …) kept this
     // process alive forever after the deploy finished.
-    const foundationPath = resolve(options.projectRoot, 'aws-blocks/index.ts');
+    const foundationPath = resolve(options.projectRoot, 'cdk-blocks/index.ts');
     const clientPath = join(dirname(foundationPath), 'client.js');
     log.progress('📝 Generating client code...');
     await generateDeployClient(foundationPath, clientPath);
@@ -311,7 +311,7 @@ async function runDeploy(options: DeployOptions) {
     // Framework resolves in the cdk synth child (where Hosting is built); it writes the
     // value to this file so the parent can attach it to telemetry. Created immediately
     // before the spawn, so a failure earlier in the command leaves nothing behind.
-    const frameworkSink = createFrameworkSink();
+    const frameworkSink = createFrameworkSink(options.projectRoot);
 
     try {
       await runStreaming(
@@ -326,8 +326,8 @@ async function runDeploy(options: DeployOptions) {
           env: {
             ...process.env,
             NODE_OPTIONS: '--conditions=cdk',
-            ...getCdkTelemetryEnv('production'),
-            ...getFrameworkSinkEnv(frameworkSink),
+            ...getCdkTelemetryEnv('production', options.projectRoot),
+            ...getFrameworkSinkEnv(frameworkSink, options.projectRoot),
           },
           curated: cdkOutput.streams,
           onHostingUrl: (url) => {
@@ -361,7 +361,7 @@ async function runDeploy(options: DeployOptions) {
     const outputs = JSON.parse(readFileSync(join(options.projectRoot, OUTPUTS_FILE.production), 'utf-8'));
     // `--all` can write more than one stack's outputs (e.g. the us-east-1
     // CloudFront-alarm monitoring stack). Pick the group that carries `ApiUrl`
-    // — the main Blocks stack, which also holds the Hosting outputs — rather
+    // — the main CDK Blocks stack, which also holds the Hosting outputs — rather
     // than relying on the write order of the outputs file. Falls back to the
     // first group so a single-stack app is unchanged.
     const stackGroups = Object.entries(outputs) as [string, Record<string, string>][];

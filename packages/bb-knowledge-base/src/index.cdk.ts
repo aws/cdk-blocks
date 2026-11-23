@@ -9,9 +9,9 @@ import * as bedrock from 'aws-cdk-lib/aws-bedrock';
 import * as s3vectors from 'aws-cdk-lib/aws-s3vectors';
 import * as s3deploy from 'aws-cdk-lib/aws-s3-deployment';
 import * as cr from 'aws-cdk-lib/custom-resources';
-import { BuildingBlockScope, registerConfig, synthGuard } from '@aws-blocks/core/cdk';
-import { sourceScopedConditions } from '@aws-blocks/core/cdk/internal';
-import type { ScopeParent } from '@aws-blocks/core';
+import { BuildingBlockScope, registerConfig, synthGuard } from '@aws-cdk-blocks/core/cdk';
+import { sourceScopedConditions } from '@aws-cdk-blocks/core/cdk/internal';
+import type { ScopeParent } from '@aws-cdk-blocks/core';
 import type { KnowledgeBaseOptions, ChunkingConfig, KnowledgeBaseAgentTool, KnowledgeBaseAgentToolOptions } from './types.js';
 import { createAgentTool } from './agent-tool.js';
 import * as path from 'node:path';
@@ -41,7 +41,7 @@ function envKey(fullId: string, suffix: string): string {
 // ── Chunking config builder ────────────────────────────────────────────────
 
 /**
- * Convert the Blocks `ChunkingConfig` to the Bedrock `ChunkingConfigurationProperty`.
+ * Convert the CDK Blocks `ChunkingConfig` to the Bedrock `ChunkingConfigurationProperty`.
  * Maps strategy names and default values to the Bedrock-specific format.
  */
 function buildChunkingConfig(config?: ChunkingConfig): bedrock.CfnDataSource.ChunkingConfigurationProperty {

@@ -79,10 +79,10 @@ describe('kebab derivation', () => {
 });
 
 describe('name derivation by mode', () => {
-	test('contributor uses @aws-blocks scope', () => {
+	test('contributor uses @aws-cdk-blocks scope', () => {
 		const n = deriveNames('SearchIndex', 'contributor', 'ignored');
 		assert.strictEqual(n.folder, 'bb-search-index');
-		assert.strictEqual(n.pkgName, '@aws-blocks/bb-search-index');
+		assert.strictEqual(n.pkgName, '@aws-cdk-blocks/bb-search-index');
 	});
 	test('external uses the given scope', () => {
 		const n = deriveNames('SearchIndex', 'external', 'acme');
@@ -209,7 +209,7 @@ describe('workspaces helpers', () => {
 });
 
 describe('customer-mode detection', () => {
-	test('detects a customer workspace (workspaces, but not the Blocks repo)', async () => {
+	test('detects a customer workspace (workspaces, but not the CDK Blocks repo)', async () => {
 		const dir = mkdtempSync(join(tmpdir(), 'cb-cust-'));
 		try {
 			writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: '@acme/app', workspaces: ['packages/*'] }));
@@ -222,7 +222,7 @@ describe('customer-mode detection', () => {
 			rmSync(dir, { recursive: true, force: true });
 		}
 	});
-	test('does NOT treat the AWS Blocks monorepo as a customer workspace', async () => {
+	test('does NOT treat the CDK Blocks monorepo as a customer workspace', async () => {
 		const dir = mkdtempSync(join(tmpdir(), 'cb-blk-'));
 		try {
 			writeFileSync(join(dir, 'package.json'), JSON.stringify({ workspaces: ['packages/blocks'] }));

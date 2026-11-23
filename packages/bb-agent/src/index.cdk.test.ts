@@ -5,7 +5,7 @@
  * CDK-side tests for the Agent BB.
  *
  * Pin that the Agent provisions an AgentCore Runtime for the streaming loop that runs AS the shared
- * Blocks execution role (the same principal as the handler) — not a bespoke per-runtime role. That
+ * CDK Blocks execution role (the same principal as the handler) — not a bespoke per-runtime role. That
  * shared role already carries everything the loop touches (Realtime publish via the handler wiring,
  * Bedrock, the conversation/message tables, the session bucket); the Agent adds only the
  * AgentCore-specific bits — the scoped `bedrock-agentcore` assume-role trust, Bedrock model access,
@@ -19,14 +19,14 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import * as cdk from 'aws-cdk-lib';
 import { Match, Template } from 'aws-cdk-lib/assertions';
-import { BlocksStack, BlocksPresets, Scope } from '@aws-blocks/core/cdk';
-import type { DefaultComputeFactory } from '@aws-blocks/core/cdk/internal';
-import { LambdaCompute } from '@aws-blocks/bb-lambda-compute/cdk';
+import { BlocksStack, BlocksPresets, Scope } from '@aws-cdk-blocks/core/cdk';
+import type { DefaultComputeFactory } from '@aws-cdk-blocks/core/cdk/internal';
+import { LambdaCompute } from '@aws-cdk-blocks/bb-lambda-compute/cdk';
 import { Agent } from './index.cdk.js';
 
 /**
  * Inject LambdaCompute as the stack's default compute, the same way
- * `@aws-blocks/blocks` does for real apps. `main` (PR #459) made the Agent
+ * `aws-cdk-blocks` does for real apps. `main` (PR #459) made the Agent
  * resolve the stack's `defaultCompute` at construction (the Realtime/AgentCore
  * wiring reads it), so a bare handler-only stub stack (no default compute) can
  * no longer synthesize it — `BlocksStack.create` initializes the default

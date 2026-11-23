@@ -129,7 +129,7 @@ final class DateFormatCodegenTests: XCTestCase {
 
     // MARK: - Compiled and run
 
-    /// Builds the generated module and calls it against a local JSON-RPC server that sends what AWS Blocks
+    /// Builds the generated module and calls it against a local JSON-RPC server that sends what CDK Blocks
     /// sends: dates as ISO 8601 strings. Checks what each request sent, and what each result decoded to.
     func testDatesCrossTheWireAsISOStrings() throws {
         #if os(macOS)
@@ -174,7 +174,7 @@ final class DateFormatCodegenTests: XCTestCase {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         let instant = formatter.date(from: wire)!
-        let api = Api(server: BlocksServer(name: "local", url: "http://127.0.0.1:\(port)/aws-blocks/api"))
+        let api = Api(server: BlocksServer(name: "local", url: "http://127.0.0.1:\(port)/cdk-blocks/api"))
         do {
             print(formatter.string(from: try await api.echo(at: instant)))
             let event = try await api.getEvent(event: Event(at: instant, title: "launch"))
