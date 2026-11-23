@@ -29,9 +29,10 @@ export type DeployManifest = {
     /** Path to static files directory */
     directory: string;
     /**
-     * Cache-Control header for non-hashed assets (HTML, public/, etc.).
-     * Defaults to `public, max-age=0, must-revalidate` so a redeploy
-     * invalidates cached HTML on next request — required to avoid PWA
+     * Cache-Control header for non-hashed assets other than HTML (public/,
+     * etc.). On the `'none'` door it defaults to
+     * `public, max-age=0, must-revalidate` so a redeploy invalidates cached
+     * files on next request — required to avoid PWA
      * "brick" scenarios where a cached `index.html` references hashed
      * URLs that the new deploy already removed.
      *
@@ -40,7 +41,8 @@ export type DeployManifest = {
      * (fonts included). HTML never receives it: `*.html` always gets its own
      * tier, `max-age=0, must-revalidate`. When unset, the construct's
      * default is `public, s-maxage=31536000, max-age=0, must-revalidate`
-     * (CloudFront caches for a year under the build's own prefix; the
+     * (CloudFront caches under the build's own prefix, for up to a year on
+     * a static-only site and up to one day on an app with a server; the
      * browser revalidates).
      */
     cacheControl?: string;
