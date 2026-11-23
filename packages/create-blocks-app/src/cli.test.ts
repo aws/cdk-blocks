@@ -1488,4 +1488,36 @@ describe('create-blocks-app bin-symlink invocation', () => {
       rmSync(tmpDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
     }
   });
+
+  it('runs through a symlinked package directory when Node preserves symlinks for the main module', () => {
+    // With --preserve-symlinks-main Node keeps the symlink path as the entry
+    // module's URL, so the guard must resolve both argv[1] and import.meta.url.
+    // The link is to the package directory (as `npm link` makes), not to the
+    // entry file: with this flag Node also resolves the CLI's imports from the
+    // symlink's location, so a link to the file alone cannot load them.
+    const tmpDir = mkdtempSync(join(tmpdir(), 'create-blocks-app-linked-package-'));
+    try {
+      // 'junction' applies on Windows only, where a directory link then needs no elevation.
+      symlinkSync(join(__dirname, '..'), join(tmpDir, 'linked-package'), 'junction');
+      // The CLI's dependencies are hoisted to the repository root, which the link's location cannot see.
+      symlinkSync(join(__dirname, '../../../node_modules'), join(tmpDir, 'node_modules'), 'junction');
+      // --help prints the usage and returns before any write or network access.
+      const stdout = execFileSync(
+        'node',
+        ['--preserve-symlinks-main', join(tmpDir, 'linked-package', 'dist', 'index.js'), '--help'],
+        {
+          encoding: 'utf-8',
+          timeout: 30000,
+          env: {
+            ...process.env,
+            CDK_DISABLE_CLI_TELEMETRY: '1',
+            BLOCKS_TELEMETRY_ENDPOINT: 'http://127.0.0.1:1/noop',
+          },
+        },
+      );
+      assert.match(stdout, /Usage: create-blocks-app/);
+    } finally {
+      rmSync(tmpDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+    }
+  });
 });

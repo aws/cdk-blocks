@@ -958,15 +958,19 @@ function printNextSteps(mode: Mode, names: DerivedNames, targetRel: string): voi
 // Run the CLI only when this module is the entry point (not when imported by tests).
 // Resolve argv[1] through its real path first: npm starts a bin through a symlink
 // (node_modules/.bin/create-block), while import.meta.url names the real file.
+// Resolve this module's path too: under `node --preserve-symlinks-main`,
+// import.meta.url keeps the symlink path.
 const entryArg = process.argv[1];
 if (entryArg) {
 	let entryUrl: string;
+	let selfUrl = import.meta.url;
 	try {
 		entryUrl = pathToFileURL(realpathSync(entryArg)).href;
+		selfUrl = pathToFileURL(realpathSync(fileURLToPath(import.meta.url))).href;
 	} catch {
 		entryUrl = pathToFileURL(entryArg).href;
 	}
-	if (import.meta.url === entryUrl) {
+	if (selfUrl === entryUrl) {
 		run(process.argv.slice(2), process.cwd())
 			.then((code) => process.exit(code))
 			.catch((e) => {
