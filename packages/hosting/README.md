@@ -310,30 +310,40 @@ on the backend's `apiFrontDoor`:
 each request before the server sees it, from the headers the door itself sets
 or appends: `Host` and `x-forwarded-host` both name the public host,
 `X-Forwarded-For` holds only the client's address, and `x-forwarded-proto` is
-the viewer's scheme. On a Lambda event, `requestContext.identity.sourceIp`
-(REST) or `requestContext.http.sourceIp` (HTTP API) is the client's address
-too. What each door is trusted for:
+the viewer's scheme. Behind the CloudFront and stacked doors, a Lambda event's
+`requestContext.identity.sourceIp` (REST) or `requestContext.http.sourceIp`
+(HTTP API) is the client's address too; behind API Gateway it already is.
+What each door is trusted for:
 
 | Door | Public host from | Client address from | Scheme from |
 |---|---|---|---|
-| CloudFront | `x-forwarded-host`, which the router sets from the viewer's `Host` over any value the client sent | the 2nd `X-Forwarded-For` entry from the right (CloudFront appends the viewer, the server origin appends CloudFront) | `x-forwarded-proto` |
-| Stacked | `x-forwarded-host`, which the edge sets the same way | the 2nd entry from the right (CloudFront appends the viewer, the router appends CloudFront) | `CloudFront-Forwarded-Proto` (the edge → router hop may be plain HTTP) |
-| ALB | `Host` | the right-most entry (the ALB appends the client) | `x-forwarded-proto` (the ALB's listener) |
-| API Gateway | `Host` (the API's domain or the custom domain) | the right-most entry (API Gateway appends the client) | `x-forwarded-proto` |
+| CloudFront | `x-forwarded-host`, which the router sets from the viewer's `Host` over any value the client sent | `x-blocks-viewer-ip`, which the router sets from the viewer's address over any value the client sent | always `https` (every server route redirects HTTP to HTTPS) |
+| Stacked | `x-forwarded-host`, which the edge sets the same way | `x-blocks-viewer-ip`, which the edge sets the same way | always `https`, also when the edge → router hop is plain HTTP |
+| ALB | `Host` | the right-most `X-Forwarded-For` entry (the ALB appends its peer) | `x-forwarded-proto` (the ALB's listener) |
+| API Gateway | `Host` (the API's domain or the custom domain) | the event's `sourceIp`, API Gateway's own peer (a Lambda Web Adapter server reads it from the adapter's `x-amzn-request-context` header) | `x-forwarded-proto` |
 
-The entries left of those came from the client and are never used. A
-client-sent `x-forwarded-host` never reaches the server behind the ALB and API
-Gateway doors. Each server origin admits only its door (the CloudFront door's
+Values a client sends in `X-Forwarded-For` (or `x-blocks-viewer-ip`) are never
+used, and `x-blocks-viewer-ip` never reaches the server. A client-sent
+`x-forwarded-host` never reaches the server behind the ALB and API Gateway
+doors. Each server origin admits only its door (the CloudFront door's
 origin-verify header and origin access control, the stacked router's edge
-header), so a request that skips the door can't supply these values. Behind a
-bring-your-own door, and with `frontDoor: 'none'`, requests reach the server as
-the door sent them.
+header), so a request that skips the door can't supply these values. When a
+request carries no value from the door (the Lambda Web Adapter's readiness
+check, for one), `X-Forwarded-For` is the address the server itself saw.
+Behind a bring-your-own door, with `frontDoor: 'none'`, and for a server the
+SSR cache guard can't be installed in front of (the
+`SsrCacheGuardNotInstalled` warning), requests reach the server as the door
+sent them.
 
 Per framework:
 
 - Next.js (OpenNext) and SvelteKit read the public host and scheme as they are.
   SvelteKit's `getClientAddress()` reads `X-Forwarded-For` (`ADDRESS_HEADER`,
-  `XFF_DEPTH=1`), on Lambda and on Web Functions.
+  `XFF_DEPTH=1`), on Lambda and on Web Functions. Where requests aren't
+  rewritten (a bring-your-own door, `'none'`, or the guard not installed),
+  Hosting drops those two variables, so `getClientAddress()` reads the socket
+  as before (adapter-node would otherwise throw on a request without
+  `X-Forwarded-For`).
 - Nitro (Nuxt) reads the public host from `Host`, so `useRequestURL()` is the
   public URL. For the client's address, use
   `getRequestIP(event, { xForwardedFor: true })`.
