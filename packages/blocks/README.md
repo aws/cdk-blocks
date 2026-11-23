@@ -1,6 +1,6 @@
 # AWS CDK Blocks
 
-AWS CDK Blocks is a backend framework built from **Building Blocks**: self-contained modules that each bundle a CDK construct, its AWS SDK integration, and a local mock. You compose blocks in one directory, export an API, and call it from your frontend with end-to-end type safety.
+CDK Blocks is a backend framework built from **Building Blocks**: self-contained modules that each bundle a CDK construct, its AWS SDK integration, and a local mock. You compose blocks in one directory, export an API, and call it from your frontend with end-to-end type safety.
 
 This package (`aws-cdk-blocks`) re-exports every Building Block and the core primitives, so you import everything from one place:
 
@@ -163,12 +163,12 @@ Run `npm run docs` in the app to list the Building Blocks shipped with its insta
 <!-- BEGIN:block-catalog -->
 | Block | What it does | Keywords |
 |-------|--------------|----------|
-| auth-common | Shared interfaces and UI components for AWS CDK Blocks authentication: the `BlocksAuth` contract that `Auth` implements, the `AuthErrors` vocabulary, and the provider-agnostic sign-in UI. | — |
+| auth-common | Shared interfaces and UI components for CDK Blocks authentication: the `BlocksAuth` contract that `Auth` implements, the `AuthErrors` vocabulary, and the provider-agnostic sign-in UI. | — |
 | bb-agent | AI agent with streaming, tool calling, and conversation persistence. | — |
 | bb-app-setting | A single application configuration value backed by SSM Parameter Store. | — |
 | bb-async-job | Background job processing backed by SQS, run on Lambda or a container. | queue, job, background, async, worker, submit, batch, retry, status, transitions, SQS |
-| bb-auth | `Auth` is the single authentication Building Block for AWS CDK Blocks: one import and one options object for email + password, social sign-in, generic OIDC and SAML. | — |
-| bb-compute | The `Compute` Building Block is the single surface for choosing where a workload runs. | — |
+| bb-auth | `Auth` is the single authentication Building Block for CDK Blocks: one import and one options object for email + password, social sign-in, generic OIDC and SAML. | — |
+| bb-compute | The `Compute` Building Block selects where a workload runs: `type: 'serverless'` (AWS Lambda) or `type: 'container'` (AWS Fargate). | — |
 | bb-cron-job | Scheduled task execution backed by EventBridge Scheduler and Lambda, or a container compute for long-running jobs. | cron, schedule, timer, periodic, recurring, rate, EventBridge, background, interval |
 | bb-dashboard | Auto-generated CloudWatch Dashboard for application observability. | — |
 | bb-database | `Database` is a PostgreSQL schema on a cluster: Aurora DSQL by default, or Aurora PostgreSQL Serverless v2 created with the express configuration. | — |
@@ -181,9 +181,9 @@ Run `npm run docs` in the app to list the Building Blocks shipped with its insta
 | bb-realtime | Real-time pub/sub messaging backed by API Gateway WebSocket + DynamoDB. | — |
 | bb-secret | A single application secret backed by AWS Secrets Manager. | — |
 | bb-tracer | Distributed tracing backed by AWS X-Ray. | — |
-| core | Core primitives for building full-stack applications with the AWS CDK Blocks. | — |
+| core | Core primitives for building full-stack applications with CDK Blocks. | — |
 | hosting | Low-level CDK L3 constructs for deploying web applications on AWS | — |
-| pipeline | CDK Pipelines-based CI/CD construct for AWS CDK Blocks applications. | — |
+| pipeline | CDK Pipelines-based CI/CD construct for CDK Blocks applications. | — |
 <!-- END:block-catalog -->
 
 ## Testing
@@ -241,7 +241,7 @@ Test helpers come from `aws-cdk-blocks/utils`. The entry is Node only: tests and
 
 ### IAM hardening
 
-Every Blocks compute runs as one shared IAM execution role, and every Building Block grants its permissions onto it. Set `defaults.permissionsBoundary` to attach a [permissions boundary](https://docs.aws.amazon.com/IAM/latest/UserGuide/access_policies_boundaries.html), a ceiling on effective permissions, to every IAM role AWS CDK Blocks creates. Pass the policy's name, its full ARN (required when the policy has a path), or an `iam.IManagedPolicy`. It's unset in both presets, and unset leaves templates unchanged.
+Every CDK Blocks compute runs as one shared IAM execution role, and every Building Block grants its permissions onto it. Set `defaults.permissionsBoundary` to attach a [permissions boundary](https://docs.aws.amazon.com/IAM/latest/UserGuide/access_policies_boundaries.html), a ceiling on effective permissions, to every IAM role CDK Blocks creates. Pass the policy's name, its full ARN (required when the policy has a path), or an `iam.IManagedPolicy`. It's unset in both presets, and unset leaves templates unchanged.
 
 ```typescript
 // cdk-blocks/index.cdk.ts
@@ -252,11 +252,11 @@ export const blocksStack = await BlocksStack.create(app, stackName, {
 });
 ```
 
-Every synth writes the shared role's composed policy to `cdk.out/<stack>.blocks-iam.json` (`<stack>.<backendId>.blocks-iam.json` for an embedded `BlocksBackend`); it isn't deployed, so CI can diff it to catch permission growth. See `npm run docs core` for permissions boundary scope and shared-account guidance.
+Every synth writes the shared role's composed policy to `cdk.out/<stack>.blocks-iam.json` (`<stack>.<backendId>.blocks-iam.json` for an embedded `BlocksBackend`); it isn't deployed, so CI can diff it to catch permission growth. See `npm run docs core` for permissions boundary scope and shared-account guidance. For shared-account policies, pipeline setup, and adoption steps, run `npm run docs core/SHARED-ACCOUNT.md` (`docs/core/SHARED-ACCOUNT.md` in the installed package).
 
 ## VPC Support
 
-AWS CDK Blocks supports running your backend in a VPC for network-level isolation or to connect to VPC-bound resources. You can let Blocks manage endpoint provisioning and security groups automatically, or bring a fully-configured VPC and handle networking yourself.
+CDK Blocks supports running your backend in a VPC for network-level isolation or to connect to VPC-bound resources. You can let CDK Blocks manage endpoint provisioning and security groups automatically, or bring a fully-configured VPC and handle networking yourself.
 
 See [VPC.md](./VPC.md) for usage, configuration options, cost details, and guidance on when a VPC is appropriate.
 
@@ -308,7 +308,7 @@ Before they deploy, `npm run sandbox` and `npm run deploy` print the deployment 
 
 ## Package scripts
 
-Run tasks from your app with its package manager. `npm run` lists the scripts in its `package.json`; `npm run help` describes the Blocks tasks. Each script loads the runner, `aws-cdk-blocks/run`, from the app's installed `aws-cdk-blocks`: there is no separate CLI to install. Do not import `/run` from application code. For an older app, see [Migrating an existing app](#migrating-an-existing-app).
+Run tasks from your app with its package manager. `npm run` lists the scripts in its `package.json`; `npm run help` describes the AWS CDK Blocks tasks. Each script calls the `cdk-blocks` bin that the app's installed `aws-cdk-blocks` provides (`"dev": "cdk-blocks dev"`): there is no separate CLI to install. The bin is on `PATH` only inside package scripts, so run `npm run <task>`. Scripts in the 1.0.0 form, `node --input-type=module -e "import 'aws-cdk-blocks/run'" -- <task>`, keep working, and `npm run migrate` shortens them. An install without bin links (`npm install --no-bin-links`) has no `cdk-blocks` bin, so keep the 1.0.0 form there. Do not import `/run` from application code. For an older app, see [Migrating an existing app](#migrating-an-existing-app).
 
 With npm, put positional arguments directly after the task name. Use `--` before options that belong to the task, so npm does not consume them. For a pipe, redirect or command substitution, add `-s` to suppress npm's script banner:
 
@@ -373,7 +373,7 @@ Run `npm run typegen` once and commit `.cdk-blocks/hosting-values.d.ts` before g
 
 Importing `aws-cdk-blocks` through its default (Node) entry declares the default compute (`LambdaCompute`) so the CLI reports it in telemetry. It is folded in only when telemetry reads the registry, after the blocks the app constructed, and an app-constructed `LambdaCompute` takes precedence. The `cdk` and `browser` entries do not declare it.
 
-The runner collects usage data to improve AWS CDK Blocks and prints a notice the first time it does.
+The runner collects usage data to improve CDK Blocks and prints a notice the first time it does.
 
 - Telemetry follows the CDK CLI setting. Set `CDK_DISABLE_CLI_TELEMETRY=1` to opt out for commands that inherit it, or set `cli-telemetry: false` in the `context` of `~/.cdk.json` for a user-wide default.
 - For one app, run `npx cdk cli-telemetry --disable` from the app directory, or set `cli-telemetry: false` in the `context` of its `cdk.json`. DNS filtering and `--no-version-reporting` stop CDK's own telemetry only. See [CDK telemetry opt-out](https://docs.aws.amazon.com/cdk/v2/guide/cli-telemetry.html#telemetry-opt-out).
@@ -385,7 +385,7 @@ An event can include:
 - the command, its outcome, duration and error category (never the error message)
 - your OS, Node.js version and package manager user agent
 - whether it ran in CI or under a coding agent
-- the AWS CDK Blocks and CDK versions, the framework, and the template name and version
+- the CDK Blocks and CDK versions, the framework, and the template name and version
 - the names and versions of the official Building Blocks the app uses, how many Building Blocks it uses, and how many of them are custom (custom Building Block names are never sent)
 
 The runner does not collect source files or ask for personal identifiers. The package manager user agent and template metadata are included as supplied: keep personal information, paths and secrets out of custom values. As with any HTTPS request, the collection endpoint also receives your IP address. It is not stored, except in logs of requests that the endpoint's firewall blocks. Events are kept for up to 1 year, and logs of all requests, blocked or not, for up to 10 years.
@@ -483,11 +483,11 @@ The lifecycle commands run the app's TypeScript with `tsx`:
 
 ### Migrating an existing app
 
-The `cdk-blocks` executable is not installed, and a global install or an `npx` invocation is not a substitute. For an app whose scripts call it or run generated `aws-blocks/scripts/*.ts` wrappers:
+The `cdk-blocks` bin comes with the app's installed `aws-cdk-blocks` and runs inside its package scripts. A global install or an `npx` invocation is not a substitute. For an app whose scripts run generated `aws-blocks/scripts/*.ts` wrappers, call the prerelease `blocks` command, or use the 1.0.0 form `node --input-type=module -e "import 'aws-cdk-blocks/run'" -- <task>`:
 
-1. Update the app's `aws-cdk-blocks` dependency to a release that exports `/run`.
+1. Update the app's `aws-cdk-blocks` dependency to a release that provides the `cdk-blocks` bin.
 2. Install dependencies and commit that update.
-3. From the app directory, invoke the installed runner directly once. This works before the app has a `migrate` script:
+3. From the app directory, invoke the installed runner directly once. It loads only the installed package, so it works before the app has a `migrate` script:
 
 ```bash
 node --input-type=module -e "import 'aws-cdk-blocks/run'" -- migrate --dry-run
@@ -499,6 +499,8 @@ node --input-type=module -e "import 'aws-cdk-blocks/run'" -- migrate
 5. Replace any remaining calls in CI, shell scripts and custom wrappers with the matching app script; for example, use `npm run sandbox:deploy`, not an executable on `PATH`.
 
 Use `npm run migrate -- --dry-run` for subsequent checks once that script exists.
+
+An app with 1.0.0 scripts keeps working without a migration. `npm run migrate` shortens each generated task script to `cdk-blocks <task>`. A script with other arguments stays as it is.
 
 Migrate refuses, with exit 1 and a `Try:` hint, and writes nothing when:
 
