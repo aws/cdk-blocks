@@ -44,6 +44,17 @@ new HostingConstruct(stack, 'Hosting', { manifest });
 
 `skipBuild: true` reuses an existing build output.
 
+`astroAdapter` applies the `redirects:` table of `astro.config` at the front
+door. A source that ends in a rest parameter becomes a wildcard redirect, with
+the matched tail spliced into the destination: `'/blog/[...slug]':
+'/posts/[...slug]'` sends `/blog/a/b` to `/posts/a/b` and `/blog` to `/posts`.
+Every other redirect with a route parameter (a single `[id]`, a parameter
+before the last segment or inside one, several parameters) is left to Astro's
+router: the server answers it in `output: 'server'`, and Astro's generated
+redirect pages in `output: 'static'`. A rest-parameter redirect whose prefix
+also has pages or `public/` files of its own (`src/pages/blog/index.astro`) is
+left to Astro as well, since Astro serves those pages before the redirect.
+
 ### Entry points
 
 | Import from | Exports |
@@ -343,7 +354,12 @@ semantics, using the same matching code:
   A spliced target's leading slashes or backslashes collapse to one slash,
   so `/old//evil.example` never becomes `Location: //evil.example`. Each
   redirect source routes to the asset proxy through an ALB listener rule,
-  an HTTP API route or a REST resource;
+  an HTTP API route or a REST resource. A Nuxt / Nitro `redirect` route
+  rule sends what Nitro sends: `'/blog/**': { redirect: '/posts/**' }`
+  redirects `/blog/a/b` to `/posts/a/b`, a destination without `/**` is
+  sent as written, and the status defaults to 307. A rule the door can't
+  reproduce (a destination ending in a single `*`) is left to the Nitro
+  server;
 - header rules: every matching rule is added to a successful response (not to
   a redirect or an error, as at the CloudFront edge);
 - error pages: a missing static file answers with the 404 page (status 404),
@@ -624,6 +640,72 @@ const blocksStack = await BlocksStack.create(app, stackName, {
   `us-east-1` support stack included.
 - `npm run destroy` passes no stack selection, so the CDK CLI refuses to
   destroy an app with more than one top-level stack.
+- A deploy that changes a Lambda@Edge function (middleware or an Edge route)
+  publishes a new function version and keeps the previous one. CloudFront
+  removes the old version's replicas only hours after the distribution stops
+  using it, and Lambda can't delete a version until then, so Hosting retains
+  replaced versions instead of having the deploy wait on a delete that fails.
+  A retained version doesn't run and has no invocation charge, but its code
+  still counts toward the
+  [Lambda code storage quota](https://docs.aws.amazon.com/lambda/latest/dg/gettingstarted-limits.html#compute-and-storage)
+  of `us-east-1`, which every function in that account and Region shares.
+  Each `next build` changes the edge bundle, so every deploy adds a version;
+  left unpruned, they can fill the quota and stop any function in the Region
+  from publishing new code. Prune versions the distribution no longer uses.
+  CloudFormation no longer tracks a retained version, so deleting one doesn't
+  affect the stack. Work from the distribution, not from function names or
+  version numbers: its cache behaviors name the exact function and version
+  each Lambda@Edge association runs, and an app can have several edge
+  functions (middleware plus one per Edge route). The highest version number
+  isn't necessarily the live one either: a deploy that fails and rolls back
+  leaves the version it published behind while CloudFront keeps running the
+  previous one.
+
+  1. Find the distribution ID in the app's own stack, in the Region you
+     deploy the app to (the distribution is always there, even when the edge
+     functions live in a `us-east-1` support stack). If this lists more than
+     one ID, pick the one whose domain name (`Distribution.DomainName`) or
+     alias (`Distribution.DistributionConfig.Aliases.Items`) from
+     `aws cloudfront get-distribution --id <distribution-id>` matches the
+     site URL in the stack output whose key contains `DistributionUrl`.
+  2. Check that the distribution's status is `Deployed`. While it's
+     `InProgress`, edge locations can still run versions its configuration no
+     longer lists, so wait and check again.
+  3. Read the Lambda@Edge version ARNs from the default cache behavior and
+     every other cache behavior. Each has the form
+     `arn:aws:lambda:us-east-1:<account>:function:<function-name>:<version>`
+     (the same ARN can appear on several behaviors). These versions are live:
+     keep them. The function names in these ARNs are the only functions to
+     prune.
+  4. For each of those functions, list its versions, and delete each numbered
+     version that step 3 didn't return. Skip `$LATEST`, which isn't a
+     published version. Always pass `--qualifier`: without it,
+     `delete-function` deletes the whole function and every version,
+     including the live one.
+
+  ```sh
+  # 1. The distribution ID (app stack, app Region)
+  aws cloudformation list-stack-resources --region <app-region> \
+  	--stack-name <app-stack-name> \
+  	--query "StackResourceSummaries[?ResourceType=='AWS::CloudFront::Distribution'].PhysicalResourceId"
+  # 2. Must print Deployed
+  aws cloudfront get-distribution --id <distribution-id> \
+  	--query 'Distribution.Status' --output text
+  # 3. The live version ARNs: keep these
+  aws cloudfront get-distribution-config --id <distribution-id> \
+  	--query '[DistributionConfig.DefaultCacheBehavior.LambdaFunctionAssociations.Items[].LambdaFunctionARN, DistributionConfig.CacheBehaviors.Items[].LambdaFunctionAssociations.Items[].LambdaFunctionARN][]'
+  # 4. Every version of one of those functions, then delete an unused one
+  aws lambda list-versions-by-function --region us-east-1 \
+  	--function-name <function-name> \
+  	--query 'Versions[].[Version,LastModified,CodeSize]' --output table
+  aws lambda delete-function --region us-east-1 \
+  	--function-name <function-name> --qualifier <unused-version>
+  ```
+
+  A version can only be deleted once CloudFront has removed its replicas:
+  until then Lambda rejects the delete, so wait a few hours after the deploy
+  that replaced it and try again. That rejection also protects a version that
+  another distribution still uses.
 
 ## SvelteKit: the server's dependencies
 
@@ -1023,6 +1105,27 @@ sends. The cache-key limits in the table above are defaults, not hard caps.
 Static and image routes are not keyed on `cacheKeyCookies` /
 `cacheKeyHeaders`, and those cookies and headers are not forwarded to the
 origin on those routes (an auth-gated image source does not receive them).
+
+Image optimization requests (Next.js `/_next/image`, the Nuxt and Astro image
+endpoints) share the default behavior's cache key, and the optimizer picks the
+output format from the viewer's `Accept` header. CloudFront ignores
+`Vary: Accept`, so on image routes the edge router joins the viewer's `Accept`
+fields into one value, sends that value to the image optimizer as its only
+`Accept` field, and writes a SHA-256 digest of it into an
+`x-blocks-image-accept` header that the SSR cache policy keys on. The optimizer
+negotiates on exactly the value the cache key covers, so viewers that accept,
+reject (`image/webp;q=0`) or prefer different formats get separate cached
+copies, and a long `Accept` reaches the origin once, not twice. `Accept` is
+kept on image routes even when `cacheKeyHeaders` lists it (other
+`cacheKeyHeaders` entries are dropped there). `Accept` itself stays out of the
+default cache key,
+so pages keep one cache entry whatever `Accept` the browser sends. The router
+drops an `x-blocks-image-accept` header the viewer sends on any route, so with
+an image optimizer that name is reserved and synth rejects it in
+`cacheKeyHeaders`; without one the router leaves it alone. The header takes one
+of the cache-key header slots; when `cacheKeyHeaders` already uses all five, it
+stays out of the key and synth warns with
+`@aws-cdk-blocks/hosting:ImageAcceptNotInCacheKey`.
 
 ## Custom domains (CloudFront door)
 
