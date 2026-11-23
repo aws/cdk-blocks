@@ -308,7 +308,7 @@ Before they deploy, `npm run sandbox` and `npm run deploy` print the deployment 
 
 ## Package scripts
 
-Run tasks from your app with its package manager. `npm run` lists the scripts in its `package.json`; `npm run help` describes the CDK Blocks tasks. Each script calls the `cdk-blocks` bin that the app's installed `aws-cdk-blocks` provides (`"dev": "cdk-blocks dev"`): there is no separate CLI to install. The bin is on `PATH` only inside package scripts, so run `npm run <task>`. Scripts in the 1.0.0 form, `node --input-type=module -e "import 'aws-cdk-blocks/run'" -- <task>`, keep working, and `npm run migrate` shortens them. Do not import `/run` from application code. For an older app, see [Migrating an existing app](#migrating-an-existing-app).
+Run tasks from your app with its package manager. `npm run` lists the scripts in its `package.json`; `npm run help` describes the AWS CDK Blocks tasks. Each script calls the `cdk-blocks` bin that the app's installed `aws-cdk-blocks` provides (`"dev": "cdk-blocks dev"`): there is no separate CLI to install. The bin is on `PATH` only inside package scripts, so run `npm run <task>`. Scripts in the 1.0.0 form, `node --input-type=module -e "import 'aws-cdk-blocks/run'" -- <task>`, keep working, and `npm run migrate` shortens them. An install without bin links (`npm install --no-bin-links`) has no `cdk-blocks` bin, so keep the 1.0.0 form there. Do not import `/run` from application code. For an older app, see [Migrating an existing app](#migrating-an-existing-app).
 
 With npm, put positional arguments directly after the task name. Use `--` before options that belong to the task, so npm does not consume them. For a pipe, redirect or command substitution, add `-s` to suppress npm's script banner:
 

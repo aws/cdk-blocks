@@ -458,9 +458,10 @@ async function addBlocksWorkspace(targetDir: string, options: {
   // Add dependencies
   if (!pkg.dependencies) pkg.dependencies = {};
   // The `aws-cdk-blocks` range the project already declares, when it is not the one this CLI writes.
-  // From the monorepo the dependency becomes a `file:` path below, so there is nothing to report.
+  // A devDependencies range wins, as it does in npm's resolution of the root. From the monorepo the
+  // dependency becomes a `file:` path below, so there is nothing to report.
   const wantedBlocks = deps['aws-cdk-blocks'];
-  const declaredBlocks: unknown = pkg.dependencies['aws-cdk-blocks'];
+  const declaredBlocks: unknown = { ...pkg.dependencies, ...pkg.devDependencies }['aws-cdk-blocks'];
   const keptBlocks =
     !localMonorepo && wantedBlocks && typeof declaredBlocks === 'string' && declaredBlocks !== wantedBlocks
       ? declaredBlocks

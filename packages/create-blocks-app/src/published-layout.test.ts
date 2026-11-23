@@ -153,6 +153,20 @@ describe('create-blocks-app version stamping from the published package', () => 
     assert.ok(result.output.includes(`change the dependency to ${wanted} and install again`), result.output);
   });
 
+  it('warns about a kept aws-cdk-blocks range that the project declares in devDependencies', () => {
+    const project = join(root, 'existing-dev-pinned');
+    mkdirSync(project, { recursive: true });
+    writeFileSync(
+      join(project, 'package.json'),
+      JSON.stringify({ name: 'existing-dev-pinned', version: '1.0.0', devDependencies: { 'aws-cdk-blocks': '1.0.0' } }),
+    );
+
+    const result = run(['.', '--yes', '--skip-install'], project);
+    assert.strictEqual(result.exitCode, 0, result.output);
+    assert.strictEqual(readManifest(join(project, 'package.json')).devDependencies?.['aws-cdk-blocks'], '1.0.0');
+    assert.ok(result.output.includes('already depends on aws-cdk-blocks@1.0.0'), result.output);
+  });
+
   it('does not warn when the existing project already declares the range the CLI writes', () => {
     const project = join(root, 'existing-current');
     mkdirSync(project, { recursive: true });

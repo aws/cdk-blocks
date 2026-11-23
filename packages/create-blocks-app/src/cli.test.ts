@@ -587,7 +587,7 @@ describe('create-blocks-app auto-detection', () => {
       assert.match(result.stdout, /leave your Next\.js tsconfig\.json as it is/);
       assert.match(result.stdout, /npm run sandbox\b/);
       assert.match(result.stdout, /npm run blocks:dev\b/);
-      // The one script value the steps print: what to put in the sandbox script to run it through CDK Blocks.
+      // The one script value the steps print: what to put in the sandbox script to run it through AWS CDK Blocks.
       const sandboxScript = `script with:\n   ${task('sandbox')}\n   Then use \`npm run sandbox\`.`;
       assert.ok(result.stdout.includes(sandboxScript), result.stdout);
       // The CLI name as a command, not the `.cdk-blocks*` directories or the `/cdk-blocks/` URL path the rebrand
