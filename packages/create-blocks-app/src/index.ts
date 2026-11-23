@@ -563,7 +563,7 @@ async function addBlocksWorkspace(targetDir: string, options: {
 /** Reuse the selected template's CDK Blocks tasks, not its frontend or lifecycle scripts. */
 function templateTasks(scripts: Record<string, string>): Record<string, string> {
   return Object.fromEntries(Object.entries(scripts).filter(([name, command]) =>
-    name !== 'prebuild' && command.startsWith(`node --input-type=module -e "import 'aws-cdk-blocks/run'" -- `),
+    name !== 'prebuild' && command.startsWith('cdk-blocks '),
   ));
 }
 
