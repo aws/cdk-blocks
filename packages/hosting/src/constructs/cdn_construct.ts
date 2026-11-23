@@ -1498,8 +1498,12 @@ export class CdnConstruct extends Construct {
             // 503 that CloudFront generates (a function or Lambda@Edge error)
             // then pass through with their own bodies. An app that wants a
             // page for a 500 sets `errorPages.serverError`.
-            // None of these are cached (see withServerErrorsNotCached, which
-            // adds TTL-only entries for 500, 501 and 503).
+            // The error caching minimum TTL is 0 for all of them (see
+            // withServerErrorsNotCached, which adds TTL-only entries for 500,
+            // 501 and 503). A response that sets max-age, s-maxage or
+            // Expires is still cached for that time; the SSR cache guard
+            // rewrites a credentialed or cookie-setting one to
+            // private, no-store.
             {
               httpStatus: 502,
               responseHttpStatus: 502,

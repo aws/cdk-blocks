@@ -251,8 +251,10 @@ included. Per status:
 | 501, 503 | The server's own response. A 503 that CloudFront generates itself (a CloudFront Function or Lambda@Edge execution error or limit, on the router, the middleware or a `runtime: 'edge'` route) carries CloudFront's default error body |
 | 502, 504 | The built-in "Service Temporarily Unavailable" page, which CloudFront also uses when the server function fails, returns an invalid response or times out. A 502 or 504 body that the server or the backend sends itself is replaced too, for example the backend's `HandlerTimeoutError` RPC response, which then reaches the client without its name |
 
-None of these responses are cached (see the error caching note under
-[SSR caching & cache-key credentials](#ssr-caching--cache-key-credentials)).
+The error caching minimum TTL is 0 for all of these statuses, so a response
+without caching headers is not cached. A response that sets `max-age`,
+`s-maxage` or `Expires` is cached for that time (see the error caching note
+under [SSR caching & cache-key credentials](#ssr-caching--cache-key-credentials)).
 An app without a server maps 500, 502, 503 and 504 to `errorPages.serverError`
 when it sets one.
 
@@ -1183,10 +1185,17 @@ are cached as its `Cache-Control` says. The guard sends
   door). The response keeps its `Vary`
   header for the browser, and the server logs once per header name why the
   guard rewrote it. The ALB, API Gateway and custom doors put no CloudFront
-  cache the guard knows in front of the server, so `Vary` is not read there.
+  cache the guard knows in front of the server, so `Vary` is not read there; or
+- the request is credentialed as above, or the response sets cookies, and the
+  response is a 500, 502, 503 or 504 with a positive `max-age` or `s-maxage`,
+  or a future `Expires`, even when it is `private`, `no-store` or `no-cache`.
+  CloudFront ignores those three directives on these statuses and caches the
+  response for its own TTL.
 
-Responses that are already `private`/`no-store`, or `no-cache` without
-`s-maxage`, are left as they are. To keep a credentialed route cacheable, list
+When the guard rewrites `Cache-Control`, it also removes `Expires`.
+
+Otherwise, responses that are already `private`/`no-store`, or `no-cache`
+without `s-maxage`, are left as they are. To keep a credentialed route cacheable, list
 its credential in `cacheKeyCookies`/`cacheKeyHeaders` so the cache is keyed per
 credential. Any route that otherwise varies per user should still emit
 `Cache-Control: private`.
@@ -1224,7 +1233,10 @@ CloudFront caches the 500, 501, 502, 503 and 504 responses of an origin for the
 error caching minimum TTL and, except for 501, does so whatever their
 `Cache-Control` says. A distribution with a server (the CloudFront door and the
 stacked door) therefore sets that TTL to 0 for those statuses,
-keeping any error page configured for them.
+keeping any error page configured for them. The minimum TTL is a floor: a
+response that sets `max-age`, `s-maxage` or `Expires` is cached for the greater
+of that time and the minimum, and for 500, 502, 503 and 504 CloudFront ignores
+`private`, `no-store` and `no-cache` when it does.
 
 The guard models CloudFront's own caching inputs only: `CDN-Cache-Control` and
 `Surrogate-Control` are not CloudFront TTL inputs, so the guard does not read
@@ -1234,7 +1246,8 @@ values of a header outside the key (above); it never adds a header to the key.
 CloudFront uses `max-age` as its edge TTL when `s-maxage` is absent, so a bare
 `max-age` is cached at the edge and counts as shared-cacheable. A credentialed
 route that should still be cached by the browser should send
-`Cache-Control: private, max-age=…`, which the guard leaves unchanged.
+`Cache-Control: private, max-age=…`, which the guard leaves unchanged, except
+on a 500, 502, 503 or 504 (above).
 
 The SSR cache policy caps edge TTLs at 1 day, whatever `s-maxage` the origin
 sends. The cache-key limits in the table above are defaults, not hard caps.

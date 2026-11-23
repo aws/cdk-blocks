@@ -194,6 +194,34 @@ void describe('guardCacheControl', () => {
     }
   });
 
+  void it('rewrites a 500 / 502 / 503 / 504 whose private, no-store or no-cache sits next to a TTL', () => {
+    // CloudFront ignores private, no-store and no-cache on these statuses and
+    // caches them for the greater of their TTL and the error caching minimum TTL.
+    const request = { authorization: false, cookies: ['theme'] };
+    const future = new Date(Date.now() + 3_600_000).toUTCString();
+    for (const statusCode of [500, 502, 503, 504]) {
+      for (const cacheControl of ['private, max-age=60', 'no-store, s-maxage=60', 'no-cache, max-age=60', 'private, no-store, max-age=60']) {
+        const label = `${statusCode} ${cacheControl}`;
+        assert.equal(guard.guardCacheControl(request, { cacheControl, setCookie: false, statusCode }), PRIVATE, label);
+        assert.equal(guard.guardCacheControl(anon, { cacheControl, setCookie: true, statusCode }), PRIVATE, label);
+        assert.equal(guard.guardCacheControl(anon, { cacheControl, setCookie: false, statusCode }), null, label);
+      }
+      assert.equal(guard.guardCacheControl(request, { cacheControl: 'private', expires: future, setCookie: false, statusCode }), PRIVATE);
+      assert.equal(guard.guardCacheControl(anon, { cacheControl: 'private', expires: future, setCookie: true, statusCode }), PRIVATE);
+      // No TTL, or a zero one, leaves the error caching minimum TTL of 0.
+      for (const cacheControl of ['private', 'no-store', PRIVATE, 'no-store, max-age=0', 'private, s-maxage=0']) {
+        const label = `${statusCode} ${cacheControl}`;
+        assert.equal(guard.guardCacheControl(request, { cacheControl, setCookie: false, statusCode }), null, label);
+        assert.equal(guard.guardCacheControl(anon, { cacheControl, setCookie: true, statusCode }), null, label);
+      }
+    }
+    // CloudFront honours private on every other status, 501 included.
+    for (const statusCode of [200, 404, 501]) {
+      assert.equal(guard.guardCacheControl(request, { cacheControl: 'private, max-age=60', setCookie: false, statusCode }), null);
+      assert.equal(guard.guardCacheControl(anon, { cacheControl: 'private, max-age=60', setCookie: true, statusCode }), null);
+    }
+  });
+
   void it('treats a future Expires as shared-cacheable when Cache-Control gives no TTL', () => {
     const request = { authorization: true, cookies: [] };
     const future = new Date(Date.now() + 3_600_000).toUTCString();
@@ -387,6 +415,17 @@ void describe('requestInfoFromEvent / guardResult', () => {
       'cache-control': 'private',
     });
     assert.deepEqual(guard.guardResult({ statusCode: 200, headers: {} }, request).headers, {});
+  });
+
+  void it('drops Expires from a buffered result it rewrites', () => {
+    const request = guard.requestInfoFromEvent({ headers: { cookie: 'theme=dark' } });
+    const expires = new Date(Date.now() + 3_600_000).toUTCString();
+    const result = guard.guardResult(
+      { statusCode: 503, headers: { 'Cache-Control': 'private', Expires: expires }, multiValueHeaders: { expires: [expires] } },
+      request,
+    );
+    assert.deepEqual(result.headers, { 'cache-control': PRIVATE });
+    assert.deepEqual(result.multiValueHeaders, {});
   });
 
   void it('makes a result with cookies (HTTP API shape) private', () => {
@@ -988,6 +1027,10 @@ void describe('Node HTTP server (writeHead)', () => {
       } else if (req.url === '/error-private') {
         res.writeHead(500, { 'cache-control': 'private' });
         res.end('error');
+      } else if (req.url === '/error-private-ttl') {
+        res.setHeader('Expires', new Date(Date.now() + 3_600_000).toUTCString());
+        res.writeHead(500, { 'cache-control': 'private, max-age=60' });
+        res.end('error');
       } else if (req.url === '/expires') {
         res.writeHead(200, { Expires: new Date(Date.now() + 3_600_000).toUTCString() });
         res.end('f');
@@ -1056,6 +1099,13 @@ void describe('Node HTTP server (writeHead)', () => {
   void it('treats a future Expires passed to writeHead as shared-cacheable', async () => {
     assert.equal((await get('/expires', { cookie: 'theme=dark' })).headers.get('cache-control'), PRIVATE);
     assert.equal((await get('/expires')).headers.get('cache-control'), null);
+  });
+
+  void it('rewrites a credentialed 500 that is private with a TTL and drops its Expires', async () => {
+    const res = await get('/error-private-ttl', { cookie: 'theme=dark' });
+    assert.equal(res.headers.get('cache-control'), PRIVATE);
+    assert.equal(res.headers.get('expires'), null);
+    assert.equal((await get('/error-private-ttl')).headers.get('cache-control'), 'private, max-age=60');
   });
 
   void it('makes an uncached error status private for a credentialed request', async () => {
