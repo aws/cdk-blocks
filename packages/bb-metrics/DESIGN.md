@@ -79,6 +79,8 @@ emit('Count', 1, { dimensions: { endpoint: '/api' } })
 
 EMF requires all metrics in a single `CloudWatchMetrics` entry to share the same dimension keys and values. When `emitBatch` receives metrics with different dimension sets, they are grouped and written as separate JSON lines.
 
+The group key is the JSON encoding of the timestamp and the key-sorted dimension entries, so dimension values that contain separator characters cannot make two different sets share a group. Each document carries one `Timestamp`, so metrics with different timestamps are written as separate lines. Metric values sit next to the dimension values at the top level of the document, so a metric name repeated within a group goes into another line for that group rather than overwriting the earlier value.
+
 ### Child Emitters
 
 `child(dimensions)` returns a lightweight `ChildMetrics` object (not a Scope node) that:
@@ -123,8 +125,10 @@ This is unique among Building Blocks. Most BBs need a mock because their AWS run
 ## Validation
 
 All validation matches CloudWatch constraints:
-- **Metric name:** Non-empty, max 1024 characters
-- **Dimensions:** Max 30 key-value pairs, non-empty keys and values, max 1024 chars each
+- **Metric name:** Non-empty, max 1024 characters, not `_aws`, and not equal to one of its own dimension keys (both are top-level keys in the EMF document)
+- **Dimensions:** Max 30 key-value pairs, non-empty keys and values, max 1024 chars each, no `_aws` key
+- **Value:** A finite number (`NaN` and `Infinity` would serialize as `null`)
+- **Unit:** One of the `MetricUnit` values
 - **Batch size:** Max 100 metrics per `emitBatch` call (EMF document limit)
 
 Validation runs synchronously before the stdout write. Failures throw typed errors (`MetricsErrors.*`) that can be caught with `isBlocksError()`.

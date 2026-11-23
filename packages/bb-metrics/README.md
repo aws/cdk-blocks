@@ -76,8 +76,10 @@ type MetricUnit =
 
 | Constant | `error.name` | Thrown when |
 |----------|--------------|-------------|
-| `MetricsErrors.InvalidMetricName` | `InvalidMetricNameException` | `emit` or `emitBatch`: a metric name is empty or exceeds 1024 characters. |
-| `MetricsErrors.InvalidDimensions` | `InvalidDimensionsException` | `emit` or `emitBatch`: dimensions exceed 30 entries, or contain empty keys/values, or key/value exceeds 1024 chars. |
+| `MetricsErrors.InvalidMetricName` | `InvalidMetricNameException` | `emit` or `emitBatch`: a metric name is empty, exceeds 1024 characters, is `_aws`, or equals one of that data point's dimension keys (including `defaultDimensions`). |
+| `MetricsErrors.InvalidDimensions` | `InvalidDimensionsException` | `emit` or `emitBatch`: dimensions exceed 30 entries, or contain empty keys/values, or key/value exceeds 1024 chars, or a key is `_aws`. |
+| `MetricsErrors.InvalidValue` | `InvalidValueException` | `emit` or `emitBatch`: a value is not a finite number (`NaN`, `Infinity`, `-Infinity`). |
+| `MetricsErrors.InvalidUnit` | `InvalidUnitException` | `emit` or `emitBatch`: a unit is not one of the `MetricUnit` values. |
 | `MetricsErrors.BatchTooLarge` | `BatchTooLargeException` | `emitBatch`: the batch contains more than 100 metrics. |
 | `MetricsErrors.InvalidNamespace` | `InvalidNamespaceException` | `new Metrics(...)` at runtime and in local dev, not during CDK synthesis: the namespace is empty, exceeds 256 characters, contains a character outside `[a-zA-Z0-9._#:/ -]`, or starts with `AWS/`. |
 
