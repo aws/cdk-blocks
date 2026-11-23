@@ -8,6 +8,8 @@ import 'package:blocks_codegen/src/generator.dart';
 import 'package:blocks_codegen/src/parser.dart';
 import 'package:test/test.dart';
 
+import 'support/source_matchers.dart';
+
 // A union with a string discriminator that a response carries is generated
 // open: an object whose discriminator names no arm decodes to `XUnknown`,
 // which keeps the object and writes it back, instead of throwing. A union only
@@ -27,37 +29,47 @@ void main() {
     final output = _generate('45-open-enums');
     expect(
       output,
-      contains(
+      containsSource(
         '      default: return GetEventResultUnknown(_blocksFrozenObject(json));',
       ),
     );
     expect(
       output,
-      contains('final class GetEventResultUnknown extends GetEventResult {'),
+      containsSource(
+        'final class GetEventResultUnknown extends GetEventResult {',
+      ),
     );
     expect(
       output,
-      contains('  Map<String, dynamic> toJson() => Map.of(json);'),
+      containsSource('  Map<String, dynamic> toJson() => Map.of(json);'),
     );
   });
 
   test('a union only parameters reach stays closed', () {
     final output = _generate('18-hybrid-arm');
-    expect(output, isNot(contains('extends SetAuthStateInput {\n  /// The')));
-    expect(output, contains("default: throw ArgumentError('Unknown action:"));
+    expect(
+      output,
+      isNot(containsSource('extends SetAuthStateInput {\n  /// The')),
+    );
+    expect(
+      output,
+      containsSource("default: throw ArgumentError('Unknown action:"),
+    );
   });
 
   test('a boolean-discriminated union stays closed', () {
     final output = _generate('24-nullable-discriminated-union');
-    expect(output, contains("switch (json['isUpdated'] as bool) {"));
-    expect(output, isNot(contains('UpdateAttributesResultUnknown')));
+    expect(output, containsSource("switch (json['isUpdated'] as bool) {"));
+    expect(output, isNot(containsSource('UpdateAttributesResultUnknown')));
   });
 
-  test('unknown arms decode and round-trip', () async {
-    final work = Directory.systemTemp.createTempSync('open_union_test');
-    addTearDown(() => work.deleteSync(recursive: true));
-    final runtime = Directory('../blocks_runtime').absolute.path;
-    File('${work.path}/pubspec.yaml').writeAsStringSync('''
+  test(
+    'unknown arms decode and round-trip',
+    () async {
+      final work = Directory.systemTemp.createTempSync('open_union_test');
+      addTearDown(() => work.deleteSync(recursive: true));
+      final runtime = Directory('../blocks_runtime').absolute.path;
+      File('${work.path}/pubspec.yaml').writeAsStringSync('''
 name: open_union_check
 publish_to: none
 environment:
@@ -66,30 +78,32 @@ dependencies:
   blocks_runtime:
     path: $runtime
 ''');
-    Directory('${work.path}/bin').createSync();
-    final tasksFile = File('${work.path}/bin/tasks.dart');
-    tasksFile.writeAsStringSync(_generate('45-open-enums'));
-    File('${work.path}/bin/collide.dart').writeAsStringSync(
-      const DartCodeGenerator().generate(
-        CodegenModelBuilder().build(
-          const OpenRpcParser().parse(_collisionSpec),
+      Directory('${work.path}/bin').createSync();
+      final tasksFile = File('${work.path}/bin/tasks.dart');
+      tasksFile.writeAsStringSync(_generate('45-open-enums'));
+      File('${work.path}/bin/collide.dart').writeAsStringSync(
+        const DartCodeGenerator().generate(
+          CodegenModelBuilder().build(
+            const OpenRpcParser().parse(_collisionSpec),
+          ),
         ),
-      ),
-    );
-    File('${work.path}/bin/main.dart').writeAsStringSync(_check);
+      );
+      File('${work.path}/bin/main.dart').writeAsStringSync(_check);
 
-    final get = await Process.run(Platform.resolvedExecutable, [
-      'pub',
-      'get',
-    ], workingDirectory: work.path);
-    expect(get.exitCode, 0, reason: '${get.stdout}\n${get.stderr}');
-    final run = await Process.run(Platform.resolvedExecutable, [
-      'run',
-      'bin/main.dart',
-    ], workingDirectory: work.path);
-    expect(run.exitCode, 0, reason: '${run.stdout}\n${run.stderr}');
-    expect(run.stdout, contains('ok'));
-  }, timeout: const Timeout(Duration(minutes: 3)));
+      final get = await Process.run(Platform.resolvedExecutable, [
+        'pub',
+        'get',
+      ], workingDirectory: work.path);
+      expect(get.exitCode, 0, reason: '${get.stdout}\n${get.stderr}');
+      final run = await Process.run(Platform.resolvedExecutable, [
+        'run',
+        'bin/main.dart',
+      ], workingDirectory: work.path);
+      expect(run.exitCode, 0, reason: '${run.stdout}\n${run.stderr}');
+      expect(run.stdout, containsSource('ok'));
+    },
+    timeout: const Timeout(Duration(minutes: 3)),
+  );
 }
 
 const _check = r'''

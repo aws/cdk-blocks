@@ -26,6 +26,9 @@ dart run build_runner build
 | `--output`, `-o` | none | standard output | Where to write the Dart file. The builder writes `*.blocks.dart` next to the spec. |
 | `--fail-on-collision` | `fail_on_collision` | `false` | Makes a name collision an error. By default the codegen renames one of the two names and warns (see [Generated names](#generated-names)). |
 | `--native-package-opt-out` (repeatable) | `native_package_opt_out` | none | Logical identities from `x-blocks-native-packages` whose results stay `UnknownTransferable` instead of the declared type. An identity the spec doesn't declare opts nothing out and is reported as `AWSBLOCKS-NATIVE-006`. |
+| `--language-version` | none | the output package's | The Dart language version, such as `3.11`, to format the output for. By default the CLI reads it from the package config of the package it writes into (the current directory's for standard output), and uses 3.11 if there is none. The builder uses the version of the package it builds. |
+
+The generated file is already formatted as `dart format` formats it, so you don't need to run `dart format` after generating it. It starts with a `// dart format width=80` comment, so a `formatter: page_width` set in `analysis_options.yaml` doesn't reformat it.
 
 The builder needs no `build.yaml`. To set its options, add one to the app:
 

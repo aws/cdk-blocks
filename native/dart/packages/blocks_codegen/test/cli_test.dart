@@ -162,6 +162,82 @@ void main() {
       expect(result.stdout, isEmpty);
     });
 
+    test('a malformed --language-version exits 1', () {
+      final result = _run([
+        '--spec',
+        writeSpec(_spec()),
+        '--language-version',
+        'three',
+      ]);
+
+      expect(result.exitCode, 1);
+      expect(result.stderr, contains('--language-version must be'));
+      expect(result.stdout, isEmpty);
+    });
+
+    group('formats for the language version of the package written into', () {
+      // 3.6 is the last version `dart format` formats in the short style, so
+      // its layout differs throughout from the tall style of 3.7 and later.
+      const languageVersion = '3.6';
+
+      /// A package whose resolved language version is [languageVersion].
+      Directory package() {
+        final dir = Directory.systemTemp.createTempSync('blocks_codegen_pkg_');
+        addTearDown(() => dir.deleteSync(recursive: true));
+        File('${dir.path}/.dart_tool/package_config.json')
+          ..createSync(recursive: true)
+          ..writeAsStringSync(
+            jsonEncode({
+              'configVersion': 2,
+              'packages': [
+                {
+                  'name': 'app',
+                  'rootUri': '../',
+                  'packageUri': 'lib/',
+                  'languageVersion': languageVersion,
+                },
+              ],
+            }),
+          );
+        return dir;
+      }
+
+      /// Whether `dart format` at [version] leaves [file] unchanged.
+      bool formatted(File file, String version) =>
+          Process.runSync(Platform.resolvedExecutable, [
+            'format',
+            '--output=none',
+            '--set-exit-if-changed',
+            '--language-version=$version',
+            file.path,
+          ]).exitCode ==
+          0;
+
+      test('read from its package config', () {
+        final out = File('${package().path}/lib/src/client.dart');
+        final result = _run(['--spec', writeSpec(_spec()), '-o', out.path]);
+
+        expect(result.exitCode, 0, reason: result.stderr.toString());
+        expect(formatted(out, languageVersion), isTrue);
+        expect(formatted(out, '3.11'), isFalse);
+      });
+
+      test('overridden by --language-version', () {
+        final out = File('${package().path}/lib/client.dart');
+        final result = _run([
+          '--spec',
+          writeSpec(_spec()),
+          '-o',
+          out.path,
+          '--language-version',
+          '3.11',
+        ]);
+
+        expect(result.exitCode, 0, reason: result.stderr.toString());
+        expect(formatted(out, '3.11'), isTrue);
+      });
+    });
+
     test('--help exits 0 with usage on stdout', () {
       final result = _run(['--help']);
 

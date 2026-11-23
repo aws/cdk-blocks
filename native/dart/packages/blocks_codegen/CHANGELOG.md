@@ -1,3 +1,10 @@
+## Unreleased
+
+- Generated clients are formatted as `dart format` formats them, so running
+  `dart format` after generating no longer changes them. The CLI formats for
+  the language version of the package it writes into, or the one given with
+  `--language-version`, and the builder for the package it builds.
+
 ## 1.0.0
 
 ### Breaking

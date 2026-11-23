@@ -82,6 +82,14 @@ fi
   exit 1
 }
 
+# The goldens are what a consumer's `dart format` sees, in a package at the
+# oldest language version blocks_runtime supports: it must leave them as is.
+if ! format_report="$(cd "$WORK" && "$DART" format --output=none --set-exit-if-changed lib 2>&1)"; then
+  printf '%s\n' "$format_report" >&2
+  echo "FAIL: dart format would change Dart fixture golden(s); blocks_codegen must emit formatted code" >&2
+  exit 1
+fi
+
 # Machine format: SEVERITY|TYPE|CODE|FILE|LINE|COLUMN|LENGTH|MESSAGE.
 # `dart analyze` exits 0-3 when it ran: 0 no issues, 1 infos, 2 warnings,
 # 3 errors. Anything else (64 usage, 70 a crash, ...) means it didn't analyze,

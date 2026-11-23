@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import 'package:build/build.dart';
+import 'package:pub_semver/pub_semver.dart';
 
 import 'src/parser.dart';
 import 'src/builder.dart' as codegen_builder;
@@ -45,7 +46,15 @@ class _BlocksCodegenBuilder extends Builder {
     for (final w in codegenModel.warnings) {
       log.warning(w);
     }
-    final output = const DartCodeGenerator().generate(codegenModel);
+    // Format for the language version of the package being built, which is
+    // the one `dart format` formats the output at.
+    final packageConfig = await buildStep.packageConfig;
+    final version = packageConfig[inputId.package]?.languageVersion;
+    final output = DartCodeGenerator(
+      languageVersion: version == null
+          ? null
+          : Version(version.major, version.minor, 0),
+    ).generate(codegenModel);
 
     // .spec.json → .blocks.dart (strip both extensions)
     final path = inputId.path;
