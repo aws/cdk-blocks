@@ -13,7 +13,7 @@ import {
 	CDN_INVALIDATION_BASE_PATH_ENV,
 	CDN_INVALIDATION_HANDLER_NAME,
 	CDN_INVALIDATION_PARAM_ENV,
-	MAX_INVALIDATION_PATHS,
+	MAX_WILDCARD_PATHS,
 	cacheKeyToPagePath,
 	createCdnInvalidationHandler,
 	toInvalidationPaths,
@@ -23,6 +23,7 @@ import { CDN_INVALIDATION_BUNDLE_FILE } from './shared/cdn_invalidation_env.js';
 import { spawn } from './spawn.js';
 
 const HASH = 'a'.repeat(64);
+type InvalidateTags = (tags: string[]) => Promise<void>;
 const PAGE_KEY = `route-cache/APP_PAGE/${'3'.repeat(64)}/$/isr-tag`;
 
 /** A handler wired to fakes, recording every invalidation it issues. */
@@ -122,13 +123,19 @@ void describe('toInvalidationPaths', () => {
 		assert.deepStrictEqual(toInvalidationPaths([{ path: '/users/~bob', pagesRouter: false }]), ['/users/*']);
 	});
 
-	void it(`collapses more than ${MAX_INVALIDATION_PATHS} paths into one /*`, () => {
-		const pages = Array.from({ length: MAX_INVALIDATION_PATHS + 1 }, (_, i) => ({
-			path: `/p${i}`,
-			pagesRouter: false,
-		}));
-		assert.deepStrictEqual(toInvalidationPaths(pages), ['/*']);
-		assert.deepStrictEqual(toInvalidationPaths(pages, { basePath: '/docs/' }), ['/docs*']);
+	void it(`collapses more than ${MAX_WILDCARD_PATHS} wildcard paths into one /*`, () => {
+		const pages = (n: number) => Array.from({ length: n }, (_, i) => ({ path: `/p${i}`, pagesRouter: false }));
+		// CloudFront allows 15 wildcard paths in progress per account (not adjustable).
+		assert.strictEqual(MAX_WILDCARD_PATHS, 15);
+		assert.strictEqual(toInvalidationPaths(pages(MAX_WILDCARD_PATHS)).length, MAX_WILDCARD_PATHS);
+		assert.deepStrictEqual(toInvalidationPaths(pages(MAX_WILDCARD_PATHS + 1)), ['/*']);
+		assert.deepStrictEqual(toInvalidationPaths(pages(MAX_WILDCARD_PATHS + 1), { basePath: '/docs/' }), ['/docs*']);
+		// A Pages Router page takes two wildcard paths (the page and its data route).
+		const pagesRouter = Array.from({ length: 8 }, (_, i) => ({ path: `/p${i}`, pagesRouter: true }));
+		assert.deepStrictEqual(toInvalidationPaths(pagesRouter, { buildId: 'b1' }), ['/*']);
+		// The exact root paths don't count against the wildcard cap.
+		const withRoot = [{ path: '/', pagesRouter: false }, ...pages(MAX_WILDCARD_PATHS)];
+		assert.strictEqual(toInvalidationPaths(withRoot, { basePath: '/docs' }).length, MAX_WILDCARD_PATHS + 2);
 	});
 });
 
@@ -148,11 +155,13 @@ void describe('createCdnInvalidationHandler', () => {
 		});
 		await handler.invalidateTags(['_N_T_/isr']);
 		await handler.invalidateTags(['_N_T_/never-cached']);
+		// Next 16 tags the root as both `_N_T_/` and `_N_T_/index`: one exact `/`.
+		await handler.invalidateTags(['_N_T_/', '_N_T_/index']);
 		// A layout or `page` segment tag names no URL of its own.
 		await handler.invalidateTags(['_N_T_/blog/[slug]/page']);
 		assert.deepStrictEqual(
 			calls.map((c) => c.paths),
-			[['/isr*'], ['/never-cached*']],
+			[['/isr*'], ['/never-cached*'], ['/']],
 		);
 	});
 
@@ -240,6 +249,46 @@ void describe('createCdnInvalidationHandler', () => {
 		const { handler, calls } = fakeHandler({ byTag: { kb: [HASH, `["b1","${'c'.repeat(42)}",[]]`] } });
 		await handler.invalidateTags(['kb']);
 		assert.strictEqual(calls.length, 0);
+	});
+
+	void it('falls back to one /* when CloudFront has too many invalidations in progress', async () => {
+		const calls: string[][] = [];
+		const handler = createCdnInvalidationHandler({
+			env: { [CDN_INVALIDATION_PARAM_ENV]: 'p', [CDN_INVALIDATION_BASE_PATH_ENV]: '/docs' },
+			createInvalidation: async (_id, paths) => {
+				calls.push(paths);
+				if (paths.length > 1) {
+					throw Object.assign(new Error('Your request contains too many invalidations.'), {
+						name: 'TooManyInvalidationsInProgress',
+					});
+				}
+			},
+			readDistributionId: async () => 'E1',
+			tagCache: () => ({ getByTag: async () => [PAGE_KEY, `route-cache/APP_PAGE/${HASH}/$/other`] }),
+		});
+		await handler.invalidateTags(['kb']);
+		assert.deepStrictEqual(calls, [['/docs/isr-tag*', '/docs/other*'], ['/docs*']]);
+	});
+
+	void it('does not retry a single-path invalidation or another error', async () => {
+		const tooMany = Object.assign(new Error('too many'), { name: 'TooManyInvalidationsInProgress' });
+		for (const [keys, error] of [
+			[[PAGE_KEY], tooMany],
+			[[PAGE_KEY, `route-cache/APP_PAGE/${HASH}/$/other`], new Error('AccessDenied')],
+		] as const) {
+			const calls: string[][] = [];
+			const handler = createCdnInvalidationHandler({
+				env: { [CDN_INVALIDATION_PARAM_ENV]: 'p' },
+				createInvalidation: async (_id, paths) => {
+					calls.push(paths);
+					throw error;
+				},
+				readDistributionId: async () => 'E1',
+				tagCache: () => ({ getByTag: async () => [...keys] }),
+			});
+			await assert.rejects(handler.invalidateTags(['kb']), error);
+			assert.strictEqual(calls.length, 1);
+		}
 	});
 
 	void it('retries a failed distribution lookup on the next revalidation', async () => {
@@ -358,6 +407,8 @@ void describe('nextjsAdapter — CloudFront invalidation on on-demand revalidati
 		const manifest = nextjsAdapter({ projectDir: tmpDir });
 		assert.match(configDuringBuild ?? '', /cdnInvalidation: async \(\) =>/);
 		assert.doesNotMatch(configDuringBuild ?? '', /^import /m, 'no static import: OpenNext keeps imports external');
+		// `next build` type-checks root `*.ts` files; `import.meta` fails under `module: commonjs`.
+		assert.match(configDuringBuild ?? '', /^\/\/ @ts-nocheck\n/);
 		assert.ok(fs.existsSync(path.join(serverDir(), CDN_INVALIDATION_BUNDLE_FILE)), 'the handler bundle ships');
 		assert.strictEqual(manifest.cache?.cdnInvalidation, true);
 	});
@@ -373,13 +424,14 @@ void describe('nextjsAdapter — CloudFront invalidation on on-demand revalidati
 			const config = (await import(pathToFileURL(path.join(lambdaDir, 'open-next.config.mjs')).href)) as {
 				default: {
 					default: {
-						override: { cdnInvalidation: () => Promise<{ name: string; invalidateTags: unknown }> };
+						override: { cdnInvalidation: () => Promise<{ name: string; invalidateTags: InvalidateTags }> };
 					};
 				};
 			};
 			const resolved = await config.default.default.override.cdnInvalidation();
 			assert.strictEqual(resolved.name, CDN_INVALIDATION_HANDLER_NAME);
-			assert.strictEqual(typeof resolved.invalidateTags, 'function');
+			// Runs the import of the bundle (a no-op without the distribution parameter).
+			await resolved.invalidateTags(['kb']);
 		} finally {
 			fs.rmSync(lambdaDir, { recursive: true, force: true });
 		}

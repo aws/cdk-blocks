@@ -1260,9 +1260,13 @@ the distribution after each on-demand revalidation:
   variants keep their cached copy until their `s-maxage` runs out.
 - A Pages Router page also gets its data route
   (`/_next/data/<build id>/blog/hello.json*`).
-- With a `basePath` the paths are prefixed with it. A revalidation that touches
-  more than 50 pages issues a single `/*` (`<basePath>*` with a `basePath`)
-  instead.
+- With a `basePath` the paths are prefixed with it.
+- CloudFront allows 15 wildcard paths in progress per account at once. A
+  revalidation that needs more than 15 (16 App Router pages, or 8 Pages Router
+  pages with their data routes) issues a single `/*` (`<basePath>*` with a
+  `basePath`) instead. If CloudFront rejects a request because other
+  invalidations are still in progress, the server retries once with that
+  single `/*`.
 
 Each revalidation issues one CloudFront invalidation request. CloudFront allows
 1,000 invalidation paths a month at no charge and bills each path after that

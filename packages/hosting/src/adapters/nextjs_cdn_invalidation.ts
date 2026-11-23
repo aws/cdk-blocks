@@ -43,11 +43,15 @@ import {
 export { CDN_INVALIDATION_BASE_PATH_ENV, CDN_INVALIDATION_HANDLER_NAME, CDN_INVALIDATION_PARAM_ENV };
 
 /**
- * Above this many paths in one revalidation, a single `/*` invalidation is
- * issued instead (one path, no per-path charge, and well inside CloudFront's
- * in-progress invalidation limits).
+ * Above this many wildcard paths in one revalidation, a single `/*`
+ * (`<basePath>*`) invalidation is issued instead. CloudFront allows at most 15
+ * wildcard paths in progress per account at once (the "File invalidation:
+ * maximum number of active wildcard invalidations allowed" quota, not
+ * adjustable) and rejects a request past it with
+ * `TooManyInvalidationsInProgress`. Every page path is a wildcard (see
+ * `wildcardPath`); only the exact root paths don't count.
  */
-export const MAX_INVALIDATION_PATHS = 50;
+export const MAX_WILDCARD_PATHS = 15;
 
 /** OpenNext's soft (implicit, path-derived) tag prefix. */
 const SOFT_TAG_PREFIX = '_N_T_/';
@@ -139,7 +143,8 @@ function softTagPath(tag: string): string | undefined {
 	if (!tag.startsWith(SOFT_TAG_PREFIX)) return undefined;
 	const path = `/${tag.slice(SOFT_TAG_PREFIX.length)}`.replace(/\/+$/, '') || '/';
 	if (/\/(layout|page|route)$/.test(path) || path === '/layout' || path.includes('[')) return undefined;
-	return path;
+	// Next 16 tags the root page as both `_N_T_/` and `_N_T_/index`.
+	return denormalizePagePath(path);
 }
 
 /**
@@ -191,7 +196,7 @@ function decodeSafely(segment: string): string {
  * Turn page paths into CloudFront invalidation paths: the `basePath` prefix,
  * the Pages Router data route next to a Pages Router page, deduplicated, and
  * collapsed to a single `/*` (`<basePath>*` with a `basePath`) past
- * {@link MAX_INVALIDATION_PATHS}.
+ * {@link MAX_WILDCARD_PATHS} wildcard paths.
  *
  * Each page path ends in `*` (see `wildcardPath`), so it covers the page's
  * query-string variants and its trailing-slash form. The same path covers the
@@ -231,8 +236,18 @@ export function toInvalidationPaths(
 		}
 	}
 	if (out.size === 0) return [];
-	if (out.size > MAX_INVALIDATION_PATHS) return [base ? `${encodePath(base)}*` : '/*'];
+	if ([...out].filter((p) => p.endsWith('*')).length > MAX_WILDCARD_PATHS) return [broadestPath(base)];
 	return [...out];
+}
+
+/** The one wildcard path covering every page of the app: `/*`, or `<basePath>*`. */
+function broadestPath(base: string): string {
+	return base ? `${encodePath(base)}*` : '/*';
+}
+
+/** Whether CloudFront rejected an invalidation for its in-progress quota. */
+function isTooManyInvalidations(e: unknown): boolean {
+	return e instanceof Error && e.name === 'TooManyInvalidationsInProgress';
 }
 
 /**
@@ -301,7 +316,18 @@ export function createCdnInvalidationHandler(deps: CdnInvalidationDeps = {}): Cd
 			distributionId = undefined;
 			throw e;
 		});
-		await createInvalidation(await distributionId, paths);
+		const id = await distributionId;
+		try {
+			await createInvalidation(id, paths);
+		} catch (e) {
+			// Past CloudFront's in-progress quota (another revalidation's wildcard
+			// paths still running): one `/*` needs a single slot. A single path
+			// already needs only one, so it isn't retried.
+			if (!isTooManyInvalidations(e) || paths.length <= 1) throw e;
+			await createInvalidation(id, [
+				broadestPath((env[CDN_INVALIDATION_BASE_PATH_ENV] ?? '').replace(/\/+$/, '')),
+			]);
+		}
 	};
 
 	return {
