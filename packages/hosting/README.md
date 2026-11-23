@@ -240,19 +240,32 @@ both (`HttpErrorStatusErrorPagesError`, naming the namespaces and the mapped
 codes). Remove the 4xx error pages (`errorPages.notFound`, a build's own 404
 page), or leave `httpErrorStatus` off for those namespaces.
 
-For an app with a server, the CloudFront door replaces 5xx bodies only where
-CloudFront generates them. Per status:
+For an app with a server, the CloudFront door maps only 502 and 504 to the
+built-in page; every other 5xx reaches the client as CloudFront receives or
+generates it. CloudFront error responses apply to every path, the API
+included. Per status:
 
 | Status | Response |
 |---|---|
-| 500 | The server's own response (an API route's JSON error, the framework's error page). With `errorPages.serverError`, that page instead, on every path, the API included |
-| 501, 503 | The server's own response |
-| 502, 504 | The built-in "Service Temporarily Unavailable" page. CloudFront answers these when the server function fails, returns an invalid response or times out, so there is no body of the app's to keep |
+| 500 | Usually the server's own response (an API route's JSON error, the framework's error page). A 500 that API Gateway answers in front of the server passes through as well: when Lambda rejects the invocation (for example because the function is throttled), the client gets the gateway's `{"message": "Internal server error"}` JSON. With `errorPages.serverError`, that page instead, on every path |
+| 501, 503 | The server's own response. A 503 that CloudFront generates itself (a CloudFront Function or Lambda@Edge execution error or limit, on the router, the middleware or a `runtime: 'edge'` route) carries CloudFront's default error body |
+| 502, 504 | The built-in "Service Temporarily Unavailable" page, which CloudFront also uses when the server function fails, returns an invalid response or times out. A 502 or 504 body that the server or the backend sends itself is replaced too, for example the backend's `HandlerTimeoutError` RPC response, which then reaches the client without its name |
 
 None of these responses are cached (see the error caching note under
 [SSR caching & cache-key credentials](#ssr-caching--cache-key-credentials)).
 An app without a server maps 500, 502, 503 and 504 to `errorPages.serverError`
 when it sets one.
+
+Through `Hosting` (`@aws-cdk-blocks/core`), `errorPages` is not used when the
+framework build ships error pages of its own (for example an Astro or
+SvelteKit build with a prerendered `404.html`): the build's pages apply
+instead. On the CloudFront door, an app with a server then maps no 500, and a
+static app maps 500 only to the build's own `500.html`.
+
+The stacked door, and a bring-your-own door that uses `cf.errorPages`, map
+every 500 to the app's page instead: `errorPages.serverError`, else a
+`500.html` the framework build ships. A server's 500 body, an API route's
+JSON error included, then reaches the client as that page.
 
 ### Settings per door kind
 
