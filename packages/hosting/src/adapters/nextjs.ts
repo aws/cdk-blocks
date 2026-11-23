@@ -1606,6 +1606,26 @@ const warnIfNextOutsideOpenNextPeerRange = (
 const DROP_CONTENT_LENGTH_MARKER = '/*hosting:drop-content-length*/';
 
 /**
+ * Expression that replaces the wrapper's `acceptEncoding.includes("gzip")`:
+ * true when one of the comma-separated codings is `gzip` (any case) with no
+ * q-value or a q-value above 0, so `identity, gzip;q=0` is not read as
+ * accepting gzip. Called on the receiver as an arrow function.
+ */
+const ACCEPTS_GZIP_FN =
+  '/*hosting:accepts-gzip*/(s=>String(s??"").split(",").some(p=>{let[t,...r]=p.split(";");' +
+  'if(t.trim().toLowerCase()!=="gzip")return!1;let q=r.map(x=>x.trim().toLowerCase()).find(x=>x.startsWith("q="));' +
+  'return!q||parseFloat(q.slice(2))>0}))';
+
+/**
+ * Expression that adds `Accept-Encoding` to a prelude's `vary` header once (a
+ * `*` already covers it), folding a `Vary` key into `vary`. Called on the
+ * prelude's headers object as an arrow function.
+ */
+const VARY_ACCEPT_ENCODING_FN =
+  '(h=>{let v=h.vary??h.Vary;delete h.Vary;h.vary=v==null||v===""?"Accept-Encoding"' +
+  ':/(^|,)\\s*(\\*|accept-encoding)\\s*(,|$)/i.test(String(v))?v:String(v)+", Accept-Encoding"})';
+
+/**
  * Patch OpenNext's bundled `aws-lambda-streaming` wrapper for API Gateway
  * STREAM framing. Three changes to <projectDir>/.open-next/server-functions/
  * default/index.mjs:
@@ -1625,7 +1645,10 @@ const DROP_CONTENT_LENGTH_MARKER = '/*hosting:drop-content-length*/';
  *      streaming responsive on every verified OpenNext version. Deflate is
  *      never forwarded by CloudFront.
  *   3. Drop the app's `content-length` from a compressed response's headers
- *      (a prerendered or cached page carries the uncompressed length).
+ *      (a prerendered or cached page carries the uncompressed length), and
+ *      add `Accept-Encoding` to every response's `vary`, so a shared cache in
+ *      front of the API Gateway REST door keys on it too.
+ *   4. Make the gzip check honour q-values (`gzip;q=0` refuses gzip).
  * Idempotent.
  * @internal
  */
@@ -1699,9 +1722,18 @@ export const patchStreamingWrapperForApiGateway = (
         src = src.replace(
           encodingHeaderRe,
           (_m, prelude: string, encoding: string) =>
-            `(${DROP_CONTENT_LENGTH_MARKER}${encoding}!=="identity"&&(delete ${prelude}.headers["content-length"],delete ${prelude}.headers["Content-Length"]),${prelude}.headers["content-encoding"]=${encoding})`,
+            `(${DROP_CONTENT_LENGTH_MARKER}${encoding}!=="identity"&&(delete ${prelude}.headers["content-length"],delete ${prelude}.headers["Content-Length"]),${VARY_ACCEPT_ENCODING_FN}(${prelude}.headers),${prelude}.headers["content-encoding"]=${encoding})`,
         );
         patches++;
+        // The upstream gzip check is a substring test, which reads
+        // `gzip;q=0` as accepting gzip. Replace it with one that honours
+        // q-values. Only a bare identifier receiver is rewritten; a member
+        // chain (`a.b.includes("gzip")`) keeps the substring test.
+        const gzipCheckRe = /(?<![\w$.])([A-Za-z_$][\w$]*)\.includes\("gzip"\)/g;
+        if (gzipCheckRe.test(src)) {
+          src = src.replace(gzipCheckRe, (_m, receiver: string) => `${ACCEPTS_GZIP_FN}(${receiver})`);
+          patches++;
+        }
       } else if (/\.includes\("gzip"\)/.test(src)) {
         // Can't make gzip safe: keep the wrapper uncompressed instead.
         src = src.replace(/\.includes\("gzip"\)/g, '.includes("__hosting_no_gzip__")');

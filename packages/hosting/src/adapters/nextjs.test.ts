@@ -1163,7 +1163,7 @@ void describe('patchStreamingWrapperForApiGateway — brittleness gating', () =>
         new RegExp(`\\.includes\\("__hosting_no_${algo}__"\\)`),
       );
     }
-    assert.match(post, /\.includes\("gzip"\)/);
+    assert.match(post, /\/\*hosting:accepts-gzip\*\/.*\(acceptEncoding\)/);
     assert.doesNotMatch(post, /__hosting_no_gzip__/);
     // Snapshot: re-running the patcher against the post-patch bundle must
     // be a no-op (the regexes don't match anymore) — proves the patcher
@@ -1294,7 +1294,13 @@ void describe('patchStreamingWrapperForApiGateway — response compression', () 
       const payload = raw.subarray(preludeEnd + 8);
       const encoding = prelude.headers['content-encoding'];
       const body = encoding === 'gzip' ? zlib.gunzipSync(payload).toString('utf-8') : payload.toString('utf-8');
-      return { encoding, contentLength: prelude.headers['content-length'], payloadBytes: payload.length, body };
+      return {
+        encoding,
+        contentLength: prelude.headers['content-length'],
+        vary: prelude.headers.vary,
+        payloadBytes: payload.length,
+        body,
+      };
     } finally {
       fs.rmSync(tmp, { recursive: true, force: true });
     }
@@ -1336,6 +1342,34 @@ void describe('patchStreamingWrapperForApiGateway — response compression', () 
     assert.strictEqual(res.payloadBytes, HTML.length);
   });
 
+  // The upstream check is a substring test, which reads `gzip;q=0` as
+  // accepting gzip.
+  void it('sends the body uncompressed when the client refuses gzip with q=0', async () => {
+    const res = await invoke('identity, gzip;q=0');
+    assert.strictEqual(res.encoding, 'identity');
+    assert.strictEqual(res.body, HTML);
+  });
+
+  void it('gzips the stream when the client gives gzip a non-zero q-value', async () => {
+    const res = await invoke('identity;q=1, GZIP ; q=0.5');
+    assert.strictEqual(res.encoding, 'gzip');
+    assert.strictEqual(res.body, HTML);
+  });
+
+  // The encoding depends on the request's Accept-Encoding, so a shared cache in
+  // front of the door (a custom domain's CDN) needs Vary to key on it.
+  void it('adds Vary: Accept-Encoding to compressed and uncompressed responses', async () => {
+    assert.strictEqual((await invoke('gzip')).vary, 'Accept-Encoding');
+    assert.strictEqual((await invoke('')).vary, 'Accept-Encoding');
+  });
+
+  void it("appends Accept-Encoding to the app's Vary once", async () => {
+    const appended = await invoke('gzip', { vary: 'RSC, Next-Router-State-Tree' });
+    assert.strictEqual(appended.vary, 'RSC, Next-Router-State-Tree, Accept-Encoding');
+    const kept = await invoke('gzip', { Vary: 'rsc, accept-encoding' });
+    assert.strictEqual(kept.vary, 'rsc, accept-encoding');
+  });
+
   void it('patches the minified 4.x wrapper shape', () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'hosting-patch-min-'));
     try {
@@ -1349,7 +1383,7 @@ void describe('patchStreamingWrapperForApiGateway — response compression', () 
       );
       patchStreamingWrapperForApiGateway(tmp);
       const post = fs.readFileSync(bundle, 'utf-8');
-      assert.match(post, /i\.includes\("gzip"\)\?\(a="gzip"/);
+      assert.match(post, /\/\*hosting:accepts-gzip\*\/.*\(i\)\?\(a="gzip"/);
       assert.match(post, /a!=="identity"&&\(delete C\.headers\["content-length"\]/);
       // Still valid JavaScript after the rewrite.
       assert.doesNotThrow(() => new Function('i', 'o', '$i', post));
