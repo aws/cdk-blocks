@@ -462,7 +462,9 @@ when its host is in the manifest's image allowlist
 `'none'` publishes the build to its own public S3 website bucket, at the root.
 Each deploy prunes what the build no longer ships (a removed `*.map` stops being
 downloadable), and uploads with the same cache tiers as the other doors (hashed
-assets immutable, HTML and the rest revalidated). Pruning includes the previous
+assets immutable, HTML and the rest revalidated), except that HTML keeps
+`no-cache, no-store, must-revalidate` (see
+[Cache-Control on uploaded files](#cache-control-on-uploaded-files)). Pruning includes the previous
 build's hashed assets: a tab opened before a deploy that then lazy-loads one of
 its chunks gets a 404 (the website's error document) and needs a reload. The page is plain HTTP and the
 API is cross-site, so an auth Building Block needs `crossDomain: true`; its
