@@ -290,6 +290,11 @@ const CASES: Record<string, Case> = {
   'raw route out-of-range status': { method: 'GET', path: '/bad-status' },
   'raw route with the wrong method falls through to the frontend': { method: 'DELETE', path: '/users/1' },
   'unknown path falls through to the frontend': { method: 'GET', path: '/not-a-route' },
+  // API Gateway refuses a path with malformed percent-encoding with a 400 before
+  // the Lambda runs, so the handler never sees the undecodable value.
+  'raw route param with malformed percent-encoding': { method: 'GET', path: '/users/%E0%A4%A' },
+  'raw route wildcard with malformed percent-encoding': { method: 'GET', path: '/files/a/%E0%A4%A' },
+  'RPC namespace with malformed percent-encoding': rpc(rpcBody('api.echo', ['hi']), {}, '/cdk-blocks/api/%E0%A4%A'),
   'runtime config endpoint': { method: 'GET', path: '/.blocks-sandbox/config.json' },
 };
 
@@ -1197,10 +1202,11 @@ const EXPECTED: Record<string, unknown> = {
       "access-control-allow-methods": "GET, POST, PUT, DELETE, PATCH, HEAD, OPTIONS",
       "access-control-allow-origin": "http://localhost:<port>",
       "access-control-max-age": "7200",
+      "content-type": "application/json",
       "vary": "Origin"
     },
     "cookies": [],
-    "body": ""
+    "body": "{\"error\":\"Not Found\"}"
   },
   "unknown path falls through to the frontend": {
     "status": 404,
@@ -1210,10 +1216,53 @@ const EXPECTED: Record<string, unknown> = {
       "access-control-allow-methods": "GET, POST, PUT, DELETE, PATCH, HEAD, OPTIONS",
       "access-control-allow-origin": "http://localhost:<port>",
       "access-control-max-age": "7200",
+      "content-type": "application/json",
       "vary": "Origin"
     },
     "cookies": [],
-    "body": ""
+    "body": "{\"error\":\"Not Found\"}"
+  },
+  "raw route param with malformed percent-encoding": {
+    "status": 400,
+    "headers": {
+      "access-control-allow-credentials": "true",
+      "access-control-allow-headers": "Content-Type, Authorization, x-blocks-user-agent",
+      "access-control-allow-methods": "GET, POST, PUT, DELETE, PATCH, HEAD, OPTIONS",
+      "access-control-allow-origin": "http://localhost:<port>",
+      "access-control-max-age": "7200",
+      "content-type": "application/json",
+      "vary": "Origin"
+    },
+    "cookies": [],
+    "body": "{\"error\":\"Bad Request\"}"
+  },
+  "raw route wildcard with malformed percent-encoding": {
+    "status": 400,
+    "headers": {
+      "access-control-allow-credentials": "true",
+      "access-control-allow-headers": "Content-Type, Authorization, x-blocks-user-agent",
+      "access-control-allow-methods": "GET, POST, PUT, DELETE, PATCH, HEAD, OPTIONS",
+      "access-control-allow-origin": "http://localhost:<port>",
+      "access-control-max-age": "7200",
+      "content-type": "application/json",
+      "vary": "Origin"
+    },
+    "cookies": [],
+    "body": "{\"error\":\"Bad Request\"}"
+  },
+  "RPC namespace with malformed percent-encoding": {
+    "status": 400,
+    "headers": {
+      "access-control-allow-credentials": "true",
+      "access-control-allow-headers": "Content-Type, Authorization, x-blocks-user-agent",
+      "access-control-allow-methods": "GET, POST, PUT, DELETE, PATCH, HEAD, OPTIONS",
+      "access-control-allow-origin": "http://localhost:<port>",
+      "access-control-max-age": "7200",
+      "content-type": "application/json",
+      "vary": "Origin"
+    },
+    "cookies": [],
+    "body": "{\"error\":\"Bad Request\"}"
   },
   "runtime config endpoint": {
     "status": 200,

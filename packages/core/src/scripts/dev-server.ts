@@ -1454,6 +1454,14 @@ export async function startDevServer(options: DevServerOptions) {
 
     // ── API/RawRoute requests ──────────────────────────────────────────
     if (isApiRequest(method, url.pathname)) {
+      // API Gateway answers a path with malformed percent-encoding with a 400
+      // before the Lambda runs. Do the same here, so a handler never receives
+      // the undecodable text as if it were a literal parameter value.
+      if (hasMalformedPercentEncoding(url.pathname)) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Bad Request' }));
+        return;
+      }
       if (isSandbox && apiProxy) {
         // The dispatcher and handleApiRequest apply the Origin and Content-Type
         // checks to local requests; a request proxied to the sandbox API gets
@@ -1470,8 +1478,10 @@ export async function startDevServer(options: DevServerOptions) {
     if (frontendProxy) {
       frontendProxy.web(req, res);
     } else {
-      res.writeHead(404);
-      res.end();
+      // No frontend and no matching route: answer with the same JSON 404 the
+      // deployed dispatcher gives an unmatched request (see dispatch.ts).
+      res.writeHead(404, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Not Found' }));
     }
   });
 
@@ -2287,6 +2297,20 @@ function unsupportedMediaTypeResponse(): string {
     null,
     { name: 'UnsupportedMediaType' },
   );
+}
+
+/**
+ * Whether `pathname` holds a `%` escape that doesn't decode to valid UTF-8
+ * (e.g. `/users/%E0%A4%A`). API Gateway refuses such a request with a 400
+ * before it reaches the Lambda, so the dev server refuses it too.
+ */
+function hasMalformedPercentEncoding(pathname: string): boolean {
+  try {
+    decodeURIComponent(pathname);
+    return false;
+  } catch {
+    return true;
+  }
 }
 
 /**
