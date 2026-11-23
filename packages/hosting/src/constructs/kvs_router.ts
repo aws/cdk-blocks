@@ -26,6 +26,7 @@
  */
 import type { DeployManifest } from '../manifest/types.js';
 import { HostingError } from '../hosting_error.js';
+import { VIEWER_IP_JS } from './forwarded_headers.js';
 import { buildHostingPlan } from '../plan/hosting-plan.js';
 import { toTerseRows } from '../plan/route-table.js';
 import type { HostingPlan } from '../plan/types.js';
@@ -740,11 +741,12 @@ ${
     cf.selectRequestOriginById(meta.oImg);
     return request;
   }
-  // 4b. compute/server origin — keep URI, set x-forwarded-host, select server.
+  // 4b. compute/server origin — keep URI, set x-forwarded-host + viewer IP, select server.
   if (kind === 'c') {
     cf.selectRequestOriginById(meta.oSrv);
     var host = request.headers.host ? request.headers.host.value : undefined;
     if (host) { request.headers['x-forwarded-host'] = { value: host }; }
+    ${VIEWER_IP_JS}
     return request;
   }
   // 4c. static origin (S3): basePath strip → directory-index/SPA → build-id

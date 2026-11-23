@@ -892,9 +892,10 @@ const buildManifest = (input: {
         // getClientAddress() from X-Forwarded-For, not the socket (the Lambda
         // Web Adapter's or the Web Function proxy's loopback/link-local peer).
         // Depth 1 is the right-most entry: behind a built-in door Hosting
-        // rewrites the header to the client address the door appended (see
-        // the hosting construct's forwarded headers), and elsewhere the
-        // right-most entry is still the nearest proxy's, never the client's.
+        // rewrites the header to the single client address the door set (see
+        // the hosting construct's forwarded headers). Where requests aren't
+        // rewritten (a bring-your-own door, 'none', no SSR cache guard), the
+        // hosting construct removes these two, so the socket is read instead.
         ADDRESS_HEADER: 'x-forwarded-for',
         XFF_DEPTH: '1',
         // adapter-node's default is 512 KB, which silently 413s file uploads.

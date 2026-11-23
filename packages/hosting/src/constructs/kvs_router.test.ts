@@ -51,6 +51,7 @@ async function runRequestFn(
   code: string,
   entries: Record<string, string>,
   request: Record<string, unknown>,
+  viewer?: { ip: string },
 ): Promise<{ output: any; selectedOrigin: string | null }> {
   let selectedOrigin: string | null = null;
   const cf = {
@@ -74,7 +75,7 @@ async function runRequestFn(
     `${body}\nreturn handler;`,
   );
   const handler = factory(cf, { createHash });
-  const output = await handler({ request });
+  const output = await handler(viewer ? { request, viewer } : { request });
   return { output, selectedOrigin };
 }
 
@@ -1324,6 +1325,15 @@ void describe('request fn — G6 compute origin sets x-forwarded-host', () => {
     assert.equal(selectedOrigin, ORIGIN_ID.server);
     assert.equal(output.uri, '/api/users'); // unchanged, no build-id prefix
     assert.equal(output.headers['x-forwarded-host'].value, 'example.com');
+  });
+  void it('sets the viewer address over a client-sent x-blocks-viewer-ip', async () => {
+    const { output } = await runRequestFn(
+      reqCode,
+      entries,
+      { ...req('/api/users'), headers: { host: { value: 'example.com' }, 'x-blocks-viewer-ip': { value: '6.6.6.6' } } },
+      { ip: '203.0.113.10' },
+    );
+    assert.equal(output.headers['x-blocks-viewer-ip'].value, '203.0.113.10');
   });
 });
 
