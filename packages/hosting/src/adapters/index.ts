@@ -9,7 +9,7 @@ import { nextjsAdapter } from './nextjs.js';
 import { nitroAdapter } from './nitro.js';
 import { nuxtAdapter } from './nuxt.js';
 import { astroAdapter } from './astro.js';
-import { assertSvelteKitVersion, sveltekitAdapter } from './sveltekit.js';
+import { preflightSvelteKitVersion, sveltekitAdapter } from './sveltekit.js';
 import type { DeployManifest } from '../manifest/types.js';
 
 export { spaAdapter } from './spa.js';
@@ -79,7 +79,7 @@ const adapterRegistry = new Map<string, AdapterRegistryEntry>([
     'sveltekit',
     {
       adapter: (projectDir: string) => sveltekitAdapter({ projectDir }),
-      preflight: assertSvelteKitVersion,
+      preflight: preflightSvelteKitVersion,
     },
   ],
   ['spa', { adapter: spaAdapter }],
@@ -92,7 +92,8 @@ const adapterRegistry = new Map<string, AdapterRegistryEntry>([
  * checks and writes nothing, so call it before running the app's build:
  * otherwise the user waits for a full build that the adapter then refuses.
  * Unknown frameworks and frameworks with no such check pass through (the
- * adapter itself reports anything else).
+ * adapter itself reports anything else), and so does a framework package
+ * that is not installed yet, since the app's build command may install it.
  * @param framework - the framework type (as passed to {@link getAdapter})
  * @param projectDir - absolute path to the project root
  * @throws HostingError e.g. `UnsupportedSvelteKitVersionError`

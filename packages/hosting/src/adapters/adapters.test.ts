@@ -305,6 +305,12 @@ void describe('assertFrameworkSupported', () => {
     assert.doesNotThrow(() => assertFrameworkSupported('sveltekit', tmp));
   });
 
+  void it('leaves a SvelteKit project that does not have @sveltejs/kit installed yet to the build', () => {
+    // A buildCommand may install dependencies; the adapter checks again after it.
+    writePackageJson(tmp, { devDependencies: { '@sveltejs/kit': '^2.15.0' } });
+    assert.doesNotThrow(() => assertFrameworkSupported('sveltekit', tmp));
+  });
+
   void it('does nothing for a framework without a version check', () => {
     writePackageJson(tmp, { dependencies: { react: '^18.0.0' } });
     assert.doesNotThrow(() => assertFrameworkSupported('spa', tmp));

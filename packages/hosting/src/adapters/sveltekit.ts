@@ -258,10 +258,25 @@ export const sveltekitAdapter = (
 const SVELTEKIT_3_ISSUE_URL = 'https://github.com/aws/cdk-blocks/issues/984';
 
 /**
+ * The build-free check core `Hosting` runs (through `assertFrameworkSupported`)
+ * before the app's `buildCommand`: refuse an installed `@sveltejs/kit` outside
+ * {@link VERIFIED_SVELTEKIT_RANGE}, and pass when it is not installed yet,
+ * because the `buildCommand` may install it. The adapter runs the full
+ * {@link assertSvelteKitVersion} after the build, which refuses a missing
+ * install. Writes nothing.
+ * @param projectDir - absolute path to the SvelteKit project root
+ */
+export const preflightSvelteKitVersion = (projectDir: string): void => {
+  if (!getProjectPackageInfo('@sveltejs/kit', projectDir)?.version) return;
+  assertSvelteKitVersion(projectDir);
+};
+
+/**
  * Throw `UnsupportedSvelteKitVersionError` unless the installed `@sveltejs/kit`
  * is within {@link VERIFIED_SVELTEKIT_RANGE}. Reads the installed version (not
  * the `package.json` range) and writes nothing, so it is safe to call before
- * any build: core `Hosting` calls it (through `assertFrameworkSupported`)
+ * any build: core `Hosting` calls it (through `assertFrameworkSupported` and
+ * {@link preflightSvelteKitVersion}, which skips a not-yet-installed kit)
  * before it runs the app's `buildCommand`, and the adapter calls it again
  * before its own build.
  * @param projectDir - absolute path to the SvelteKit project root
