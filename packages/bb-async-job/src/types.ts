@@ -192,7 +192,7 @@ export interface WaitUntilCompleteOptions {
  */
 export interface SubmitOptions {
 	/**
-	 * Delay before the job becomes visible for processing. 0–900 seconds. Default: 0.
+	 * Delay before the job becomes visible for processing, in seconds. Default: 0.
 	 *
 	 * Must be an integer from 0 to 900 (the range Amazon SQS accepts); any other
 	 * value is rejected with `AsyncJobErrors.ValidationFailed` before anything is queued.

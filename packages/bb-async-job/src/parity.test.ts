@@ -36,6 +36,9 @@ async function outcomeOf(fn: () => Promise<unknown>): Promise<Outcome> {
 	}
 }
 
+/** `pad` lets a case build a payload over the 256 KB limit. */
+type Payload = { n: number; pad?: string };
+
 interface SentInput {
 	QueueUrl?: string;
 	DelaySeconds?: number;
@@ -44,7 +47,7 @@ interface SentInput {
 
 /** An AWS-runtime AsyncJob whose SQS client records every command and succeeds. */
 function makeAwsJob() {
-	const job = new AwsAsyncJob<{ n: number }>(new Scope('app'), uniqueId(), { handler: async () => {} });
+	const job = new AwsAsyncJob<Payload>(new Scope('app'), uniqueId(), { handler: async () => {} });
 	registerSdkIdentifiers(job.fullId, { queueUrl: QUEUE_URL });
 	const inputs: SentInput[] = [];
 	// Test plumbing: swap the private SDK client for a recording stub.
@@ -64,7 +67,7 @@ function makeAwsJob() {
 }
 
 function makeMockJob() {
-	return new MockAsyncJob<{ n: number }>(new Scope('app'), uniqueId(), { handler: async () => {} });
+	return new MockAsyncJob<Payload>(new Scope('app'), uniqueId(), { handler: async () => {} });
 }
 
 interface Case {
@@ -105,7 +108,10 @@ function assertSameOutcome(c: Case, mockOutcome: Outcome, awsOutcome: Outcome): 
 
 describe('AsyncJob.submit() validates delaySeconds the same way on mock and AWS', () => {
 	for (const c of cases) {
-		test(c.label, async () => {
+		test(c.label, async (t) => {
+			// The mock schedules a delayed job with a real setTimeout (15 minutes for
+			// the 900 case). Fake it so the file exits without --test-force-exit.
+			t.mock.timers.enable({ apis: ['setTimeout'] });
 			const options = c.delaySeconds === undefined ? undefined : { delaySeconds: c.delaySeconds };
 
 			const mockJob = makeMockJob();
@@ -131,7 +137,9 @@ describe('AsyncJob.submit() validates delaySeconds the same way on mock and AWS'
 
 describe('AsyncJob.submitBatch() validates delaySeconds the same way on mock and AWS', () => {
 	for (const c of cases) {
-		test(c.label, async () => {
+		test(c.label, async (t) => {
+			// See the submit() suite: keeps the mock's delay timers from holding the process open.
+			t.mock.timers.enable({ apis: ['setTimeout'] });
 			const options = c.delaySeconds === undefined ? undefined : { delaySeconds: c.delaySeconds };
 			const payloads = [{ n: 1 }, { n: 2 }];
 
@@ -156,4 +164,30 @@ describe('AsyncJob.submitBatch() validates delaySeconds the same way on mock and
 			}
 		});
 	}
+});
+
+describe('AsyncJob.submitBatch() checks delaySeconds before the payloads on mock and AWS', () => {
+	// Both entries check the batch delay before validating any payload, so a batch
+	// with an invalid delay *and* an invalid payload reports the delay on both. The
+	// mock's per-payload submit() would reject the delay anyway; this case is what
+	// guards the batch-level check that sets the order.
+	test('an invalid delay plus an oversized payload throws ValidationFailed, not PayloadTooLarge', async (t) => {
+		t.mock.timers.enable({ apis: ['setTimeout'] });
+		const payloads: Payload[] = [{ n: 1 }, { n: 2, pad: 'x'.repeat(300 * 1024) }];
+
+		const mockJob = makeMockJob();
+		const mockOutcome = await outcomeOf(() => mockJob.submitBatch(payloads, { delaySeconds: 901 }));
+
+		const { job: awsJob, inputs } = makeAwsJob();
+		const awsOutcome = await outcomeOf(() => awsJob.submitBatch(payloads, { delaySeconds: 901 }));
+
+		assertSameOutcome(
+			{ label: 'precedence', delaySeconds: 901, error: AsyncJobErrors.ValidationFailed },
+			mockOutcome,
+			awsOutcome,
+		);
+		assert.ok(!mockOutcome.ok && mockOutcome.message.includes('delaySeconds'), 'the delay error should win');
+		assert.deepStrictEqual(inputs, [], 'nothing should reach SQS');
+		assert.strictEqual(mockJob._queue.totalSubmitted, 0, 'the mock should queue nothing');
+	});
 });
