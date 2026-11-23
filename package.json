@@ -69,7 +69,7 @@
     "clean": "rm -rf packages/*/dist packages/*/*.tsbuildinfo test-apps/*/dist test-apps/*/.next test-apps/*/*.tsbuildinfo",
     "generate:sources": "npm run prebuild -w packages --if-present",
     "build:bundles": "npm run bundle:handlers -w packages/hosting && npm run build:lambda -w packages/bb-kv-store && npm run build:lambda -w packages/bb-auth && npm run build -w packages/create-blocks-app && npm run build -w packages/create-block && npm run build -w packages/admin-ui",
-    "build": "npm run generate:sources && tsc --build && npm run build:bundles",
+    "build": "npm run generate:sources && tsc --build && npm run build:bundles && node scripts/chmod-bins.mjs",
     "build:force": "npm run clean && npm run build",
     "dev": "tsc --build --watch",
     "nuke": "rm -rf node_modules packages/*/node_modules test-apps/*/node_modules packages/*/dist test-apps/*/dist test-apps/*/.next packages/*/*.tsbuildinfo test-apps/*/*.tsbuildinfo",

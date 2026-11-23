@@ -285,6 +285,11 @@ jobs:
       - name: Test the hidden-folder guard
         run: node --test scripts/dot-folder-guard.test.mjs
 
+      # `tsc` writes a bin target without the execute permission, and npm sets it
+      # only at install time. The root build makes each built bin executable.
+      - name: Test the bin permission step of the build
+        run: node --test scripts/chmod-bins.test.mjs
+
       - name: Check no reference to the old hidden folder remains
         run: npm run check:dot-folder
 
