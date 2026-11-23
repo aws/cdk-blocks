@@ -545,7 +545,8 @@ void describe('liftAstroRedirects', () => {
     );
   });
 
-  it('leaves a root rest param to Astro (it would shadow every page and asset)', () => {
+  it('leaves a root rest param to Astro (its prefix is empty, so no front-door wildcard)', () => {
+    assert.strictEqual(translateAstroRedirect('/[...all]', '/new/[...all]'), null);
     assert.deepStrictEqual(liftAstroRedirects({ redirects: { '/[...all]': '/new/[...all]' } }), []);
   });
 

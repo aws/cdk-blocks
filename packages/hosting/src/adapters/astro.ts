@@ -767,7 +767,7 @@ export const liftAstroRedirects = (
     // redirect; the doors match redirects first. So a wildcard whose prefix
     // also holds pages or files stays with Astro, which keeps that order.
     const wild = translated?.find((r) => r.source.endsWith('/*'));
-    if (wild && (wild.source === '/*' || appHasRoutesUnder(config, projectDir, wild.source.slice(0, -2)))) {
+    if (wild && appHasRoutesUnder(config, projectDir, wild.source.slice(0, -2))) {
       translated = null;
     }
     if (translated === null) {
@@ -863,6 +863,8 @@ export const translateAstroRedirect = (
   const lastParam = ASTRO_PARAM_SEGMENT.exec(last);
   if (lastParam?.[1] !== '...') return null;
   const prefix = srcSegments.slice(0, -1).join('/');
+  // A root rest param (`/[...all]`) has an empty prefix and stays with Astro:
+  // its `/*` would shadow every page and asset of the app.
   if (!prefix.startsWith('/') || hasParam(prefix)) return null;
   const name = lastParam[2];
 
@@ -880,10 +882,10 @@ export const translateAstroRedirect = (
     wildDest = `${dstPrefix}/*`;
     bareDest = dstPrefix === '' ? '/' : dstPrefix;
   }
-  const out = [{ source: `${prefix}/*`, destination: wildDest }];
-  // A root rest param (`/[...all]`) has no bare prefix: `/*` already covers `/`.
-  if (prefix !== '') out.push({ source: prefix, destination: bareDest });
-  return out;
+  return [
+    { source: `${prefix}/*`, destination: wildDest },
+    { source: prefix, destination: bareDest },
+  ];
 };
 
 const directoryHasFiles = (dir: string): boolean => {
