@@ -25,7 +25,7 @@ settings that might look like Logger options live elsewhere:
   on a Logger. (`LoggingOptions` has no `retention` option.)
 - **Log level** is purely per-instance *runtime* behavior. A `Logger`'s `level`
   is applied by the logger instance itself; a logger without an explicit `level`
-  defaults to `'info'` (see *Log Level Resolution* below). Blocks does **not**
+  defaults to `'info'` (see *Log Level Resolution* below). AWS CDK Blocks does **not**
   stamp an app-wide default — there is no `defaults.logLevel`, no `LOG_LEVEL`
   env var, and the CDK layer provisions nothing for level. This is why multiple
   Loggers with different levels coexist without fighting over shared config.
@@ -81,6 +81,22 @@ All logging methods are **synchronous**. This is an intentional deviation from t
 Priority order (highest wins):
 1. Constructor `options.level`
 2. Default: `'info'`
+
+The constructor resolves `options.level` once (`resolveLevel` in `emitter.ts`).
+The `LogLevel` type only checks literals, so a value read from config can be
+anything at runtime. It is trimmed and lower-cased. `undefined`, `null` and an
+empty string mean "not set" and use `'info'` silently. The aliases `'warning'`,
+`'trace'` and `'fatal'` then map to `'warn'`, `'debug'` and `'error'`, also
+silently. Any other value also gets `'info'`, and that Logger writes one `warn`
+line with `configuredLevel` / `effectiveLevel` (plus its `defaultContext`). It
+does not throw: a bad logging setting should not stop the app from starting.
+Child loggers inherit the resolved level.
+
+`resolveLevel` returns `{ level, unknown }`. The CDK `Logger` uses `unknown` to
+also add a synth warning (`@aws-cdk-blocks/bb-logger:unknownLevel`) via
+`Annotations.of(this).addWarningV2`, so the problem is listed with the other
+`cdk synth` warnings. `cdk synth --strict` turns that warning into an error;
+acknowledge it by its id to opt out.
 
 ## Mock Implementation
 
