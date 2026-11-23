@@ -21,7 +21,7 @@ import {
 	validateBatchSize,
 	validateNamespace,
 	validateNameDimensionClash,
-	validateMetricValue,
+	unpublishableReason,
 	validateUnit,
 	mergeDimensions,
 } from './validation.js';
@@ -118,8 +118,11 @@ export class Metrics extends Scope implements MetricsEmitter {
 	 * @throws {MetricsErrors.InvalidMetricName} If the metric name is `_aws` or equals one of its dimension keys.
 	 * @throws {MetricsErrors.InvalidDimensions} If dimensions exceed 30 entries or contain empty keys/values.
 	 * @throws {MetricsErrors.InvalidDimensions} If a dimension key is `_aws`.
-	 * @throws {MetricsErrors.InvalidValue} If the value is not a finite number (`NaN`, `Infinity`).
 	 * @throws {MetricsErrors.InvalidUnit} If the unit is not a `MetricUnit` value.
+	 *
+	 * A value that is not a finite number (`NaN`, `Infinity`), or a timestamp that is not a
+	 * valid `Date`, does not throw: the data point is not written and a warning is logged
+	 * through the configured logger.
 	 *
 	 * @example
 	 * ```typescript
@@ -132,7 +135,7 @@ export class Metrics extends Scope implements MetricsEmitter {
 	 * ```
 	 */
 	emit(name: string, value: number, options?: EmitOptions): void {
-		writeEmf(this.namespace, [resolveMetric(this.defaultDimensions, { ...options, name, value })]);
+		emitData(this.namespace, this.defaultDimensions, this.log, [{ ...options, name, value }]);
 	}
 
 	/**
@@ -140,12 +143,13 @@ export class Metrics extends Scope implements MetricsEmitter {
 	 * Metrics with the same dimension set are grouped into one EMF entry.
 	 * Metrics with different timestamps go into separate entries, and a metric
 	 * name repeated within a group goes into another entry so every value is kept.
-	 * Every data point is validated before anything is written.
+	 * Every data point is validated before anything is written. A data point whose value
+	 * is not a finite number, or whose timestamp is not a valid `Date`, is left out with a
+	 * logged warning and the rest of the batch is still written.
 	 *
 	 * @param metrics - Array of metric data points (max 100 per call).
 	 * @throws {MetricsErrors.InvalidMetricName} If any metric name is invalid.
 	 * @throws {MetricsErrors.InvalidDimensions} If any metric's dimensions are invalid.
-	 * @throws {MetricsErrors.InvalidValue} If any value is not a finite number.
 	 * @throws {MetricsErrors.InvalidUnit} If any unit is not a `MetricUnit` value.
 	 * @throws {MetricsErrors.BatchTooLarge} If the batch exceeds 100 metrics.
 	 *
@@ -161,10 +165,7 @@ export class Metrics extends Scope implements MetricsEmitter {
 	emitBatch(metrics: MetricDatum[]): void {
 		validateBatchSize(metrics.length);
 
-		// Validate every datum before writing so an invalid one leaves no partial output.
-		const resolved = metrics.map(m => resolveMetric(this.defaultDimensions, m));
-
-		writeEmf(this.namespace, resolved);
+		emitData(this.namespace, this.defaultDimensions, this.log, metrics);
 	}
 
 	/**
@@ -189,6 +190,7 @@ export class Metrics extends Scope implements MetricsEmitter {
 		return new ChildMetrics(
 			this.namespace,
 			{ ...this.defaultDimensions, ...dimensions },
+			this.log,
 		);
 	}
 
@@ -215,19 +217,17 @@ class ChildMetrics implements MetricsEmitter {
 	constructor(
 		private namespace: string,
 		readonly defaultDimensions: Readonly<Record<string, string>>,
+		private log: ChildLogger,
 	) {}
 
 	emit(name: string, value: number, options?: EmitOptions): void {
-		writeEmf(this.namespace, [resolveMetric(this.defaultDimensions, { ...options, name, value })]);
+		emitData(this.namespace, this.defaultDimensions, this.log, [{ ...options, name, value }]);
 	}
 
 	emitBatch(metrics: MetricDatum[]): void {
 		validateBatchSize(metrics.length);
 
-		// Validate every datum before writing so an invalid one leaves no partial output.
-		const resolved = metrics.map(m => resolveMetric(this.defaultDimensions, m));
-
-		writeEmf(this.namespace, resolved);
+		emitData(this.namespace, this.defaultDimensions, this.log, metrics);
 	}
 
 	flush(): void {}
@@ -236,6 +236,7 @@ class ChildMetrics implements MetricsEmitter {
 		return new ChildMetrics(
 			this.namespace,
 			{ ...this.defaultDimensions, ...dimensions },
+			this.log,
 		);
 	}
 }
@@ -264,7 +265,6 @@ interface MetricGroup {
  */
 function resolveMetric(defaultDimensions: Readonly<Record<string, string>>, datum: MetricDatum): ResolvedMetric {
 	validateMetricName(datum.name);
-	validateMetricValue(datum.name, datum.value);
 	const unit = datum.unit ?? 'None';
 	validateUnit(unit);
 	const dimensions = mergeDimensions(defaultDimensions, datum.dimensions);
@@ -278,6 +278,34 @@ function resolveMetric(defaultDimensions: Readonly<Record<string, string>>, datu
 		timestamp: datum.timestamp,
 		resolution: datum.resolution ?? 'standard',
 	};
+}
+
+/**
+ * Validate, resolve and write data points for `emit` and `emitBatch`.
+ *
+ * Checks on names, dimensions and units throw for the whole call before anything
+ * is written: they depend on code, not data, so they fail on the first run.
+ * A non-finite value or an invalid timestamp comes from runtime data (`errors / total`
+ * is `NaN` at zero traffic), so that data point is dropped with a warning and its
+ * valid siblings are still written, rather than failing the request it observes.
+ */
+function emitData(
+	namespace: string,
+	defaultDimensions: Readonly<Record<string, string>>,
+	log: ChildLogger,
+	data: readonly MetricDatum[],
+): void {
+	const resolved = data.map(d => resolveMetric(defaultDimensions, d));
+	const publishable: ResolvedMetric[] = [];
+	for (const m of resolved) {
+		const reason = unpublishableReason(m.value, m.timestamp);
+		if (reason === undefined) {
+			publishable.push(m);
+		} else {
+			log.warn(`Metric '${m.name.substring(0, 50)}' was not written: ${reason}`, { metric: m.name.substring(0, 50) });
+		}
+	}
+	writeEmf(namespace, publishable);
 }
 
 /**
@@ -315,7 +343,9 @@ function writeEmf(namespace: string, metrics: ResolvedMetric[]): void {
 		};
 
 		for (const m of group.metrics) {
-			emfPayload[m.name] = m.value;
+			// defineProperty, not assignment: `emfPayload['__proto__'] = v` would call the
+			// prototype setter and leave the metric with no value in the document.
+			Object.defineProperty(emfPayload, m.name, { value: m.value, enumerable: true, writable: true, configurable: true });
 		}
 
 		process.stdout.write(JSON.stringify(emfPayload) + '\n');

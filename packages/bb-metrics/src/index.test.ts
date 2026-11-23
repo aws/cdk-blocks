@@ -788,28 +788,75 @@ describe('EMF key safety', () => {
 });
 
 describe('value and unit validation', () => {
+	/** A logger that records warn() calls, passed through MetricsOptions.logger. */
+	function recordingLogger() {
+		const warnings: string[] = [];
+		const noop = () => {};
+		const logger = {
+			debug: noop,
+			info: noop,
+			error: noop,
+			warn: (message: string) => { warnings.push(message); },
+			child: () => logger,
+		};
+		return { logger: logger as any, warnings };
+	}
+
 	for (const value of [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY]) {
-		test(`emit rejects ${value}`, () => {
-			const m = new Metrics(fakeScope, 'app');
-			assert.throws(
-				() => m.emit('Count', value),
-				(err: Error) => err.name === MetricsErrors.InvalidValue,
-			);
-			assert.throws(
-				() => m.emitBatch([{ name: 'Ok', value: 1 }, { name: 'Count', value }]),
-				(err: Error) => err.name === MetricsErrors.InvalidValue,
-			);
-			assert.strictEqual(stdoutLines.length, 0, 'nothing is written when any datum is invalid');
+		test(`emit drops ${value} with a warning instead of throwing or writing null`, () => {
+			const { logger, warnings } = recordingLogger();
+			const m = new Metrics(fakeScope, 'app', { logger });
+			assert.doesNotThrow(() => m.emit('ErrorRate', value));
+			assert.strictEqual(stdoutLines.length, 0, 'no document with a null value is written');
+			assert.strictEqual(warnings.length, 1);
+			assert.match(warnings[0], /ErrorRate/);
+		});
+
+		test(`emitBatch drops a ${value} datum and still writes its valid siblings`, () => {
+			const { logger, warnings } = recordingLogger();
+			const m = new Metrics(fakeScope, 'app', { logger });
+			m.child({ route: '/a' }).emitBatch([{ name: 'Ok', value: 1 }, { name: 'ErrorRate', value }]);
+			assert.strictEqual(stdoutLines.length, 1);
+			const doc = getEmfDoc();
+			assert.strictEqual(doc.Ok, 1);
+			assert.ok(!('ErrorRate' in doc));
+			assert.deepStrictEqual(doc._aws.CloudWatchMetrics[0].Metrics.map((x: { Name: string }) => x.Name), ['Ok']);
+			assert.strictEqual(warnings.length, 1, 'child emitters log through the parent logger');
 		});
 	}
 
-	test('emit rejects a non-number value from untyped callers', () => {
-		const m = new Metrics(fakeScope, 'app');
+	test('a non-number value from untyped callers is dropped with a warning', () => {
+		const { logger, warnings } = recordingLogger();
+		const m = new Metrics(fakeScope, 'app', { logger });
 		const untyped: unknown = '5';
+		m.emit('Count', untyped as number);
+		assert.strictEqual(stdoutLines.length, 0);
+		assert.strictEqual(warnings.length, 1);
+	});
+
+	test('an invalid timestamp is dropped with a warning and does not affect undated siblings', () => {
+		const { logger, warnings } = recordingLogger();
+		const m = new Metrics(fakeScope, 'app', { logger });
+		const before = Date.now();
+		m.emitBatch([
+			{ name: 'A', value: 1, timestamp: new Date('not a date') },
+			{ name: 'B', value: 2 },
+		]);
+		assert.strictEqual(stdoutLines.length, 1);
+		const doc = getEmfDoc();
+		assert.strictEqual(doc.B, 2);
+		assert.ok(!('A' in doc));
+		assert.ok(Number.isInteger(doc._aws.Timestamp) && doc._aws.Timestamp >= before, 'Timestamp is never null');
+		assert.strictEqual(warnings.length, 1);
+	});
+
+	test('static checks still throw when a batch also holds a non-finite value', () => {
+		const m = new Metrics(fakeScope, 'app');
 		assert.throws(
-			() => m.emit('Count', untyped as number),
-			(err: Error) => err.name === MetricsErrors.InvalidValue,
+			() => m.emitBatch([{ name: 'Ok', value: Number.NaN }, { name: '', value: 1 }]),
+			(err: Error) => err.name === MetricsErrors.InvalidMetricName,
 		);
+		assert.strictEqual(stdoutLines.length, 0);
 	});
 
 	test('zero and negative values are accepted', () => {
@@ -839,17 +886,30 @@ describe('value and unit validation', () => {
 
 	test('every documented unit is accepted', () => {
 		const m = new Metrics(fakeScope, 'app');
+		// Every unit the EMF schema accepts (CloudWatch MetricDatum.Unit), 27 in total.
 		const units = [
 			'Count', 'Seconds', 'Milliseconds', 'Microseconds', 'Bytes', 'Kilobytes',
-			'Megabytes', 'Gigabytes', 'Percent', 'Bits/Second', 'None',
+			'Megabytes', 'Gigabytes', 'Terabytes', 'Bits', 'Kilobits', 'Megabits', 'Gigabits',
+			'Terabits', 'Percent', 'Bytes/Second', 'Kilobytes/Second', 'Megabytes/Second',
+			'Gigabytes/Second', 'Terabytes/Second', 'Bits/Second', 'Kilobits/Second',
+			'Megabits/Second', 'Gigabits/Second', 'Terabits/Second', 'Count/Second', 'None',
 		] as const;
+		assert.strictEqual(units.length, 27);
 		m.emitBatch(units.map((unit, i) => ({ name: `M${i}`, value: i, unit })));
 		const written = getEmfDoc()._aws.CloudWatchMetrics[0].Metrics.map((x: { Unit: string }) => x.Unit);
 		assert.deepStrictEqual(written, [...units]);
 	});
 
-	test('new error constants have expected names', () => {
-		assert.strictEqual(MetricsErrors.InvalidValue, 'InvalidValueException');
+	test('new error constant has expected name', () => {
 		assert.strictEqual(MetricsErrors.InvalidUnit, 'InvalidUnitException');
+	});
+
+	test('a metric named __proto__ gets its own value key', () => {
+		const m = new Metrics(fakeScope, 'app');
+		m.emit('__proto__', 5);
+		const doc = getEmfDoc();
+		assert.strictEqual(doc._aws.CloudWatchMetrics[0].Metrics[0].Name, '__proto__');
+		assert.ok(Object.hasOwn(doc, '__proto__'));
+		assert.strictEqual(Object.getOwnPropertyDescriptor(doc, '__proto__')?.value, 5);
 	});
 });

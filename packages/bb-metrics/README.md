@@ -68,9 +68,19 @@ All methods are synchronous: there is nothing to `await`.
 ```typescript
 type MetricUnit =
   | 'Count' | 'Seconds' | 'Milliseconds' | 'Microseconds'
-  | 'Bytes' | 'Kilobytes' | 'Megabytes' | 'Gigabytes'
-  | 'Percent' | 'Bits/Second' | 'None';
+  | 'Bytes' | 'Kilobytes' | 'Megabytes' | 'Gigabytes' | 'Terabytes'
+  | 'Bits' | 'Kilobits' | 'Megabits' | 'Gigabits' | 'Terabits'
+  | 'Percent'
+  | 'Bytes/Second' | 'Kilobytes/Second' | 'Megabytes/Second' | 'Gigabytes/Second' | 'Terabytes/Second'
+  | 'Bits/Second' | 'Kilobits/Second' | 'Megabits/Second' | 'Gigabits/Second' | 'Terabits/Second'
+  | 'Count/Second' | 'None';
 ```
+
+These are the units CloudWatch accepts in an EMF document. Any other unit throws `MetricsErrors.InvalidUnit`.
+
+### Values that cannot be published
+
+A value that is not a finite number (`NaN`, `Infinity`, `-Infinity`) or a `timestamp` that is not a valid `Date` does not throw. That data point is not written, a warning is logged through the `logger` option, and the other data points in the same `emitBatch` call are still written. This keeps a ratio such as `errors / total`, which is `NaN` at zero traffic, from failing the request that emits it. The default logger only logs errors, so pass a `logger` at `warn` level or lower to see these warnings.
 
 ## Errors
 
@@ -78,7 +88,6 @@ type MetricUnit =
 |----------|--------------|-------------|
 | `MetricsErrors.InvalidMetricName` | `InvalidMetricNameException` | `emit` or `emitBatch`: a metric name is empty, exceeds 1024 characters, is `_aws`, or equals one of that data point's dimension keys (including `defaultDimensions`). |
 | `MetricsErrors.InvalidDimensions` | `InvalidDimensionsException` | `emit` or `emitBatch`: dimensions exceed 30 entries, or contain empty keys/values, or key/value exceeds 1024 chars, or a key is `_aws`. |
-| `MetricsErrors.InvalidValue` | `InvalidValueException` | `emit` or `emitBatch`: a value is not a finite number (`NaN`, `Infinity`, `-Infinity`). |
 | `MetricsErrors.InvalidUnit` | `InvalidUnitException` | `emit` or `emitBatch`: a unit is not one of the `MetricUnit` values. |
 | `MetricsErrors.BatchTooLarge` | `BatchTooLargeException` | `emitBatch`: the batch contains more than 100 metrics. |
 | `MetricsErrors.InvalidNamespace` | `InvalidNamespaceException` | `new Metrics(...)` at runtime and in local dev, not during CDK synthesis: the namespace is empty, exceeds 256 characters, contains a character outside `[a-zA-Z0-9._#:/ -]`, or starts with `AWS/`. |

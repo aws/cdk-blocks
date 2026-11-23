@@ -29,8 +29,6 @@ export const MetricsErrors = {
 	 * or use the reserved `_aws` key.
 	 */
 	InvalidDimensions: 'InvalidDimensionsException',
-	/** Metric value is not a finite number (`NaN`, `Infinity`, `-Infinity`, or a non-number). */
-	InvalidValue: 'InvalidValueException',
 	/** Metric unit is not one of the `MetricUnit` values. */
 	InvalidUnit: 'InvalidUnitException',
 	/** Batch contains more than 100 metrics. */

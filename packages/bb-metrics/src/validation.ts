@@ -21,8 +21,24 @@ const METRIC_UNITS = [
 	'Kilobytes',
 	'Megabytes',
 	'Gigabytes',
+	'Terabytes',
+	'Bits',
+	'Kilobits',
+	'Megabits',
+	'Gigabits',
+	'Terabits',
 	'Percent',
+	'Bytes/Second',
+	'Kilobytes/Second',
+	'Megabytes/Second',
+	'Gigabytes/Second',
+	'Terabytes/Second',
 	'Bits/Second',
+	'Kilobits/Second',
+	'Megabits/Second',
+	'Gigabits/Second',
+	'Terabits/Second',
+	'Count/Second',
 	'None',
 ] as const satisfies readonly MetricUnit[];
 
@@ -66,16 +82,21 @@ export function validateNameDimensionClash(name: string, dimensions: Record<stri
 }
 
 /**
- * Validate a metric value.
- * - Must be a finite number (`NaN`, `Infinity` and `-Infinity` serialize to `null` in JSON)
+ * Why a data point built from runtime data cannot be published, or `undefined` if it can.
+ * - The value must be a finite number (`NaN`, `Infinity` and `-Infinity` serialize to `null` in JSON)
+ * - A timestamp, when given, must be a valid `Date` (an invalid one serializes to `null`)
+ *
+ * These are not thrown: a ratio such as `errors / total` is `NaN` at zero traffic, and a
+ * metrics call must not fail the request it observes. Callers drop the data point instead.
  */
-export function validateMetricValue(name: string, value: number): void {
+export function unpublishableReason(value: number, timestamp?: Date): string | undefined {
 	if (typeof value !== 'number' || !Number.isFinite(value)) {
-		throw blocksError(
-			MetricsErrors.InvalidValue,
-			`Metric value for '${name.substring(0, 50)}' must be a finite number (got ${String(value).substring(0, 50)})`,
-		);
+		return `value ${String(value).substring(0, 50)} is not a finite number`;
 	}
+	if (timestamp !== undefined && !(timestamp instanceof Date && Number.isFinite(timestamp.getTime()))) {
+		return 'timestamp is not a valid Date';
+	}
+	return undefined;
 }
 
 /**

@@ -124,11 +124,16 @@ This is unique among Building Blocks. Most BBs need a mock because their AWS run
 
 ## Validation
 
-All validation matches CloudWatch constraints:
+Validation covers these CloudWatch constraints:
 - **Metric name:** Non-empty, max 1024 characters, not `_aws`, and not equal to one of its own dimension keys (both are top-level keys in the EMF document)
 - **Dimensions:** Max 30 key-value pairs, non-empty keys and values, max 1024 chars each, no `_aws` key
-- **Value:** A finite number (`NaN` and `Infinity` would serialize as `null`)
-- **Unit:** One of the `MetricUnit` values
+- **Unit:** One of the `MetricUnit` values, which are the units the EMF schema accepts
 - **Batch size:** Max 100 metrics per `emitBatch` call (EMF document limit)
 
 Validation runs synchronously before the stdout write. Failures throw typed errors (`MetricsErrors.*`) that can be caught with `isBlocksError()`.
+
+The EMF specification is stricter than the limits above: metric names are limited to 255 characters, dimension keys to 250 characters and must not start with `:`, and both must be printable ASCII. Names and keys that pass validation here but break those rules are dropped by CloudWatch without an error. These limits are not enforced yet, because tightening them would make inputs that are accepted today start throwing.
+
+Values and timestamps come from runtime data rather than code, so they are not thrown on. A value that is not a finite number (`NaN` and `Infinity` serialize as `null`) or a timestamp that is not a valid `Date` (also `null`) leaves that data point out of the document with a warning through the configured logger. Its siblings in the batch are still written. A ratio such as `errors / total` is `NaN` at zero traffic, and a metrics call should not fail the request it observes.
+
+Metric values are written with `Object.defineProperty`, so a metric named `__proto__` gets its own key instead of calling the prototype setter.
