@@ -362,21 +362,23 @@ the stacked door's edge apply the rules to every response.
 **Caching.** These doors have no edge cache: nothing between the browser and
 the server stores a response. A route that sets `s-maxage` or
 `stale-while-revalidate` (from app code, a header rule, or Nitro
-`routeRules`) reaches the server on every request, and its `Cache-Control`
-reaches the browser unchanged, where `s-maxage` means nothing. Only a
-server-side cache spares the render. There is no
+`routeRules`) has no shared copy across visitors: each visitor's requests
+reach the server (the browser's own cache still applies to `max-age`), and
+its `Cache-Control` reaches the browser unchanged, where `s-maxage` means
+nothing. Only a server-side cache spares the render. There is no
 stale copy to serve on an error either (`stale-if-error`), and the SSR cache
 guard has no shared cache to protect. Per framework:
 
 | Framework | Behind the ALB and API Gateway doors |
 |---|---|
-| Nuxt / Nitro | `routeRules` `swr` and `cache`, and `defineCachedEventHandler`, still cache server-side in Hosting's S3 cache, so a cached route is served from the server function without re-rendering. No edge copy. |
+| Nuxt / Nitro | `routeRules` `swr` and `cache` still cache server-side in Hosting's S3 cache, so a cached route is served from the server function without re-rendering; `defineCachedEventHandler` uses that cache too when a route rule turns it on, otherwise it caches in memory per instance. No edge copy. |
 | Next.js | ISR (`revalidate`) still regenerates through OpenNext's incremental cache (unless `incrementalRegeneration: false`), but every request reaches the server function. No edge copy. |
 | Astro, SvelteKit | No server cache: every request renders. |
 
 Synth warns once per app when its header rules ask a shared cache to store a
-route (`s-maxage`, `stale-while-revalidate` or `stale-if-error`, which the
-Nitro adapter emits for `swr` and `cache.maxAge` route rules), naming the
+route (`s-maxage` above zero, or `stale-while-revalidate` / `stale-if-error`
+on a `public` or `s-maxage` response, and neither `private` nor `no-store`;
+the Nitro adapter emits these for `swr` and `cache.maxAge` route rules), naming the
 routes (`@aws-cdk-blocks/hosting:NoEdgeCache`). It can't see a `Cache-Control`
 the server sets at run time. For edge caching, use the CloudFront door or the
 stacked door.

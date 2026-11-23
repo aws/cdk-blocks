@@ -21,6 +21,7 @@ import { App, Stack } from 'aws-cdk-lib';
 import { Annotations, Match, Template } from 'aws-cdk-lib/assertions';
 import type { DeployManifest } from '../manifest/types.js';
 import { doorCapabilitiesFor, HostingConstruct, type HostingConstructProps } from './hosting_construct.js';
+import { edgeCacheRoutes } from './proxy_rules.js';
 
 const API_URL = 'https://abc123.execute-api.us-west-2.amazonaws.com/prod/cdk-blocks/api';
 const WARNING = '@aws-cdk-blocks/hosting:DoorRulesNotApplied';
@@ -239,7 +240,9 @@ describe("regional doors apply the app's redirects, header rules and error pages
       const text = warningText(warnings);
       assert.match(text, new RegExp(`^${name} front door has no edge cache: /swr, /cached/\\* set a shared-cache`));
       assert.doesNotMatch(text, /\/browser-only|\/assets/, 'a rule without a shared-cache directive is not named');
-      assert.match(text, /every request for these routes reaches the server/);
+      assert.match(text, /each visitor's requests for these routes reach the server \(the browser's own cache still applies to `max-age`\)/);
+      assert.match(text, /unless `incrementalRegeneration: false`/);
+      assert.match(text, /otherwise it caches in memory per instance/);
       assert.match(text, /use the CloudFront door or the stacked door/);
     }
   });
@@ -249,6 +252,22 @@ describe("regional doors apply the app's redirects, header rules and error pages
     assert.deepEqual(noEdgeCacheWarnings(ssr(), { kind: 'apiGateway' }), []);
     assert.deepEqual(noEdgeCacheWarnings(cacheable(), undefined), []);
     assert.deepEqual(noEdgeCacheWarnings(cacheable(), { kind: 'stackedRouter' }), []);
+  });
+
+  it('NoEdgeCache: names only routes whose Cache-Control asks a shared cache to store them', () => {
+    const asks = (value: string) => edgeCacheRoutes([{ pattern: '/r', headers: { 'Cache-Control': value } }]).length === 1;
+    // Asks a shared cache: s-maxage above zero, or SWR / SIE on a shared-cacheable response.
+    assert.equal(asks('public, s-maxage=60'), true);
+    assert.equal(asks('S-MaxAge=60'), true, 'directive names are case-insensitive');
+    assert.equal(asks('public, max-age=60, stale-while-revalidate=30'), true);
+    assert.equal(asks('public, stale-if-error=600'), true);
+    // Doesn't: s-maxage=0, private or no-store, or SWR on a browser-only response.
+    assert.equal(asks('s-maxage=0'), false);
+    assert.equal(asks('s-maxage=0, stale-while-revalidate=30'), true, 's-maxage=0 still makes SWR shared');
+    assert.equal(asks('private, s-maxage=60'), false);
+    assert.equal(asks('no-store, s-maxage=60'), false);
+    assert.equal(asks('max-age=60, stale-while-revalidate=30'), false, 'a browser honors SWR without a shared cache');
+    assert.equal(asks('public, max-age=60'), false);
   });
 
   it('NoEdgeCache: names at most five routes, then how many more', () => {

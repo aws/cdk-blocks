@@ -663,7 +663,7 @@ new Hosting(stack, 'Web', { ...HostingPresets.preview, imageOptimization: true, 
 
 | Prop | Value | Effect |
 |---|---|---|
-| `frontDoor` | `{ kind: 'apiGateway' }` | The API Gateway HTTP API door: no CloudFront; buffered server responses, about 6 MB each; no edge cache, so `s-maxage` and `stale-while-revalidate` routes render on every request (a preview doesn't show how the CloudFront door caches) |
+| `frontDoor` | `{ kind: 'apiGateway' }` | The API Gateway HTTP API door: no CloudFront; buffered server responses, about 6 MB each; no edge cache, so `s-maxage` and `stale-while-revalidate` routes reach the server on every request (a preview doesn't show how the CloudFront door caches) |
 | `imageOptimization` | `false` | No image function; the image endpoints serve the source image (a remote one is redirected only when its host is in the app's image allowlist, else 404) |
 | `incrementalRegeneration` | `false` | Next.js builds without the tag cache and revalidation queue; prerendered pages come from the build's snapshot |
 | `edgeRoutes` | `'regional'` | Next.js `runtime: 'edge'` routes run as regional Lambda functions, not Lambda@Edge |

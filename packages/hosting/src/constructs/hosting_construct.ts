@@ -2884,8 +2884,11 @@ const resolveHostingFrontDoor = (props: HostingConstructProps): ResolvedHostingF
  *   the client chose.
  * - `edgeCache`: a shared cache in front of the server stores responses the
  *   app marks shared-cacheable (`s-maxage`, `stale-while-revalidate`). Behind
- *   a door without one, those routes render on every request; synth warns
- *   (`@aws-cdk-blocks/hosting:NoEdgeCache`) when the app's header rules ask for it.
+ *   a door without one, those routes reach the server on every request; synth
+ *   warns (`@aws-cdk-blocks/hosting:NoEdgeCache`) when the app's header rules
+ *   ask for it. The warning covers only doors that run a server (ALB and API
+ *   Gateway); the S3 website door (`'none'`) has no edge cache either, but
+ *   serves static files only, so it doesn't warn.
  *
  * A bring-your-own door declares only `streaming`, through `serverResponse`
  * (default `'streaming'`); the rest are its own to wire (and `cf.recordWired`
