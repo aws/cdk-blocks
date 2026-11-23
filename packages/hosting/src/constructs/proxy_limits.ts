@@ -37,6 +37,22 @@ const ENVELOPE_BYTES = 2048;
 /** The base64-encoded size of `bytes` bytes. */
 const base64Size = (bytes: number): number => 4 * Math.ceil(bytes / 3);
 
+/**
+ * The most bytes one ranged (206) response of the asset proxy carries under a
+ * response limit: what fits after base64's 4/3 inflation and the envelope,
+ * rounded down to a 64 KiB multiple. A longer range (an open-ended
+ * `bytes=0-`, as a browser's first media request is) is shortened to this, so
+ * it fits the door instead of failing; the `Content-Range` reports the bytes
+ * sent and the client asks for the rest (RFC 9110 section 15.3.7).
+ *
+ * @param limitBytes the door's response limit ({@link ALB_LAMBDA_RESPONSE_LIMIT} or {@link LAMBDA_SYNC_RESPONSE_LIMIT}).
+ * @returns the range cap in bytes.
+ */
+export const maxRangeBytes = (limitBytes: number): number => {
+  const fits = Math.floor((limitBytes - ENVELOPE_BYTES) / 4) * 3;
+  return Math.max(64 * 1024, Math.floor(fits / (64 * 1024)) * 64 * 1024);
+};
+
 /** The file extensions the asset proxy gzips for a browser (its compressible content types). */
 const COMPRESSIBLE_EXTENSIONS = new Set(['html', 'htm', 'js', 'mjs', 'cjs', 'css', 'json', 'map', 'svg', 'txt', 'xml', 'webmanifest']);
 
