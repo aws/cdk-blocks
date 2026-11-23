@@ -114,6 +114,8 @@ test.describe('SvelteKit SSR Hosting', () => {
     const r = await request.get(`${hostingUrl}/error-demo`);
     expect(r.status()).toBe(500);
     const html = await r.text();
+    // The app's own +error.svelte page, not a page the CDN put in its place.
+    expect(html).toContain('data-page="error"');
     expect(html).not.toMatch(/\/var\/task|\.js:\d+:\d+/);
   });
 
