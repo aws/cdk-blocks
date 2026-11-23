@@ -458,8 +458,11 @@ const mayOverlap = (apiPattern: string, s3Pattern: string): boolean => {
  * nothing). Over {@link MAX_EDGE_BEHAVIORS}, the default becomes the router
  * (which serves everything correctly); the API behaviors no kept S3 pattern
  * can shadow are dropped first (the router default reaches them, and without
- * a `Cache-Control` it does not cache them), then the list is cut to a prefix
- * — still correct, since the edge evaluates it in the router's order.
+ * a `Cache-Control` it does not cache them), then single-file S3 routes
+ * (`/robots.txt`), last first, so a prefix serving many files (`/_astro/*`)
+ * keeps its S3 behavior; then the list is cut to a prefix — still correct,
+ * since the edge evaluates it in the router's order and the router serves
+ * whatever a dropped behavior would have.
  */
 const planEdgeBehaviors = (
   input: DoorInput,
@@ -501,9 +504,24 @@ const planEdgeBehaviors = (
   if (behaviors.length > MAX_EDGE_BEHAVIORS) {
     truncated = true;
     defaultTarget = 'router';
-    const s3Patterns = wanted.filter(([, t]) => t === 's3').map(([p]) => p);
-    const kept = wanted.filter(([p, t]) => t !== 'api' || s3Patterns.some((s) => mayOverlap(p, s)));
-    behaviors = trim(trim(kept, 'router').slice(0, MAX_EDGE_BEHAVIORS), 'router');
+    // The API behaviors no kept S3 pattern can shadow are dropped (the router default reaches them).
+    const fit = (list: Array<[string, EdgeTarget]>) => {
+      const s3Patterns = list.filter(([, t]) => t === 's3').map(([p]) => p);
+      return trim(list.filter(([p, t]) => t !== 'api' || s3Patterns.some((s) => mayOverlap(p, s))), 'router');
+    };
+    // Still over: single-file S3 routes (`/robots.txt`) give way first, last
+    // first, so a prefix serving many files (`/_astro/*`) keeps its S3
+    // behavior. Dropping an S3 behavior is always safe: its requests reach a
+    // later behavior or the router default, and the router serves the file.
+    let list = [...wanted];
+    let kept = fit(list);
+    for (let i = list.length - 1; i >= 0 && kept.length > MAX_EDGE_BEHAVIORS; i--) {
+      const [p, t] = list[i];
+      if (t !== 's3' || p.includes('*')) continue;
+      list = [...list.slice(0, i), ...list.slice(i + 1)];
+      kept = fit(list);
+    }
+    behaviors = trim(kept.slice(0, MAX_EDGE_BEHAVIORS), 'router');
   }
   const usesS3 = defaultTarget === 's3' || behaviors.some(([, t]) => t === 's3');
   return { behaviors, defaultTarget, usesS3, truncated, wanted: trim(wanted, catchAll).length };
