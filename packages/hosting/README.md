@@ -354,16 +354,23 @@ semantics, using the same matching code:
   An SPA keeps its `index.html` fallback.
 
 **Compression.** Only static files are compressed on these doors (by the
-asset proxy, above). Nothing compresses server-rendered (SSR) or API
+asset proxy, above), with one exception: a Next.js server on Lambda
+(`compute.type: 'lambda'`) behind `apiGateway` with `api: 'rest'` gzips its
+own streamed responses for clients that accept gzip, and adds
+`Vary: Accept-Encoding`. Nothing else compresses server-rendered (SSR) or API
 responses: there is no CDN in front to do it, so they reach the browser as
 the server wrote them. To send them compressed, compress in the server:
 gzip (or Brotli) the body when the request's `Accept-Encoding` allows it, and
 set `Content-Encoding` and `Vary: Accept-Encoding` on the response (for
-example in a response middleware or hook of your framework). On the CloudFront
-door, CloudFront compresses server responses that carry a `Content-Length`,
-and a Next.js server on Lambda (`compute.type: 'lambda'`) gzips its own
-streamed responses for viewers that accept gzip. A Next.js Web Function streams
-without a `Content-Length`, so its server responses are not compressed yet.
+example in a response middleware or hook of your framework). This doesn't
+apply to Next.js on Lambda: OpenNext's streaming wrapper sets
+`Content-Encoding` itself and replaces the one your app sets, so a body the
+app compresses would be compressed twice. On the CloudFront door, CloudFront
+compresses server responses that carry a `Content-Length`, and a Next.js
+server on Lambda (`compute.type: 'lambda'`, with OpenNext's default
+`aws-lambda-streaming` wrapper) gzips its own streamed responses for viewers
+that accept gzip. A Next.js Web Function streams without a `Content-Length`,
+so its server responses are not compressed yet.
 
 Responses the door sends straight to a function or the backend don't pass
 through those proxies: server-rendered (SSR) and image-optimization responses,
@@ -554,7 +561,8 @@ it is not an in-place update.
   `monitoring: { enabled: false }`, and its access logs are off unless you set
   them.
 - **CloudFront → ALB or API Gateway** stops compressing server-rendered and
-  API responses (static files are still gzipped by the asset proxy); see
+  API responses (static files are still gzipped by the asset proxy, and a
+  Next.js server on Lambda behind `api: 'rest'` still gzips its own); see
   "Compression" in [the ALB and API Gateway doors](#the-alb-and-api-gateway-doors-rules-and-limits).
 - **A custom domain moving between doors** (for example the CloudFront door's
   `domain` to an API Gateway or ALB door) creates Route 53 records of the same
