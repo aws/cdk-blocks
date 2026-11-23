@@ -338,13 +338,17 @@ void describe('HostingConstruct — SSR mode', () => {
     const policyHeaders: string[] =
       ssrPolicy.Properties.CachePolicyConfig.ParametersInCacheKeyAndForwardedToOrigin.HeadersConfig.Headers;
     assert.ok(cf.keyed);
-    assert.deepEqual([...cf.keyed].sort(), ['accept-encoding', ...policyHeaders].sort());
+    // `cookie` is left to the cookie rule, which knows the keyed cookies.
+    assert.deepEqual([...cf.keyed].sort(), ['accept-encoding', 'cookie', ...policyHeaders].sort());
     assert.ok(cf.keyed.includes('x-tenant'));
 
-    // CloudFront-over-ALB door: the router headers, which the keyed query string carries as `_rsc`.
+    // CloudFront-over-ALB door: the router headers, which the keyed query string carries as `_rsc`,
+    // and every cookie. That door's edge (built by core) keys on no request header, the whole
+    // query string and every cookie: pinned in cloudfront_edge_door.test.ts.
     const stacked = guardFor({ kind: 'stackedRouter' });
     assert.deepEqual(stacked.keyed, [
       'accept-encoding',
+      'cookie',
       'rsc',
       'next-router-prefetch',
       'next-router-state-tree',

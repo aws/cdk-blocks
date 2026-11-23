@@ -934,7 +934,8 @@ export class HostingConstruct extends Construct {
     // Next.js router headers and `cacheKeyHeaders`; the CloudFront-over-ALB
     // door's keys on no header but on the whole query string, which holds
     // Next.js's `_rsc` (derived from the router headers, `Next-Url` included).
-    // The other doors put no CloudFront cache in front of the server.
+    // `Vary: Cookie` is left to the cookie rule on both. The other doors put
+    // no CloudFront cache in front of the server.
     assertCacheGuardIgnoredCookies(f.cacheKeyCookies, f.cacheGuardIgnoredCookies);
     const varyKeyedHeaders = stackedRouter
       ? [...SSR_CACHE_GUARD_ROUTER_HEADERS, 'next-url']

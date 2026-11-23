@@ -1050,10 +1050,15 @@ are cached as its `Cache-Control` says. The guard sends
   cache key does not hold, or is `Vary: *`. CloudFront ignores `Vary`, so it
   would store one copy and serve it for every value of that header (for
   example a page rendered from `Accept-Language`, served in the first
-  visitor's language to everyone). `Accept-Encoding` is always in the key, as
-  are the Next.js router headers (`RSC`, `Next-Router-State-Tree`,
-  `Next-Router-Prefetch`, `Next-Router-Segment-Prefetch`, `Next-Action`) and,
-  on the CloudFront door, `cacheKeyHeaders`. The response keeps its `Vary`
+  visitor's language to everyone). `Accept-Encoding` is always in the key.
+  The Next.js router headers (`RSC`, `Next-Router-State-Tree`,
+  `Next-Router-Prefetch`, `Next-Router-Segment-Prefetch`, `Next-Action`) count
+  as keyed too: the CloudFront door's key holds them as request headers, and
+  the stacked door's holds the query string, whose `_rsc` parameter Next.js
+  derives from them and `Next-Url`. On the CloudFront door `cacheKeyHeaders`
+  are keyed as well. `Vary: Cookie` alone never leads to a rewrite: cookies
+  follow the cookie rule above (and are all in the key behind the stacked
+  door). The response keeps its `Vary`
   header for the browser, and the server logs once per header name why the
   guard rewrote it. The ALB, API Gateway and custom doors put no CloudFront
   cache the guard knows in front of the server, so `Vary` is not read there.
@@ -1073,8 +1078,9 @@ frontDoor: { features: { cacheKeyHeaders: ['accept-language'] } }
 
 Behind the stacked door the server-route cache key holds no request headers
 (only the query string, the Next.js `_rsc` parameter included, and every
-cookie), so a route that varies on another header is sent as
-`private, no-store`; put the value in the path or the query string to cache it.
+cookie), so a route that varies on a header other than `Accept-Encoding`,
+`Cookie` or the Next.js router headers is sent as `private, no-store`; put the
+value in the path or the query string to cache it.
 
 Client-side analytics and consent cookies (`_ga`, `_gid`, `_fbp`, a consent
 manager's cookie) are not in the cache key, so by default a visitor carrying one
@@ -1089,8 +1095,8 @@ frontDoor: { features: { cacheKeyCookies: ['session'], cacheGuardIgnoredCookies:
 ```
 
 Behind the stacked door the server-route cache key holds every
-cookie, so cookies never lead to a rewrite there; `Authorization` and
-`Set-Cookie` still do.
+cookie, so cookies (and `Vary: Cookie`) never lead to a rewrite there;
+`Authorization`, `Set-Cookie` and a `Vary` header outside the key still do.
 
 CloudFront caches the 500, 501, 502, 503 and 504 responses of an origin for the
 error caching minimum TTL and, except for 501, does so whatever their
