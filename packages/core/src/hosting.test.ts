@@ -3568,9 +3568,9 @@ describe('Hosting', () => {
     it('security headers on the default behavior and every S3 behavior; the S3 default has index.html as root object', () => {
       const t = stackedSynth('CfOverAlbHeadersEverywhere');
       const edge = edgeOf(t);
-      const policies = Object.keys(t.findResources('AWS::CloudFront::ResponseHeadersPolicy'));
-      assert.strictEqual(policies.length, 1);
-      const ref = { Ref: policies[0] };
+      // The AWS-managed SecurityHeadersPolicy, as on the CloudFront door: no policy resource.
+      t.resourceCountIs('AWS::CloudFront::ResponseHeadersPolicy', 0);
+      const ref = '67f7725c-6f97-4210-82d7-5512b31e9d03';
       const def = edge.config.DefaultCacheBehavior as unknown as { ResponseHeadersPolicyId?: unknown };
       assert.deepStrictEqual(def.ResponseHeadersPolicyId, ref, 'the S3 default behavior carries the security headers');
       const all = (edge.config.CacheBehaviors ?? []) as unknown as Array<{ PathPattern: string; ResponseHeadersPolicyId?: unknown }>;
@@ -3777,15 +3777,12 @@ describe('Hosting', () => {
       new Hosting(stack, 'Hosting', { root: tmpDir, api: MOCK_API, frontDoor: { kind: 'stacked', edge: 'cloudfront', router: 'alb' } });
 
       const t = Template.fromStack(stack);
-      // A ResponseHeadersPolicy with the security headers, attached to the edge's
-      // default behavior — the ALB can't inject these, so CloudFront owns them.
-      t.hasResourceProperties('AWS::CloudFront::ResponseHeadersPolicy', {
-        ResponseHeadersPolicyConfig: Match.objectLike({
-          SecurityHeadersConfig: Match.objectLike({
-            StrictTransportSecurity: Match.objectLike({ Override: true }),
-          }),
-        }),
-      });
+      // The AWS-managed SecurityHeadersPolicy the default CloudFront door uses,
+      // on the edge's default behavior — the ALB can't inject these, so
+      // CloudFront owns them; a header the server sets itself wins.
+      t.resourceCountIs('AWS::CloudFront::ResponseHeadersPolicy', 0);
+      const def = edgeOf(t).config.DefaultCacheBehavior as unknown as { ResponseHeadersPolicyId?: unknown };
+      assert.strictEqual(def.ResponseHeadersPolicyId, '67f7725c-6f97-4210-82d7-5512b31e9d03');
     });
 
     // ── The router is reachable only through the edge ──────────────────────
