@@ -624,6 +624,115 @@ const blocksStack = await BlocksStack.create(app, stackName, {
   `us-east-1` support stack included.
 - `npm run destroy` passes no stack selection, so the CDK CLI refuses to
   destroy an app with more than one top-level stack.
+- A deploy that changes a Lambda@Edge function (middleware or an Edge route)
+  publishes a new function version and keeps the previous one. CloudFront
+  removes the old version's replicas only hours after the distribution stops
+  using it, and Lambda can't delete a version until then, so Hosting retains
+  replaced versions instead of having the deploy wait on a delete that fails.
+  A retained version doesn't run and has no invocation charge, but its code
+  still counts toward the
+  [Lambda code storage quota](https://docs.aws.amazon.com/lambda/latest/dg/gettingstarted-limits.html#compute-and-storage)
+  of `us-east-1`, which every function in that account and Region shares.
+  Each `next build` changes the edge bundle, so every deploy adds a version;
+  left unpruned, they can fill the quota and stop any function in the Region
+  from publishing new code. Prune versions the distribution no longer uses.
+  CloudFormation no longer tracks a retained version, so deleting one doesn't
+  affect the stack. Work from the distribution, not from function names or
+  version numbers: its cache behaviors name the exact function and version
+  each Lambda@Edge association runs, and an app can have several edge
+  functions (middleware plus one per Edge route). The highest version number
+  isn't necessarily the live one either: a deploy that fails and rolls back
+  leaves the version it published behind while CloudFront keeps running the
+  previous one.
+
+  1. Find the distribution ID in the app's own stack, in the Region you
+     deploy the app to (the distribution is always there, even when the edge
+     functions live in a `us-east-1` support stack). If this lists more than
+     one ID, pick the one whose domain name (`Distribution.DomainName`) or
+     alias (`Distribution.DistributionConfig.Aliases.Items`) from
+     `aws cloudfront get-distribution --id <distribution-id>` matches the
+     site URL in the stack output whose key contains `DistributionUrl`.
+  2. Check that the distribution's status is `Deployed`. While it's
+     `InProgress`, edge locations can still run versions its configuration no
+     longer lists, so wait and check again.
+  3. Read the Lambda@Edge version ARNs from the default cache behavior and
+     every other cache behavior. Each has the form
+     `arn:aws:lambda:us-east-1:<account>:function:<function-name>:<version>`
+     (the same ARN can appear on several behaviors). These versions are live:
+     keep them. The function names in these ARNs are the only functions to
+     prune.
+  4. For each of those functions, list its versions, and delete each numbered
+     version that step 3 didn't return. Skip `$LATEST`, which isn't a
+     published version. Always pass `--qualifier`: without it,
+     `delete-function` deletes the whole function and every version,
+     including the live one.
+
+  ```sh
+  # 1. The distribution ID (app stack, app Region)
+  aws cloudformation list-stack-resources --region <app-region> \
+  	--stack-name <app-stack-name> \
+  	--query "StackResourceSummaries[?ResourceType=='AWS::CloudFront::Distribution'].PhysicalResourceId"
+  # 2. Must print Deployed
+  aws cloudfront get-distribution --id <distribution-id> \
+  	--query 'Distribution.Status' --output text
+  # 3. The live version ARNs: keep these
+  aws cloudfront get-distribution-config --id <distribution-id> \
+  	--query '[DistributionConfig.DefaultCacheBehavior.LambdaFunctionAssociations.Items[].LambdaFunctionARN, DistributionConfig.CacheBehaviors.Items[].LambdaFunctionAssociations.Items[].LambdaFunctionARN][]'
+  # 4. Every version of one of those functions, then delete an unused one
+  aws lambda list-versions-by-function --region us-east-1 \
+  	--function-name <function-name> \
+  	--query 'Versions[].[Version,LastModified,CodeSize]' --output table
+  aws lambda delete-function --region us-east-1 \
+  	--function-name <function-name> --qualifier <unused-version>
+  ```
+
+  A version can only be deleted once CloudFront has removed its replicas:
+  until then Lambda rejects the delete, so wait a few hours after the deploy
+  that replaced it and try again. That rejection also protects a version that
+  another distribution still uses.
+
+## SvelteKit: the server's dependencies
+
+The SvelteKit adapter runs `@sveltejs/adapter-node`'s server, and the server
+function ships `build/` without your app's `node_modules`. adapter-node leaves
+each package in your `dependencies` (for example `aws-cdk-blocks`, whose
+`/server` entry a `+page.server.ts` imports) as an import that it expects to
+find in `node_modules` at runtime. So the deploy builds the server with its
+dependencies bundled:
+
+- The build runs with a Node.js preload (`NODE_OPTIONS=--import=…`) that hands
+  `vite build` a config in a temporary directory: it loads the config that Vite
+  itself would load (the file your build command names with `--config`, else
+  the first of `vite.config.{js,mjs,ts,cjs,mts,cts}` in the root that the
+  command names, else in the working directory), in the same ESM or CommonJS
+  format, and adds one build-only Vite plugin, which sets
+  `ssr.noExternal: true`. When the command leaves the config unclear (for
+  example `--config` given twice, or an option the preload doesn't know), the
+  build runs unchanged and says so. Nothing in your project is written or
+  renamed, so builds that overlap are safe and a `cdk watch` sees no change.
+  Your own adapter-node setup and the adapter's transparent build are treated
+  the same.
+- After the build, synth resolves every module the server in `build/` loads,
+  the way Node.js does from the importing file's place in `build/` (where the
+  deployed ZIP stores it, also for a symlinked file) and only inside `build/`
+  (`exports`, `imports`, `main`, the CommonJS file lookup, and the target file
+  has to exist; a symlink or relative path that leads outside `build/` counts
+  as missing, and scripts reached only through such a symlink aren't checked),
+  and also checks the files those resolve to. An `import` or `require()` of an
+  `@aws-sdk/*` package that the Lambda Node.js runtime ships passes, as the
+  runtime puts its copy on `NODE_PATH` and its Node.js reads `NODE_PATH` for
+  ESM too; an `@aws-sdk/*` package the runtime doesn't ship (for example
+  `@aws-sdk/client-lambda-web`) needs a copy in `build/`. The check fails with
+  `SvelteKitUnbundledDependencyError`, naming each missing module with the file
+  that imports it, for example a package you list in `ssr.external`. Remove it
+  from `ssr.external`, or, for a build whose config the preload couldn't tell,
+  set `ssr: { noExternal: true }` yourself. A dynamic `import()` or `require()`
+  that the code handles failing (a `require()` in a `try` with a `catch`, or an
+  `import()` awaited there or given a `.catch()`) is optional and doesn't fail
+  synth, and neither does a missing dependency of a file that only optional
+  loads reach, as the load then fails into the code's fallback.
+- `npm run destroy` skips this check, so a build left from before can't block
+  deleting the stack.
 
 ## SSR compute: Lambda or Lambda Web Functions
 
@@ -980,6 +1089,27 @@ sends. The cache-key limits in the table above are defaults, not hard caps.
 Static and image routes are not keyed on `cacheKeyCookies` /
 `cacheKeyHeaders`, and those cookies and headers are not forwarded to the
 origin on those routes (an auth-gated image source does not receive them).
+
+Image optimization requests (Next.js `/_next/image`, the Nuxt and Astro image
+endpoints) share the default behavior's cache key, and the optimizer picks the
+output format from the viewer's `Accept` header. CloudFront ignores
+`Vary: Accept`, so on image routes the edge router joins the viewer's `Accept`
+fields into one value, sends that value to the image optimizer as its only
+`Accept` field, and writes a SHA-256 digest of it into an
+`x-blocks-image-accept` header that the SSR cache policy keys on. The optimizer
+negotiates on exactly the value the cache key covers, so viewers that accept,
+reject (`image/webp;q=0`) or prefer different formats get separate cached
+copies, and a long `Accept` reaches the origin once, not twice. `Accept` is
+kept on image routes even when `cacheKeyHeaders` lists it (other
+`cacheKeyHeaders` entries are dropped there). `Accept` itself stays out of the
+default cache key,
+so pages keep one cache entry whatever `Accept` the browser sends. The router
+drops an `x-blocks-image-accept` header the viewer sends on any route, so with
+an image optimizer that name is reserved and synth rejects it in
+`cacheKeyHeaders`; without one the router leaves it alone. The header takes one
+of the cache-key header slots; when `cacheKeyHeaders` already uses all five, it
+stays out of the key and synth warns with
+`@aws-cdk-blocks/hosting:ImageAcceptNotInCacheKey`.
 
 ## Custom domains (CloudFront door)
 

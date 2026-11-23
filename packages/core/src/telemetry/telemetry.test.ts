@@ -853,7 +853,7 @@ describe('telemetry/identifiers first-run notice', () => {
     assert.ok(notice.includes('cdk cli-telemetry --disable'), notice);
     assert.ok(notice.includes('export CDK_DISABLE_CLI_TELEMETRY=1'), notice);
     assert.ok(notice.includes('https://docs.aws.amazon.com/cdk/v2/guide/cli-telemetry.html#telemetry-opt-out'), notice);
-    assert.doesNotMatch(notice, /AWS_BLOCKS_DISABLE_TELEMETRY|blocks-telemetry/, 'the Blocks opt-out is gone');
+    assert.doesNotMatch(notice, /AWS_BLOCKS_DISABLE_TELEMETRY|blocks-telemetry/, 'the AWS CDK Blocks opt-out is gone');
 
     rmSync(tmp, { recursive: true, force: true });
   });
@@ -890,6 +890,12 @@ describe('telemetry/identifiers first-run notice', () => {
 describe('telemetry/--telemetry-file flag', () => {
   const originalArgv = [...process.argv];
   const originalEnv = { ...process.env };
+
+  // Telemetry is on in this file (see the top), so a test here that does not set its
+  // own endpoint would send its event to the real collection endpoint.
+  beforeEach(() => {
+    process.env.BLOCKS_TELEMETRY_ENDPOINT = DEAD_ENDPOINT;
+  });
 
   afterEach(() => {
     process.argv = [...originalArgv];
