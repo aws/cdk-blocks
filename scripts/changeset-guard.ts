@@ -177,10 +177,18 @@ function getChangedFiles(): string[] {
 	return changedFilesCache;
 }
 
-/** Publishable @aws-cdk-blocks/* packages with file changes vs origin/main. */
+/** A package's CHANGELOG.md: release output that `changeset version` writes, not package content. */
+const isChangelogFile = (file: string): boolean => /^packages\/[^/]+\/CHANGELOG\.md$/.test(file);
+
+/**
+ * Publishable @aws-cdk-blocks/* packages with file changes vs origin/main.
+ * An edit to a package's CHANGELOG.md alone does not count: correcting the notes of a
+ * release that already shipped needs no new release.
+ */
 function getChangedPackages(): Set<string> {
 	const packages = new Set<string>();
 	for (const file of getChangedFiles()) {
+		if (isChangelogFile(file)) continue;
 		const match = file.match(/^packages\/([^/]+)\//);
 		if (!match) continue;
 
@@ -421,7 +429,7 @@ function blockMajor(): number {
 		return 0;
 	}
 
-	console.error("\n❌ Major version bumps are not allowed while Blocks is pre-release.\n");
+	console.error("\n❌ Major version bumps are not allowed while AWS CDK Blocks is pre-release.\n");
 	console.error("The following changeset(s) declare a `major` release:\n");
 	for (const { file, pkg } of majors) {
 		console.error(`   • ${pkg}  (.changeset/${file})`);

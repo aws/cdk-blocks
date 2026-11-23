@@ -49,7 +49,7 @@ def build_and_pack(commit, output):
     empty.touch()
     env = {key: value for key, value in os.environ.items()
            if key not in BUILD_ENV_DROP and not key.startswith('AWS_')}
-    env.update(HUSKY='0', BLOCKS_DISABLE_TELEMETRY='1', NPM_CONFIG_USERCONFIG='/dev/null',
+    env.update(HUSKY='0', CDK_DISABLE_CLI_TELEMETRY='1', NPM_CONFIG_USERCONFIG='/dev/null',
                NPM_CONFIG_GLOBALCONFIG=str(empty), NPM_CONFIG_CACHE=str(output / 'npm-cache'))
     try:
         with (output / 'build.log').open('w') as log:
@@ -253,7 +253,7 @@ def main():
     parser.add_argument('--concurrency', type=int, default=2,
                         help='concurrent Harbor runs; each container takes 2 CPUs and 6 GiB (default 2)')
     parser.add_argument('--output', type=Path, required=True, help='new or empty calibration directory')
-    parser.add_argument('--revision', default='HEAD', help='AWS Blocks revision to pack once (default HEAD)')
+    parser.add_argument('--revision', default='HEAD', help='CDK Blocks revision to pack once (default HEAD)')
     parser.add_argument('--registry', type=Path,
                         help='reuse an already packed dist-registry of --revision instead of building it')
     parser.add_argument('--profile', default=os.environ.get('HARBOR_AWS_PROFILE'),
