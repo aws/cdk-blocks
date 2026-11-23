@@ -971,14 +971,23 @@ new HostingConstruct(stack, 'Hosting', {
 
 ### Cache-Control on uploaded files
 
-Each uploaded file gets one of these `Cache-Control` values:
+Each file uploaded from the static directory gets one of these `Cache-Control`
+values:
 
 | Files | `Cache-Control` |
 |---|---|
 | Hashed assets (`staticAssets.immutablePaths`) | `public, max-age=31536000, immutable` |
 | HTML (`*.html`, prerendered pages included) | `max-age=0, must-revalidate` |
 | `staticAssets.noCachePaths` | `no-cache, no-store, must-revalidate` |
+| Fonts (`.woff2`, `.woff`, `.ttf`, `.otf`, `.eot`), hashed ones included | `staticAssets.cacheControl`, else `public, s-maxage=31536000, max-age=0, must-revalidate` |
 | Everything else | `staticAssets.cacheControl`, else `public, s-maxage=31536000, max-age=0, must-revalidate` |
+
+Fonts are uploaded again with an explicit `Content-Type`, after the other
+files, so a hashed font under `immutablePaths` (for example Next.js
+`_next/static/media/*.woff2`) gets the mutable value, not `immutable`:
+CloudFront still caches it for a year and the browser revalidates it. The error
+pages the construct uploads itself (`errorPages.notFound`,
+`errorPages.serverError` and the default 404 page) carry no `Cache-Control`.
 
 HTML is revalidated on every request, and because it carries no `no-store`,
 the CloudFront door keeps a copy at the edge and answers a repeat visit's
