@@ -491,9 +491,13 @@ Annotations.of(stack).acknowledgeWarning('@aws-cdk-blocks/hosting:PlainHttpFront
   the dynamic routes (server rendering, image optimization) go to the ALB.
   The static routes include the files the framework copies from its public
   folder (`robots.txt`, favicons, downloads), so they are cached at the edge
-  and a large one never meets the ALB's 1 MB response limit. (An Astro
-  `public/` folder that a page also renders under, such as `public/blog/`
-  next to `src/pages/blog/[slug].astro`, stays with the server.)
+  and skip the ALB's 1 MB response limit (within the edge's behavior budget;
+  over it, single files give way first, so hashed bundles such as
+  `/_astro/*` keep their S3 behavior). An Astro `public/` folder stays with
+  the server when a page could render under it: a same-named page or folder
+  in `src/pages`, a route an integration injects under it, or any top-level
+  dynamic page such as `[...slug].astro`. Its files are then subject to the
+  limit.
   The app's redirects, header rules and error pages apply at the edge to
   every response. A new build never hits the previous build's cached files,
   and the cutover waits for the build's uploads, the resolved runtime config

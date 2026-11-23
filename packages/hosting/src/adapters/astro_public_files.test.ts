@@ -21,13 +21,18 @@ import { buildFrontDoor } from '../constructs/custom_door.js';
 import { buildDoorInput } from '../constructs/door_input.js';
 
 /** An SSR Astro project with a finished build (`skipBuild: true`). */
-const scaffold = (tmp: string, opts: { pages: string[]; client: Record<string, string> }): void => {
+const scaffold = (tmp: string, opts: { pages: string[]; client: Record<string, string>; serverRoutes?: string[] }): void => {
   fs.mkdirSync(path.join(tmp, 'node_modules', 'astro'), { recursive: true });
   fs.writeFileSync(path.join(tmp, 'node_modules', 'astro', 'package.json'), JSON.stringify({ name: 'astro', version: '5.0.0' }));
   fs.writeFileSync(path.join(tmp, 'astro.config.mjs'), "export default { output: 'server' };\n");
   const serverDir = path.join(tmp, 'dist', 'server');
   fs.mkdirSync(serverDir, { recursive: true });
   fs.writeFileSync(path.join(serverDir, 'entry.mjs'), 'export const handler = () => {};');
+  if (opts.serverRoutes) {
+    // The route data Astro serializes into the server build (injected routes included).
+    const routes = opts.serverRoutes.map((route) => ({ routeData: { route, type: 'page', prerender: false } }));
+    fs.writeFileSync(path.join(serverDir, 'manifest_abc.mjs'), `const manifest = ${JSON.stringify({ routes })};\nexport { manifest };\n`);
+  }
   for (const [rel, body] of Object.entries(opts.client)) {
     const file = path.join(tmp, 'dist', 'client', rel);
     fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -90,6 +95,28 @@ void describe('astroAdapter — public files are static routes', () => {
     assert.ok(!patterns.includes('/images/*'), 'the catch-all page may render under /images/');
   });
 
+  it('keeps a public folder with the server when an injected route renders under it (server build manifest)', () => {
+    scaffold(tmp, {
+      pages: ['index.astro'],
+      client: { 'robots.txt': '', 'docs/diagram.png': '', 'images/logo.png': '' },
+      // An integration's injectRoute: no file in src/pages.
+      serverRoutes: ['/', '/docs/[...slug]', '/_image'],
+    });
+    const patterns = staticPatterns(tmp);
+    assert.ok(!patterns.includes('/docs/*'), 'an injected on-demand route may render under /docs/');
+    assert.ok(patterns.includes('/images/*'), 'a folder no route claims is still static');
+    assert.ok(patterns.includes('/robots.txt'));
+  });
+
+  it('keeps every public folder with the server when an injected route is dynamic at the top level', () => {
+    scaffold(tmp, {
+      pages: ['index.astro'],
+      client: { 'images/logo.png': '' },
+      serverRoutes: ['/[lang]/[...slug]'],
+    });
+    assert.ok(!staticPatterns(tmp).includes('/images/*'));
+  });
+
   it('keeps public folders with the server when there is no src/pages to check against', () => {
     scaffold(tmp, { pages: [], client: { 'robots.txt': '', 'images/logo.png': '' } });
     const patterns = staticPatterns(tmp);
@@ -107,11 +134,7 @@ void describe('astroAdapter — the stacked door edge serves public files from S
     fs.rmSync(tmp, { recursive: true, force: true });
   });
 
-  it('gives /robots.txt, /favicon.svg and /big.bin S3 behaviors; the pages stay on the router', () => {
-    scaffold(tmp, {
-      pages: ['index.astro', 'dynamic.astro'],
-      client: { 'robots.txt': '', 'favicon.svg': '', 'big.bin': '', '_astro/app.abc123.js': '' },
-    });
+  const edgeConfig = () => {
     const manifest = astroAdapter({ projectDir: tmp, skipBuild: true });
     const plan = buildHostingPlan({ manifest, buildId: 'b1', hasServer: true, hasImage: false });
     const stack = new Stack(new App(), 'AstroEdge', { env: { account: '111111111111', region: 'us-west-2' } });
@@ -149,10 +172,35 @@ void describe('astroAdapter — the stacked door edge serves public files from S
     };
     const s3Id = config.Origins.find((o) => o.S3OriginConfig)?.Id;
     assert.ok(s3Id, 'the edge has an S3 origin');
+    return { config, s3Id };
+  };
+
+  it('gives /robots.txt, /favicon.svg and /big.bin S3 behaviors; the pages stay on the router', () => {
+    scaffold(tmp, {
+      pages: ['index.astro', 'dynamic.astro'],
+      client: { 'robots.txt': '', 'favicon.svg': '', 'big.bin': '', '_astro/app.abc123.js': '' },
+    });
+    const { config, s3Id } = edgeConfig();
     const originOf = (pattern: string) => config.CacheBehaviors?.find((b) => b.PathPattern === pattern)?.TargetOriginId;
     for (const p of ['/robots.txt', '/favicon.svg', '/big.bin', '/_astro/*']) {
       assert.equal(originOf(p), s3Id, `${p} is served from S3 at the edge`);
     }
     assert.notEqual(config.DefaultCacheBehavior.TargetOriginId, s3Id, 'the pages go to the router');
+  });
+
+  it('over the behavior budget, /_astro/* keeps its S3 behavior; single public files give way first', () => {
+    const client: Record<string, string> = { '_astro/app.abc123.js': '' };
+    // 30 top-level public files with names long enough to sort ahead of /_astro/*.
+    for (let i = 0; i < 30; i++) client[`favicon-${String(i).padStart(3, '0')}x.png`] = '';
+    scaffold(tmp, { pages: ['index.astro'], client });
+    const { config, s3Id } = edgeConfig();
+    const behaviors = config.CacheBehaviors ?? [];
+    assert.equal(behaviors.length, 24, 'the edge is at its behavior budget');
+    assert.equal(
+      behaviors.find((b) => b.PathPattern === '/_astro/*')?.TargetOriginId,
+      s3Id,
+      '/_astro/* is still served from S3 at the edge',
+    );
+    assert.notEqual(config.DefaultCacheBehavior.TargetOriginId, s3Id, 'the router is the default and serves the rest');
   });
 });

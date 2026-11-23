@@ -1320,7 +1320,7 @@ const buildSsrManifest = (input: {
   // The files Astro copies from `public/` into `dist/client/` (robots.txt,
   // favicons, downloads) are static too: route them to S3 so no front door
   // sends them through the SSR server (see `publicFileRoutes`).
-  routes.push(...publicFileRoutes(clientDir, pagesDir));
+  routes.push(...publicFileRoutes(clientDir, pagesDir, serverRouteSegments(serverDir)));
 
   routes.push({ pattern: '/*', target: 'default' });
   manifest.routes = dedupeRoutes(routes);
@@ -1351,13 +1351,15 @@ const ROOT_AND_ERROR_HTML = new Set(['index.html', '404.html', '500.html']);
  *   - a folder → `/<name>/*`, only when no page can render under it: the
  *     folder holds no HTML (prerendered pages are routed one by one above),
  *     and `src/pages` has no `<name>` entry and no top-level dynamic page
- *     (`[slug].astro`, `[...path]/`). Otherwise the folder stays with the
- *     server, which serves its files as before. Without a readable
- *     `src/pages` (routes injected by integrations only) no folder is routed.
+ *     (`[slug].astro`, `[...path]/`), and no route in the server build's
+ *     manifest starts with `<name>` or a dynamic segment (`segments`: routes an
+ *     integration injects, i18n fallbacks). Otherwise the folder stays with
+ *     the server, which serves its files as before. Without a readable
+ *     `src/pages` no folder is routed.
  *
  * `_astro/` (hashed assets) is routed by the caller.
  */
-const publicFileRoutes = (clientDir: string, pagesDir: string): RouteBehavior[] => {
+const publicFileRoutes = (clientDir: string, pagesDir: string, segments: ReadonlySet<string> = new Set()): RouteBehavior[] => {
   if (!fs.existsSync(clientDir)) return [];
   let pageEntries: string[] | undefined;
   try {
@@ -1365,10 +1367,12 @@ const publicFileRoutes = (clientDir: string, pagesDir: string): RouteBehavior[] 
   } catch {
     pageEntries = undefined;
   }
-  const hasDynamicTopLevelPage = pageEntries?.some((name) => name.startsWith('[')) ?? true;
+  const hasDynamicTopLevelPage =
+    (pageEntries?.some((name) => name.startsWith('[')) ?? true) || [...segments].some((seg) => seg.startsWith('['));
   const pageClaims = (name: string): boolean =>
     pageEntries === undefined ||
     hasDynamicTopLevelPage ||
+    segments.has(name) ||
     pageEntries.some((entry) => entry === name || entry.startsWith(`${name}.`));
   const routes: RouteBehavior[] = [];
   for (const entry of fs.readdirSync(clientDir, { withFileTypes: true })) {
@@ -1384,6 +1388,32 @@ const publicFileRoutes = (clientDir: string, pagesDir: string): RouteBehavior[] 
     routes.push({ pattern: `/${entry.name}/*`, target: 'static' });
   }
   return routes;
+};
+
+/**
+ * The first path segment of every route the server build knows, read from the
+ * route data Astro serializes into `dist/server` (`"route":"/api/auth/[...auth]"`).
+ * That list includes what `src/pages` doesn't show: routes an integration
+ * injects (`injectRoute`) and i18n fallback routes. Used only to keep more
+ * `public/` folders with the server, so a format it doesn't recognize just
+ * leaves the `src/pages` check in charge.
+ */
+const serverRouteSegments = (serverDir: string): Set<string> => {
+  const segments = new Set<string>();
+  if (!fs.existsSync(serverDir)) return segments;
+  for (const rel of fg.sync('**/*.mjs', { cwd: serverDir, ignore: ['**/node_modules/**'] })) {
+    let source: string;
+    try {
+      source = fs.readFileSync(path.join(serverDir, rel), 'utf8');
+    } catch {
+      continue;
+    }
+    if (!source.includes('"route":"')) continue;
+    for (const m of source.matchAll(/"route":"\/([^"/]*)/g)) {
+      if (m[1]) segments.add(m[1]);
+    }
+  }
+  return segments;
 };
 
 const detectErrorPages = (
