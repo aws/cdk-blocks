@@ -105,17 +105,18 @@ export class CronJob<T = void> extends Scope {
 	private _start(): void {
 		if (this._schedule.type === 'rate') {
 			console.log(`[CronJob:${this.id}] scheduled: rate(${formatMs(this._schedule.intervalMs)})`);
-			// Slots count from the start time at whole seconds, so each reported
-			// scheduledTime matches the second-precision time EventBridge sends.
+			// Slots count from the start time at whole seconds; `_fire` drops milliseconds either way.
 			const startMs = Math.floor(Date.now() / 1000) * 1000;
 			const intervalMs = this._schedule.intervalMs;
 			if (intervalMs > MAX_TIMEOUT_MS) {
 				this._scheduleLongRateTick(startMs + intervalMs);
 			} else {
-				let slot = 0;
+				let lastSlot = 0;
 				this._timer = setInterval(() => {
-					slot++;
-					this._fire(startMs + slot * intervalMs);
+					// Count slots from the wall clock, not from ticks: a suspended machine
+					// pauses the interval, and the next run reports the latest slot due.
+					lastSlot = Math.max(lastSlot + 1, Math.floor((Date.now() - startMs) / intervalMs));
+					this._fire(startMs + lastSlot * intervalMs);
 				}, intervalMs);
 				(this._timer as NodeJS.Timeout).unref();
 			}
@@ -128,8 +129,9 @@ export class CronJob<T = void> extends Scope {
 	 * Fires a rate schedule longer than `setTimeout`/`setInterval` allow (about 24.8 days). Node
 	 * clamps a longer delay to 1 ms, so wait for `fireAt` in steps, then fire and schedule the next one.
 	 * If the clock jumped past several intervals (for example the machine was asleep), the handler runs
-	 * once, with `scheduledTime` set to the latest slot that was due, and the next run is the first later slot on the same cadence: like EventBridge Scheduler, the
-	 * mock does not run the slots it missed.
+	 * once, with `scheduledTime` set to the latest slot that was due, and the next run is the first
+	 * later slot on the same cadence: like EventBridge Scheduler, the mock does not run the slots it
+	 * missed.
 	 */
 	private _scheduleLongRateTick(fireAt: number): void {
 		const delayMs = fireAt - Date.now();

@@ -153,8 +153,9 @@ describe('CronJob mock – scheduledTime is the schedule slot', () => {
 			},
 		});
 
-		// The timer runs 10 ms after the 00:10 slot, as a real timer often does.
-		mock.timers.tick(10 * 60_000 + 10);
+		// The timer runs 1.5 s after the 00:10 slot, more than the milliseconds the format
+		// drops, so only an event that carries the slot passes.
+		mock.timers.tick(10 * 60_000 + 1_500);
 		assert.deepStrictEqual(fired, ['2026-03-01T00:10:00Z']);
 	});
 
@@ -167,9 +168,36 @@ describe('CronJob mock – scheduledTime is the schedule slot', () => {
 			},
 		});
 
-		mock.timers.tick(5 * 60_000 + 10);
+		// As above, the first timer runs 1.5 s late so the test checks the slot, not the format.
+		mock.timers.tick(5 * 60_000 + 1_500);
 		mock.timers.tick(5 * 60_000);
 		assert.deepStrictEqual(fired, ['2026-03-01T00:05:00Z', '2026-03-01T00:10:00Z']);
+	});
+
+	test('a rate schedule reports the latest due slot after the machine wakes from sleep', () => {
+		// During a suspend the wall clock moves on but setInterval's monotonic clock does not. The
+		// mocked timers stand in for the monotonic clock and a stubbed Date.now for the wall clock.
+		// (mock.timers.setTime would leave the interval's due times behind and replay every one.)
+		mock.timers.reset();
+		mock.timers.enable({ apis: ['setInterval'] });
+		let wallMs = Date.parse('2026-03-01T00:00:00Z');
+		mock.method(Date, 'now', () => wallMs);
+		const fired: string[] = [];
+		new CronJob(fakeScope, 'every-five-after-sleep', {
+			schedule: 'rate(5 minutes)',
+			handler: async (event) => {
+				fired.push(event.scheduledTime);
+			},
+		});
+
+		wallMs += 5 * 60_000;
+		mock.timers.tick(5 * 60_000);
+		// One hour asleep: the wall clock gains an hour more than the interval saw.
+		wallMs += 3_600_000 + 5 * 60_000;
+		mock.timers.tick(5 * 60_000);
+		wallMs += 5 * 60_000;
+		mock.timers.tick(5 * 60_000);
+		assert.deepStrictEqual(fired, ['2026-03-01T00:05:00Z', '2026-03-01T01:10:00Z', '2026-03-01T01:15:00Z']);
 	});
 });
 
