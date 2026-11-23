@@ -11,10 +11,13 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'node:test';
-import { App, type CfnElement, Stack } from 'aws-cdk-lib';
+import { App, type CfnElement, NestedStack, Stack } from 'aws-cdk-lib';
 import { Match, Template } from 'aws-cdk-lib/assertions';
 import { CDN_INVALIDATION_BASE_PATH_ENV, CDN_INVALIDATION_PARAM_ENV } from '../adapters/shared/cdn_invalidation_env.js';
 import type { CacheConfig, DeployManifest } from '../manifest/types.js';
+import { Distribution } from 'aws-cdk-lib/aws-cloudfront';
+import { Code, Function as LambdaFunction, Runtime } from 'aws-cdk-lib/aws-lambda';
+import { CdnInvalidationConstruct } from './cdn_invalidation.js';
 import { HostingConstruct, type HostingConstructProps } from './hosting_construct.js';
 
 const API_URL = 'https://abc123.execute-api.us-west-2.amazonaws.com/prod/cdk-blocks/api';
@@ -142,7 +145,9 @@ describe('HostingConstruct — CloudFront invalidation on on-demand revalidation
 		assert.deepEqual(param.Properties?.Value, { Ref: distributionId });
 		const name = param.Properties?.Name;
 		assert.equal(typeof name, 'string');
-		assert.match(name as string, /^\/cdk-blocks\/hosting\/App\/[0-9a-f]+\/distribution-id$/);
+		// Under the stack's name, so an app with `defaults.appIdentity` (whose
+		// stack name carries the app's prefix) may create and read it.
+		assert.match(name as string, /^\/App\/hosting\/[0-9a-f]+\/distribution-id$/);
 
 		// The server's environment carries the NAME (a plain string), not a
 		// reference to the distribution, so there is no dependency cycle.
@@ -194,6 +199,28 @@ describe('HostingConstruct — CloudFront invalidation on on-demand revalidation
 			};
 			for (const id of graph.keys()) visit(id, []);
 		}
+	});
+
+	it('names the parameter after the top-level stack, so it synthesizes inside a NestedStack', () => {
+		const stack = new Stack(new App({ context: { sandboxMode: 'true' } }), 'app-a', {
+			env: { account: '111111111111', region: 'us-west-2' },
+		});
+		const nested = new NestedStack(stack, 'Site');
+		// A NestedStack's own name is a deploy-time token.
+		new CdnInvalidationConstruct(nested, 'CdnInvalidation', {
+			distribution: Distribution.fromDistributionAttributes(nested, 'Dist', {
+				distributionId: 'E2EXAMPLE123',
+				domainName: 'd111111abcdef8.cloudfront.net',
+			}),
+			server: new LambdaFunction(nested, 'Server', {
+				runtime: Runtime.NODEJS_22_X,
+				handler: 'index.handler',
+				code: Code.fromInline('export const handler = async () => ({});'),
+			}),
+		});
+		const params = resources(Template.fromStack(nested), 'AWS::SSM::Parameter');
+		assert.equal(params.length, 1);
+		assert.match(params[0][1].Properties?.Name as string, /^\/app-a\/hosting\/[0-9a-f]+\/distribution-id$/);
 	});
 
 	it('passes the basePath to the server', () => {

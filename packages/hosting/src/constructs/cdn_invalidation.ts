@@ -72,12 +72,20 @@ export class CdnInvalidationConstruct extends Construct {
 		}
 		const stack = Stack.of(this);
 
-		// Unique per construct path within the stack; built from synth-time
-		// strings only, so the server's environment doesn't reference the
-		// distribution.
-		const parameterName = `/cdk-blocks/hosting/${stack.stackName}/${this.node.addr}/distribution-id`;
+		// Unique per construct in the app; built from synth-time strings only,
+		// so the server's environment doesn't reference the distribution. It
+		// starts with the top-level stack's name: under `defaults.appIdentity`
+		// that name carries the app's prefix, which is the only place the app's
+		// permissions let it create and read parameters. A nested stack's own
+		// name is a deploy-time token, so its parent's name is used instead.
+		let root = stack;
+		while (root.nestedStackParent) root = root.nestedStackParent;
+		const parameterName = `/${root.stackName}/hosting/${this.node.addr}/distribution-id`;
 		this.parameter = new StringParameter(this, 'DistributionId', {
 			parameterName,
+			// A hierarchical name (it starts with `/`), stated so the ARN is
+			// built without parsing the name.
+			simpleName: false,
 			stringValue: props.distribution.distributionId,
 			description: 'CloudFront distribution id the server invalidates after an on-demand revalidation.',
 		});
