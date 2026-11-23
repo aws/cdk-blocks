@@ -1124,9 +1124,19 @@ the distribution after each on-demand revalidation:
 - `revalidatePath('/blog/hello')` invalidates `/blog/hello`. A layout or
   dynamic-segment form (`revalidatePath('/blog/[slug]', 'page')`) invalidates
   the cached pages under it.
-- One invalidation path covers both the HTML and the RSC payload of a page.
-  With a `basePath` the paths are prefixed with it. A revalidation that touches
-  more than 50 pages issues a single `/*` instead.
+- Each page gets one wildcard path, `/blog/hello*`, which covers its HTML and
+  RSC payload, its query-string variants (`/blog/hello?ref=x`, cached apart
+  because the SSR cache policy keys on the query string) and its
+  `trailingSlash: true` form (`/blog/hello/`). The wildcard also takes URLs
+  that start with the same characters (`/blog/hello-world`, `/blog/hello/2`);
+  those pages cost one extra origin request. The root page gets the exact `/`
+  instead (a `/*` would purge the whole distribution), so its query-string
+  variants keep their cached copy until their `s-maxage` runs out.
+- A Pages Router page also gets its data route
+  (`/_next/data/<build id>/blog/hello.json*`).
+- With a `basePath` the paths are prefixed with it. A revalidation that touches
+  more than 50 pages issues a single `/*` (`<basePath>*` with a `basePath`)
+  instead.
 
 Each revalidation issues one CloudFront invalidation request. CloudFront allows
 1,000 invalidation paths a month at no charge and bills each path after that
@@ -1138,9 +1148,11 @@ minutes. A revalidation still succeeds if the invalidation fails: the
 error is logged in the server function's log group, and the edge keeps the old
 page until its `s-maxage` runs out.
 
-This is set up when the adapter generates `open-next.config.ts` (the default).
-It is not set up for a project with its own `open-next.config.ts`, a build
-with `runtime: 'edge'` routes (OpenNext also compiles the config for the edge
+This is set up when the adapter generates `open-next.config.ts` (the default)
+and the build uses `@opennextjs/aws` 4.1.14 or later (the adapter's default;
+earlier releases don't pass `revalidateTag` to the handler). It is not set up
+for an older `@opennextjs/aws`, a project with its own `open-next.config.ts`, a
+build with `runtime: 'edge'` routes (OpenNext also compiles the config for the edge
 runtime, where the handler can't run), a preview deploy without the tag cache,
 or front doors other than CloudFront (they don't cache SSR responses). There,
 an on-demand revalidation reaches the edge once the page's `s-maxage` runs out

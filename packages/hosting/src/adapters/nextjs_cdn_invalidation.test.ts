@@ -61,6 +61,12 @@ void describe('cacheKeyToPagePath', () => {
 		assert.strictEqual(cacheKeyToPagePath(''), undefined);
 	});
 
+	void it("skips 'use cache' (composable cache) keys, which are not page paths", () => {
+		// Next's serialised `[buildId, id, args]` for a `'use cache'` function.
+		assert.strictEqual(cacheKeyToPagePath(`["development","${'7f'.repeat(21)}",[]]`), undefined);
+		assert.strictEqual(cacheKeyToPagePath(`["b1","${'c'.repeat(42)}",[{"slug":"hello"}]]`), undefined);
+	});
+
 	void it('reads the path-style keys of older Next releases', () => {
 		assert.deepStrictEqual(cacheKeyToPagePath('blog/hello'), { path: '/blog/hello', pagesRouter: false });
 		assert.deepStrictEqual(cacheKeyToPagePath('index'), { path: '/', pagesRouter: false });
@@ -78,14 +84,42 @@ void describe('toInvalidationPaths', () => {
 				],
 				{ basePath: '/docs', buildId: 'B1' },
 			),
-			['/docs/a', '/docs', '/docs/_next/data/B1/index.json'],
+			['/docs/a*', '/docs', '/docs/', '/docs/_next/data/B1/index.json*'],
 		);
 	});
 
-	void it('percent-encodes path segments', () => {
+	void it('covers the query-string and trailing-slash variants of a page with one wildcard path', () => {
+		// The SSR cache policy keys on the query string (`/isr-tag?utm_source=x`),
+		// and `trailingSlash: true` caches the page as `/isr-tag/`.
+		assert.deepStrictEqual(
+			toInvalidationPaths([
+				{ path: '/isr-tag', pagesRouter: false },
+				{ path: '/blog/hello/', pagesRouter: false },
+			]),
+			['/isr-tag*', '/blog/hello*'],
+		);
+		// The root page stays exact: a `/*` would purge the whole distribution.
+		assert.deepStrictEqual(toInvalidationPaths([{ path: '/', pagesRouter: false }]), ['/']);
+	});
+
+	void it('percent-encodes only non-ASCII and RFC 1738 unsafe characters', () => {
 		assert.deepStrictEqual(toInvalidationPaths([{ path: '/blog/héllo world', pagesRouter: false }]), [
-			'/blog/h%C3%A9llo%20world',
+			'/blog/h%C3%A9llo%20world*',
 		]);
+		// CloudFront misses an invalidation whose safe characters are encoded.
+		assert.deepStrictEqual(
+			toInvalidationPaths([
+				{ path: '/@alice', pagesRouter: false },
+				{ path: '/tags/c++', pagesRouter: false },
+				{ path: '/a:b,c;d=e&f$g', pagesRouter: false },
+				{ path: '/tags/c%2B%2B', pagesRouter: false },
+			]),
+			['/@alice*', '/tags/c++*', '/a:b,c;d=e&f$g*'],
+		);
+	});
+
+	void it('cuts a path back before a ~, which CloudFront does not accept', () => {
+		assert.deepStrictEqual(toInvalidationPaths([{ path: '/users/~bob', pagesRouter: false }]), ['/users/*']);
 	});
 
 	void it(`collapses more than ${MAX_INVALIDATION_PATHS} paths into one /*`, () => {
@@ -94,7 +128,7 @@ void describe('toInvalidationPaths', () => {
 			pagesRouter: false,
 		}));
 		assert.deepStrictEqual(toInvalidationPaths(pages), ['/*']);
-		assert.deepStrictEqual(toInvalidationPaths(pages, { basePath: '/docs/' }), ['/docs/*']);
+		assert.deepStrictEqual(toInvalidationPaths(pages, { basePath: '/docs/' }), ['/docs*']);
 	});
 });
 
@@ -104,7 +138,7 @@ void describe('createCdnInvalidationHandler', () => {
 		// two data-cache entries and the page itself.
 		const { handler, calls, lookups } = fakeHandler({ byTag: { kb: [HASH, 'b'.repeat(64), PAGE_KEY] } });
 		await handler.invalidateTags(['kb']);
-		assert.deepStrictEqual(calls, [{ distributionId: 'E2EXAMPLE123', paths: ['/isr-tag'] }]);
+		assert.deepStrictEqual(calls, [{ distributionId: 'E2EXAMPLE123', paths: ['/isr-tag*'] }]);
 		assert.deepStrictEqual(lookups, ['/cdk-blocks/hosting/App/x/distribution-id']);
 	});
 
@@ -118,7 +152,7 @@ void describe('createCdnInvalidationHandler', () => {
 		await handler.invalidateTags(['_N_T_/blog/[slug]/page']);
 		assert.deepStrictEqual(
 			calls.map((c) => c.paths),
-			[['/isr'], ['/never-cached']],
+			[['/isr*'], ['/never-cached*']],
 		);
 	});
 
@@ -141,7 +175,7 @@ void describe('createCdnInvalidationHandler', () => {
 			tagCache: () => ({ getPathsByTags: async () => [`/route-cache/APP_PAGE/${HASH}/$/news`] }),
 		});
 		await handler.invalidateTags(['news']);
-		assert.deepStrictEqual(calls, [['/news']]);
+		assert.deepStrictEqual(calls, [['/news*']]);
 	});
 
 	void it('invalidates the paths OpenNext passes after res.revalidate / an ISR refresh', async () => {
@@ -157,10 +191,41 @@ void describe('createCdnInvalidationHandler', () => {
 			{ initialPath: 'pages-page', resolvedRoutes: [{ route: '/pages-page', type: 'page' }] },
 		]);
 		assert.deepStrictEqual(calls[0]?.paths, [
-			'/docs/app-page',
-			'/docs/pages-page',
-			'/docs/_next/data/B1/pages-page.json',
+			'/docs/app-page*',
+			'/docs/pages-page*',
+			'/docs/_next/data/B1/pages-page.json*',
 		]);
+	});
+
+	void it('does not prefix the basePath again onto a path that already carries it', async () => {
+		const { handler, calls } = fakeHandler({
+			env: {
+				[CDN_INVALIDATION_PARAM_ENV]: 'p',
+				[CDN_INVALIDATION_BASE_PATH_ENV]: '/docs',
+				NEXT_BUILD_ID: 'B1',
+			},
+		});
+		// `res.revalidate('/docs/blog/hello')` with `basePath: '/docs'`.
+		await handler.invalidatePaths([
+			{ initialPath: '/docs/blog/hello', resolvedRoutes: [{ route: '/blog/[slug]', type: 'page' }] },
+			{ initialPath: '/docs', resolvedRoutes: [{ route: '/', type: 'app' }] },
+		]);
+		assert.deepStrictEqual(calls[0]?.paths, [
+			'/docs/blog/hello*',
+			'/docs/_next/data/B1/blog/hello.json*',
+			'/docs',
+			'/docs/',
+		]);
+	});
+
+	void it("builds the data route from Next's build id, not the deploymentId", async () => {
+		// With `deploymentId` set, OpenNext sets OPEN_NEXT_BUILD_ID to it while
+		// `/_next/data/<id>/…` URLs keep Next's build id (NEXT_BUILD_ID).
+		const { handler, calls } = fakeHandler({
+			env: { [CDN_INVALIDATION_PARAM_ENV]: 'p', NEXT_BUILD_ID: 'NEXTID', OPEN_NEXT_BUILD_ID: 'dpl_1' },
+		});
+		await handler.invalidatePaths([{ initialPath: '/blog/hello', resolvedRoutes: [{ type: 'page' }] }]);
+		assert.deepStrictEqual(calls[0]?.paths, ['/blog/hello*', '/_next/data/NEXTID/blog/hello.json*']);
 	});
 
 	void it('is a no-op without the distribution parameter (another front door, local runs)', async () => {
@@ -172,7 +237,7 @@ void describe('createCdnInvalidationHandler', () => {
 	});
 
 	void it('issues nothing when no tagged page is cached', async () => {
-		const { handler, calls } = fakeHandler({ byTag: { kb: [HASH] } });
+		const { handler, calls } = fakeHandler({ byTag: { kb: [HASH, `["b1","${'c'.repeat(42)}",[]]`] } });
 		await handler.invalidateTags(['kb']);
 		assert.strictEqual(calls.length, 0);
 	});
@@ -194,7 +259,7 @@ void describe('createCdnInvalidationHandler', () => {
 		});
 		await assert.rejects(handler.invalidateTags(['kb']), /throttled/);
 		await handler.invalidateTags(['kb']);
-		assert.deepStrictEqual(calls, [['/isr-tag']]);
+		assert.deepStrictEqual(calls, [['/isr-tag*']]);
 	});
 });
 
@@ -227,14 +292,18 @@ void describe('nextjsAdapter — CloudFront invalidation on on-demand revalidati
 	let configDuringBuild: string | undefined;
 	let lenientBackup: string | undefined;
 	let withEdge = false;
+	/** Workspace build: OpenNext nests the real bundle under `default/<workspace-path>/`. */
+	let nestedUnder: string | undefined;
 
 	const writeOutput = (config: string | undefined): void => {
 		const openNextDir = path.join(tmpDir, '.open-next');
 		const serverDir = path.join(openNextDir, 'server-functions', 'default');
 		fs.mkdirSync(serverDir, { recursive: true });
 		fs.writeFileSync(path.join(serverDir, 'index.mjs'), 'export const handler = async () => {};');
+		const configDir = nestedUnder ? path.join(serverDir, nestedUnder) : serverDir;
+		fs.mkdirSync(configDir, { recursive: true });
 		// OpenNext copies its compiled config into every function bundle.
-		if (config !== undefined) fs.writeFileSync(path.join(serverDir, 'open-next.config.mjs'), config);
+		if (config !== undefined) fs.writeFileSync(path.join(configDir, 'open-next.config.mjs'), config);
 		fs.mkdirSync(path.join(openNextDir, 'assets'), { recursive: true });
 		fs.mkdirSync(path.join(openNextDir, 'cache'), { recursive: true });
 		fs.mkdirSync(path.join(openNextDir, 'revalidation-function'), { recursive: true });
@@ -266,6 +335,7 @@ void describe('nextjsAdapter — CloudFront invalidation on on-demand revalidati
 		tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hosting-nextjs-cdn-inval-'));
 		configDuringBuild = undefined;
 		withEdge = false;
+		nestedUnder = undefined;
 		mock.method(spawn, 'sync', () => {
 			const cfg = path.join(tmpDir, 'open-next.config.ts');
 			configDuringBuild = fs.existsSync(cfg) ? fs.readFileSync(cfg, 'utf-8') : undefined;
@@ -286,7 +356,7 @@ void describe('nextjsAdapter — CloudFront invalidation on on-demand revalidati
 
 	void it('installs the CloudFront invalidation handler and flags the cache for it', () => {
 		const manifest = nextjsAdapter({ projectDir: tmpDir });
-		assert.match(configDuringBuild ?? '', /cdnInvalidation: \(\) =>/);
+		assert.match(configDuringBuild ?? '', /cdnInvalidation: async \(\) =>/);
 		assert.doesNotMatch(configDuringBuild ?? '', /^import /m, 'no static import: OpenNext keeps imports external');
 		assert.ok(fs.existsSync(path.join(serverDir(), CDN_INVALIDATION_BUNDLE_FILE)), 'the handler bundle ships');
 		assert.strictEqual(manifest.cache?.cdnInvalidation, true);
@@ -313,6 +383,48 @@ void describe('nextjsAdapter — CloudFront invalidation on on-demand revalidati
 		} finally {
 			fs.rmSync(lambdaDir, { recursive: true, force: true });
 		}
+	});
+
+	void it('ships the handler next to the nested config of a workspace (monorepo) build', () => {
+		nestedUnder = path.join('apps', 'web');
+		const manifest = nextjsAdapter({ projectDir: tmpDir });
+		const nested = path.join(serverDir(), 'apps', 'web');
+		assert.ok(fs.existsSync(path.join(nested, CDN_INVALIDATION_BUNDLE_FILE)), 'the bundle sits next to the config');
+		assert.strictEqual(manifest.cache?.cdnInvalidation, true);
+	});
+
+	void it('loads the handler bundle on the first revalidation, not when the override is resolved', async () => {
+		nextjsAdapter({ projectDir: tmpDir });
+		// Without the bundle (as if it were never copied), resolving the override
+		// (what OpenNext does on every cold start) still works; only a
+		// revalidation fails, and OpenNext logs it.
+		const lambdaDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hosting-task-'));
+		try {
+			fs.copyFileSync(path.join(serverDir(), 'open-next.config.mjs'), path.join(lambdaDir, 'open-next.config.mjs'));
+			const config = (await import(pathToFileURL(path.join(lambdaDir, 'open-next.config.mjs')).href)) as {
+				default: {
+					default: {
+						override: {
+							cdnInvalidation: () => Promise<{ name: string; invalidateTags: (t: string[]) => Promise<void> }>;
+						};
+					};
+				};
+			};
+			const resolved = await config.default.default.override.cdnInvalidation();
+			assert.strictEqual(resolved.name, CDN_INVALIDATION_HANDLER_NAME);
+			await assert.rejects(resolved.invalidateTags(['kb']), /Cannot find module|ERR_MODULE_NOT_FOUND/);
+		} finally {
+			fs.rmSync(lambdaDir, { recursive: true, force: true });
+		}
+	});
+
+	void it('leaves it out for @opennextjs/aws before 4.1.14, which never calls invalidateTags', () => {
+		const pkgDir = path.join(tmpDir, 'node_modules', '@opennextjs', 'aws');
+		fs.mkdirSync(pkgDir, { recursive: true });
+		fs.writeFileSync(path.join(pkgDir, 'package.json'), JSON.stringify({ name: '@opennextjs/aws', version: '3.10.4' }));
+		const manifest = nextjsAdapter({ projectDir: tmpDir });
+		assert.doesNotMatch(configDuringBuild ?? '', /cdnInvalidation/);
+		assert.strictEqual(manifest.cache?.cdnInvalidation, undefined);
 	});
 
 	void it("leaves a project's own open-next.config.ts alone", () => {

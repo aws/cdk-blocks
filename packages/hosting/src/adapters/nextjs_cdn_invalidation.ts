@@ -58,6 +58,17 @@ const ROUTE_CACHE_KEY = /^\/?route-cache\/(PAGES|APP_PAGE|APP_ROUTE)\/[0-9a-f]{6
 /** A fetch / `unstable_cache` entry key: never a CDN path. */
 const DATA_CACHE_KEY = /^[0-9a-f]{64}$/;
 
+/**
+ * A path-style page key of older Next releases (`blog/hello`, `index`): no
+ * whitespace, quotes, brackets, braces or commas. A `'use cache'` (composable cache) key is Next's
+ * serialised `[id, args, …]` (brackets, quotes, commas between them) and
+ * never matches, so it is not mistaken for a page.
+ */
+const PATH_STYLE_KEY = /^[^\s"'[\]{},\\<>^`|]+$/u;
+
+/** RFC 1738 unsafe characters, which CloudFront wants percent-encoded in an invalidation path. */
+const RFC1738_UNSAFE = new Set([' ', '<', '>', '"', '#', '%', '{', '}', '|', '\\', '^', '[', ']', '`']);
+
 /** A path OpenNext hands to `invalidatePaths` (a subset of its `CDNPath`). */
 export interface CdnPath {
 	initialPath: string;
@@ -104,7 +115,8 @@ function denormalizePagePath(page: string): string {
 
 /**
  * The page path a tag-cache key stands for, or `undefined` for a data-cache
- * (fetch / `unstable_cache`) key, which the CDN never caches.
+ * (fetch / `unstable_cache`) key or a `'use cache'` (composable cache) key,
+ * which the CDN never caches.
  *
  * @param key a key from the tag cache, without the build id
  * @returns the page path, or `undefined`
@@ -112,7 +124,7 @@ function denormalizePagePath(page: string): string {
 export function cacheKeyToPagePath(key: string): PagePath | undefined {
 	const route = ROUTE_CACHE_KEY.exec(key);
 	if (route) return { path: denormalizePagePath(route[2]), pagesRouter: route[1] === 'PAGES' };
-	if (DATA_CACHE_KEY.test(key) || key === '') return undefined;
+	if (DATA_CACHE_KEY.test(key) || !PATH_STYLE_KEY.test(key)) return undefined;
 	// Older Next releases key a page by its path (`blog/hello`, `index`).
 	return { path: denormalizePagePath(key.startsWith('/') ? key : `/${key}`), pagesRouter: false };
 }
@@ -130,12 +142,41 @@ function softTagPath(tag: string): string | undefined {
 	return path;
 }
 
-/** Percent-encode what CloudFront needs encoded in an invalidation path, leaving `/` and `*`. */
+/**
+ * Percent-encode what CloudFront needs encoded in an invalidation path: non-ASCII
+ * characters and the RFC 1738 unsafe ones. Every other character is left as is
+ * (`/blog/@alice`, `/tags/c++`): CloudFront doesn't invalidate a path whose
+ * safe characters are encoded.
+ */
 function encodePath(path: string): string {
 	return path
 		.split('/')
-		.map((segment) => (segment === '*' ? segment : encodeURIComponent(decodeSafely(segment))))
+		.map((segment) => {
+			let out = '';
+			for (const char of decodeSafely(segment)) {
+				const code = char.codePointAt(0) ?? 0;
+				out += code <= 0x20 || code >= 0x7f || RFC1738_UNSAFE.has(char) ? encodeURIComponent(char) : char;
+			}
+			return out;
+		})
 		.join('/');
+}
+
+/**
+ * The invalidation path covering every cached variant of one page URL: a
+ * trailing `*` matches the query-string variants (the SSR cache policy keys on
+ * the query string) and the trailing-slash form (`trailingSlash: true`), and
+ * stays one billed path. It also matches other URLs that start with the same
+ * characters (`/blog*` takes `/blog/hello` and `/blogroll` too), which only
+ * costs those pages one extra origin request.
+ *
+ * CloudFront doesn't support `~` in an invalidation path, so a path with one is
+ * cut back to the wildcard before it.
+ */
+function wildcardPath(path: string): string {
+	const encoded = encodePath(path);
+	const tilde = encoded.indexOf('~');
+	return `${tilde === -1 ? encoded : encoded.slice(0, tilde)}*`;
 }
 
 function decodeSafely(segment: string): string {
@@ -149,15 +190,21 @@ function decodeSafely(segment: string): string {
 /**
  * Turn page paths into CloudFront invalidation paths: the `basePath` prefix,
  * the Pages Router data route next to a Pages Router page, deduplicated, and
- * collapsed to a single `/*` past {@link MAX_INVALIDATION_PATHS}.
+ * collapsed to a single `/*` (`<basePath>*` with a `basePath`) past
+ * {@link MAX_INVALIDATION_PATHS}.
  *
- * One exact path covers both the HTML and the RSC payload: the SSR cache
- * policy keys RSC requests on the `rsc` header and leaves `_rsc` out of the
- * cache key, and an invalidation drops every cached variant of a path.
+ * Each page path ends in `*` (see `wildcardPath`), so it covers the page's
+ * query-string variants and its trailing-slash form. The same path covers the
+ * HTML and the RSC payload: the SSR cache policy keys RSC requests on the
+ * `rsc` header and leaves `_rsc` out of the cache key, and an invalidation
+ * drops every header variant of a path. The root page is the exception: a
+ * `/*` there would purge the whole distribution, so it gets the exact `/`
+ * (`<basePath>` and `<basePath>/` with a `basePath`), and its query-string
+ * variants keep their cached copy until their `s-maxage` runs out.
  *
- * @param pages the pages to invalidate
+ * @param pages the pages to invalidate, relative to the `basePath`
  * @param options.basePath the app's Next.js `basePath`, if any
- * @param options.buildId the build id (`OPEN_NEXT_BUILD_ID`), for Pages Router data routes
+ * @param options.buildId Next's build id (`NEXT_BUILD_ID`), for Pages Router data routes
  * @returns the invalidation paths (empty when there is nothing to invalidate)
  */
 export function toInvalidationPaths(
@@ -167,15 +214,36 @@ export function toInvalidationPaths(
 	const base = (options.basePath ?? '').replace(/\/+$/, '');
 	const out = new Set<string>();
 	for (const { path, pagesRouter } of pages) {
-		const clean = path.startsWith('/') ? path : `/${path}`;
-		out.add(clean === '/' && base ? base : `${base}${clean}`);
+		const clean = path.startsWith('/') ? path.replace(/(.)\/+$/, '$1') : `/${path}`;
+		if (clean === '/') {
+			if (base) {
+				out.add(encodePath(base));
+				out.add(`${encodePath(base)}/`);
+			} else {
+				out.add('/');
+			}
+		} else {
+			out.add(wildcardPath(`${base}${clean}`));
+		}
 		if (pagesRouter && options.buildId) {
-			out.add(`${base}/_next/data/${options.buildId}${clean === '/' ? '/index' : clean}.json`);
+			// Next adds the dynamic route's params as a query string to a data URL.
+			out.add(wildcardPath(`${base}/_next/data/${options.buildId}${clean === '/' ? '/index' : clean}.json`));
 		}
 	}
 	if (out.size === 0) return [];
-	if (out.size > MAX_INVALIDATION_PATHS) return [`${base}/*`];
-	return [...out].map(encodePath);
+	if (out.size > MAX_INVALIDATION_PATHS) return [base ? `${encodePath(base)}*` : '/*'];
+	return [...out];
+}
+
+/**
+ * A path relative to the `basePath`. OpenNext passes `invalidatePaths` the
+ * request or `res.revalidate()` path, which may carry the `basePath`, while the
+ * paths derived from tags never do.
+ */
+function stripBasePath(path: string, base: string): string {
+	if (!base) return path;
+	if (path === base) return '/';
+	return path.startsWith(`${base}/`) ? path.slice(base.length) : path;
 }
 
 function defaultCreateInvalidation(): (distributionId: string, paths: string[]) => Promise<void> {
@@ -223,7 +291,9 @@ export function createCdnInvalidationHandler(deps: CdnInvalidationDeps = {}): Cd
 		if (!parameterName) return;
 		const paths = toInvalidationPaths(pages, {
 			basePath: env[CDN_INVALIDATION_BASE_PATH_ENV],
-			buildId: env.OPEN_NEXT_BUILD_ID,
+			// `/_next/data/<id>/…` URLs carry Next's build id; `OPEN_NEXT_BUILD_ID`
+			// is the `deploymentId` when one is set (a storage key, not a URL part).
+			buildId: env.NEXT_BUILD_ID ?? env.OPEN_NEXT_BUILD_ID,
 		});
 		if (paths.length === 0) return;
 		distributionId ??= readDistributionId(parameterName).catch((e: unknown) => {
@@ -237,9 +307,10 @@ export function createCdnInvalidationHandler(deps: CdnInvalidationDeps = {}): Cd
 	return {
 		name: CDN_INVALIDATION_HANDLER_NAME,
 		async invalidatePaths(paths) {
+			const base = (env[CDN_INVALIDATION_BASE_PATH_ENV] ?? '').replace(/\/+$/, '');
 			await invalidate(
 				paths.map(({ initialPath, resolvedRoutes }) => ({
-					path: initialPath.startsWith('/') ? initialPath : `/${initialPath}`,
+					path: stripBasePath(initialPath.startsWith('/') ? initialPath : `/${initialPath}`, base),
 					pagesRouter: resolvedRoutes.length > 0 && !resolvedRoutes.some((r) => r.type === 'app'),
 				})),
 			);
