@@ -211,7 +211,7 @@ function dayOfMonthNeverExists(dom: string, month: string, expr: string): boolea
 
 /** Throw `CronJobErrors.InvalidTimezone` if `tz` is not a valid IANA timezone. */
 export function validateTimezone(tz: string): void {
-	// `Intl.DateTimeFormat` treats an empty `timeZone` as "use the default", so check it here.
+	// `Intl` already throws for '' and whitespace; kept so the error stays explicit on any engine that treats '' as the default zone.
 	if (tz.trim() === '') {
 		throw blocksError(CronJobErrors.InvalidTimezone, `"${tz}" is not a valid IANA timezone`);
 	}

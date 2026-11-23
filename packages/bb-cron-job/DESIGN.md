@@ -76,6 +76,17 @@ Local Mock
 - `rate(...)` is fully validated (unit ∈ minute/hour/day, plural agreement, value ≥ 1) — this catches `rate(10 seconds)`, `rate(1 minutes)`, etc.
 - `cron(...)` is validated for its **6-field shape**, plus two rules that hold for every EventBridge cron: exactly one of day-of-month and day-of-week is `?`, and a plain numeric day-of-month must exist in at least one listed month (Feb 29 counts, Feb 30 does not). Other field-level semantics — `L` (last day), `W` (nearest weekday), `#` (nth weekday), named days, value ranges such as minute `100`, and the year field — are **left to EventBridge**, because the mock parser models only a subset and gating the deploy on it would reject advanced-but-valid cron.
 
+**Evidence for the day-field rules.** The Scheduler and EventBridge cron docs only state the `*`/value-without-`?` case. The rest was observed by calling `CreateSchedule` in us-east-1 (2026-11-23) with a placeholder target, so a valid expression gets past expression validation and fails only on the target role:
+
+| Expression | `CreateSchedule` result |
+|---|---|
+| `cron(0 12 * * ? *)`, `cron(0 0 29 2 ? *)` | Expression accepted (fails later on the placeholder role) |
+| `cron(0 12 * * MON *)` | `ValidationException: Invalid Schedule Expression cron(0 12 * * MON *).` |
+| `cron(0 0 ? * ? *)` | `ValidationException: Invalid Schedule Expression cron(0 0 ? * ? *).` |
+| `cron(0 0 30 2 ? *)`, `cron(0 0 31 4 ? *)` | `ValidationException: The schedule expression cron(0 0 30 2 ? *), with StartDate null and EndDate null, is invalid because it will never schedule an invocation.` |
+
+So none of these rules rejects a schedule that could have been deployed.
+
 **Rationale:**
 - **Fail fast** — clear mistakes (`rate(10 seconds)`, malformed shape) fail at synth/local dev, not after a 2-minute deploy.
 - **No partial state** — if the mock constructor throws, no timer is started.

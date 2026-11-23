@@ -63,6 +63,9 @@ const invalid: [string, string | undefined, string][] = [
 	['rate(5 minutes)', '', CronJobErrors.InvalidTimezone],
 	['rate(5 minutes)', '   ', CronJobErrors.InvalidTimezone],
 	['rate(5 minutes)', 'Not/AZone', CronJobErrors.InvalidTimezone],
+	// Both inputs wrong: every entry checks the schedule first.
+	['cron(0 12 * * MON *)', 'Not/AZone', CronJobErrors.InvalidSchedule],
+	['rate(10 seconds)', '', CronJobErrors.InvalidSchedule],
 ];
 
 describe('CronJob constructor: mock and AWS runtime agree', () => {

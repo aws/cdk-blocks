@@ -36,6 +36,7 @@ describe('validateSchedule (synth-time guard)', () => {
 	// 'Rate(...)' / 'Cron(...)' are rejected: EventBridge requires lowercase, so the gate is case-sensitive.
 	// The day-field rules hold for every EventBridge cron: exactly one of day-of-month and
 	// day-of-week is "?", and a plain numeric day-of-month must exist in a listed month.
+	// Observed from Scheduler CreateSchedule (us-east-1, 2026-11-23); see DESIGN.md D-CJ-4.
 	const invalid = ['rate(10 seconds)', 'rate(0 minutes)', 'rate(1 minutes)', 'rate(5 minute)', 'every 5 minutes', 'cron(0 9 * * *)', 'cron(0 9 * * ? * extra)', 'Rate(5 minutes)', 'CRON(0 9 * * ? *)', '',
 		'cron(0 12 * * MON *)', // both day fields set
 		'cron(0 12 1 * MON *)', // both day fields set

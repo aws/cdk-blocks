@@ -89,15 +89,15 @@ export class CronJob<T = void> extends Scope {
 		this._enabled = options.enabled !== false;
 		registerSdkIdentifiers(this.fullId, { scheduleName: `mock-${this.fullId}` });
 
+		// The synth gate first, in the same order as the CDK and AWS entries (schedule,
+		// then timezone), so an input with both wrong gets the same named error.
+		validateSchedule(options.schedule);
 		// `!== undefined` (not truthiness) so `timezone: ''` is rejected, as at synth.
 		if (options.timezone !== undefined) {
 			validateTimezone(options.timezone);
 		}
 
-		// The synth gate first, so the mock rejects everything synth and the AWS
-		// runtime reject (both day fields set, Feb 30, ...). Then the mock's own
-		// parser, which also flags valid cron it can't simulate.
-		validateSchedule(options.schedule);
+		// Then the mock's own parser, which also flags valid cron it can't simulate.
 		this._schedule = parseScheduleForMock(options.schedule);
 
 		if (this._enabled) {
