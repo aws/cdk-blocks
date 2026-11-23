@@ -213,6 +213,9 @@ export function serviceError(name: string, message: string): Error {
 /** @internal */
 export const userNotFound = (): Error => serviceError(AuthErrors.UserNotFound, 'User does not exist.');
 
+/** One character of Java's `\s` (Cognito's validator), which is ASCII-only. See `MockStore.enforcePasswordFormat`. */
+const ASCII_WHITESPACE = /^[ \t\n\v\f\r]$/;
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Parsing (tolerant)
 // ─────────────────────────────────────────────────────────────────────────────
@@ -704,6 +707,26 @@ export class MockStore {
 			if (c.username === username) delete this.state.challenges[token];
 		}
 		this.flush();
+	}
+
+	/**
+	 * Refuse a password that begins or ends with whitespace, as Cognito does:
+	 * the `Password` / `ProposedPassword` / `TemporaryPassword` member of
+	 * `SignUp`, `ConfirmForgotPassword`, `ChangePassword`,
+	 * `AdminSetUserPassword` and `AdminCreateUser` must match
+	 * `^[\S]+.*[\S]+$`, and a request that does not is answered with
+	 * `InvalidParameterException` before the pool's policy is consulted.
+	 * Whitespace inside the password is allowed. The password is never
+	 * trimmed: trimming would store a password the user did not type.
+	 *
+	 * `\S` here is Java's (Cognito's validator): it excludes only the ASCII
+	 * whitespace characters space, `\t`, `\n`, `\v`, `\f` and `\r`.
+	 */
+	enforcePasswordFormat(password: string): void {
+		if (typeof password !== 'string' || password.length === 0) return;
+		if (ASCII_WHITESPACE.test(password[0]) || ASCII_WHITESPACE.test(password[password.length - 1])) {
+			throw serviceError(AuthErrors.InvalidParameter, 'Password must not begin or end with whitespace.');
+		}
 	}
 
 	enforcePasswordPolicy(password: string): void {
