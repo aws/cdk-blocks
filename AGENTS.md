@@ -334,4 +334,5 @@ Check correctness/security, mock↔aws↔cdk↔browser consistency + conditional
 - `packages/hosting/README.md` — SPA/SSR frontend hosting
 - `packages/bb-database/README.md` — DB migrations
 - `native/*` — Kotlin/Swift/Dart client codegen
+- `formal/` — TLA+ models of protocols whose bugs are orderings that tests rarely reach, checked by `npm run check:formal`. Changing `resolveSession`, `signOut` or `SessionStore` in `packages/bb-auth`? Follow `.agents/skills/verify-auth-session-refresh/SKILL.md`.
 - per-template `AGENTS.md` (via `npm create @aws-cdk-blocks/blocks-app@latest my-app`) — building an app *with* CDK Blocks.

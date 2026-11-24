@@ -1,0 +1,48 @@
+name: Formal Models
+
+# Model-checks the TLA+ models listed in formal/models.json with TLC. The models
+# cover orderings of concurrent requests that unit tests rarely reach, such as a
+# session refresh that finishes after sign-out. Path-filtered at the trigger so
+# it only runs for PRs that change the modelled code, a model, or the runner.
+#
+# No AWS / secrets needed — this runs the same on fork PRs. The runner uses Node
+# built-ins only, and the Java that TLC needs ships with the runner image.
+
+on:
+  pull_request:
+    paths:
+      - 'packages/bb-auth/src/auth-base.ts'
+      - 'packages/bb-auth/src/sessions.ts'
+      - 'formal/**'
+      - 'scripts/check-formal-models.mjs'
+      - 'scripts/check-formal-models.test.mjs'
+      - '.github/workflows/formal-models.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: formal-models-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Formal models (TLC)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: '.nvmrc'
+
+      - name: Test the runner
+        run: node --test scripts/check-formal-models.test.mjs
+
+      - name: Check every model
+        run: node scripts/check-formal-models.mjs

@@ -1,0 +1,59 @@
+[
+	{
+		"spec": "auth-session-refresh/SessionRefresh.tla",
+		"config": "auth-session-refresh/Head.cfg",
+		"expect": "holds",
+		"why": "The conditional refresh writes of bb-auth (SessionStore.replaceIfUnchanged, SessionStore.deleteIfUnchanged) keep every invariant when two requests and a sign-out share one session.",
+		"guide": ".agents/skills/verify-auth-session-refresh/SKILL.md",
+		"covers": {
+			"packages/bb-auth/src/auth-base.ts": {
+				"resolveSession": "8a7f33b7df822f02",
+				"sessionAfterLostWrite": "1adb0ad184d50b4b",
+				"refreshRecord": "f9487eeb28b98b87",
+				"signOut": "2817ab5c22a0e09d"
+			},
+			"packages/bb-auth/src/sessions.ts": {
+				"versionOf": "6758b71af688785a",
+				"unchangedSince": "9e9f35ff1007e86a",
+				"create": "381185491f98fd48",
+				"lookup": "825bdc6077400a66",
+				"read": "629584ad90f557df",
+				"replaceIfUnchanged": "2f7fd4a31a560207",
+				"deleteIfUnchanged": "38878c903a8d188b",
+				"delete": "70ef501fac7b1639"
+			}
+		}
+	},
+	{
+		"spec": "auth-session-refresh/SessionRefresh.tla",
+		"config": "auth-session-refresh/PreFix.SignOutSticks.cfg",
+		"expect": "violates",
+		"invariant": "SignOutSticks",
+		"why": "Before #1314 the refresh wrote with a get followed by an unconditional put, so a sign-out between the two was undone.",
+		"guide": ".agents/skills/verify-auth-session-refresh/SKILL.md"
+	},
+	{
+		"spec": "auth-session-refresh/SessionRefresh.tla",
+		"config": "auth-session-refresh/PreFix.NoStaleDelete.cfg",
+		"expect": "violates",
+		"invariant": "NoStaleDelete",
+		"why": "Before #1314 a failed refresh deleted the session without a condition, also when another request had just refreshed it.",
+		"guide": ".agents/skills/verify-auth-session-refresh/SKILL.md"
+	},
+	{
+		"spec": "auth-session-refresh/SessionRefresh.tla",
+		"config": "auth-session-refresh/PreFix.NoStaleOverwrite.cfg",
+		"expect": "violates",
+		"invariant": "NoStaleOverwrite",
+		"why": "Before #1314 the unconditional put recreated a session that sign-out had deleted and replaced a row that a concurrent refresh had written.",
+		"guide": ".agents/skills/verify-auth-session-refresh/SKILL.md"
+	},
+	{
+		"spec": "auth-session-refresh/SessionRefresh.tla",
+		"config": "auth-session-refresh/PreFix.AnswersComeFromTheStore.cfg",
+		"expect": "violates",
+		"invariant": "AnswersComeFromTheStore",
+		"why": "Before #1314 a refresh that found the session deleted wrote nothing and still answered with the refreshed tokens.",
+		"guide": ".agents/skills/verify-auth-session-refresh/SKILL.md"
+	}
+]
