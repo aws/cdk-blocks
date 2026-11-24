@@ -33,6 +33,7 @@
 import { readFileSync, readdirSync, existsSync, statSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { DISCOVERY_KEYWORD } from "./discovery-keyword.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const PACKAGES_DIR = join(ROOT, "packages");
@@ -40,7 +41,6 @@ const SCOPE = "@aws-cdk-blocks/";
 // The umbrella publishes unscoped, so a scope test alone would exempt it from the guard.
 const UMBRELLA_PKG = "aws-cdk-blocks";
 const isReleasedPackage = (name: string): boolean => name.startsWith(SCOPE) || name === UMBRELLA_PKG;
-const DISCOVERY_KEYWORD = "aws-blocks";
 
 /**
  * The guard could not evaluate what it was asked to assert. Reported as a normal

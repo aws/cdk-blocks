@@ -53,7 +53,10 @@ function baseRepo(t, files = {}) {
 	t.after(() => rmSync(dir, { recursive: true, force: true }));
 
 	mkdirSync(join(dir, "scripts"), { recursive: true });
-	copyFileSync(GUARD_SRC, join(dir, "scripts", "keywords-guard.ts"));
+	// The guard and the module it imports the discovery tag from.
+	for (const file of ["keywords-guard.ts", "discovery-keyword.mjs"]) {
+		copyFileSync(join(SCRIPTS_DIR, file), join(dir, "scripts", file));
+	}
 
 	const layout = {
 		"package.json": `${JSON.stringify({ name: "fixture-root", private: true }, null, 2)}\n`,
