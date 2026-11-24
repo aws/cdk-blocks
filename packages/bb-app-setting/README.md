@@ -80,6 +80,8 @@ import { AppSettingErrors, isBlocksError } from 'aws-cdk-blocks';
 | `AppSettingErrors.ValidationFailed` | `ValidationFailedException` | `put()`: the value fails the schema, has no JSON representation (`undefined`, a function, a symbol, a bigint, a circular object), is a non-secret value whose JSON exceeds 4 KB (4,096 bytes), or is an empty string for a `secret: true` setting. The block skips the size check for secrets; SSM still enforces the [parameter tier's limit](https://docs.aws.amazon.com/systems-manager/latest/userguide/parameter-store-advanced-parameters.html). Constructor: the options are an invalid combination. |
 | `AppSettingErrors.ParameterNotFound` | `ParameterNotFoundException` | `get()`: the parameter does not exist or has no value (AWS), or a `secret: true` value is an empty string (AWS and local; `put()` refuses one, but it can still be set out of band). |
 
+`put()` stores the value's JSON form, so a value that JSON can represent only approximately is accepted and reads back changed: `NaN` and `Infinity` become `null`, a `Map` or `Set` becomes `{}`, a `Date` becomes its ISO 8601 string, and `undefined` object properties are dropped. Pass a `schema` to refuse such values.
+
 ## Secret values (`secret: true`)
 
 ```typescript

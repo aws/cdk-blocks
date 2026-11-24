@@ -150,4 +150,40 @@ describe('AppSetting.put() validates the same input the same way on mock and AWS
 		const setting = new MockAppSetting<string>(new Scope('app'), uniqueId(), { value: 'ok-init', schema: okPrefixSchema });
 		await assert.rejects(() => setting.put('b'.repeat(5000)), /value must start with "ok"/);
 	});
+
+	// The fixed message must not quote the value: a circular TypeError names the
+	// closing key, which on a secret setting could be sensitive. The engine
+	// error is kept only as a non-enumerable `cause` for server-side logs.
+	const selfRef = (): Record<string, unknown> => {
+		const o: Record<string, unknown> = {};
+		o.apiKey = o;
+		return o;
+	};
+	for (const [what, make] of [
+		['a circular object', selfRef],
+		['a nested bigint', () => ({ apiKey: 1n })],
+	] as const) {
+		test(`a rejected ${what} is not quoted in the message`, async () => {
+			const send = mock.method(SSMClient.prototype, 'send', async () => ({}));
+			try {
+				for (const Setting of [MockAppSetting, AwsAppSetting]) {
+					const setting = new Setting<unknown>(new Scope('app'), uniqueId(), { secret: true });
+					await assert.rejects(
+						() => setting.put(make()),
+						(e: unknown) => {
+							assert.ok(isBlocksError(e, AppSettingErrors.ValidationFailed));
+							const err = e as Error;
+							assert.ok(!err.message.includes('apiKey'), `message quotes the key: ${err.message}`);
+							assert.ok(err.cause instanceof TypeError, 'the engine error is kept as cause');
+							assert.ok(!Object.keys(err).includes('cause'), 'cause must not be enumerable');
+							return true;
+						},
+					);
+				}
+				assert.strictEqual(send.mock.callCount(), 0, 'a rejected value must not reach SSM');
+			} finally {
+				send.mock.restore();
+			}
+		});
+	}
 });
