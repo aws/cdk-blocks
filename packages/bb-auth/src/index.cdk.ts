@@ -490,15 +490,27 @@ export class Auth<const O extends AuthOptions = AuthOptions> extends BuildingBlo
 			);
 		}
 
-		// An unset `removalPolicy` on a pool we own is legal (the stack default
-		// applies) but deserves a nudge: the pool holds every user.
-		if (this.userPool && !opts.userPool && opts.removalPolicy === undefined) {
-			const resolved = this.defaults.removalPolicy === cdk.RemovalPolicy.RETAIN ? 'retain' : 'destroy';
+		// An unset `removalPolicy` on a pool we own means "follow the stack
+		// posture". That is the only way to say "retain in production, destroy in a
+		// sandbox" from the shared `cdk-blocks/index.ts` (the option takes one value,
+		// `'destroy' | 'retain'`, for every deployment), so it is not itself a
+		// problem. It warns only where that posture deletes users outside a sandbox:
+		// the stack default destroys, and this deployment is not a sandbox. Under a
+		// retaining default (`BlocksPresets.production`) the pool is kept, and in a
+		// sandbox losing it is the point.
+		if (
+			this.userPool &&
+			!opts.userPool &&
+			opts.removalPolicy === undefined &&
+			this.defaults.removalPolicy === cdk.RemovalPolicy.DESTROY &&
+			!isSandboxContext(this)
+		) {
 			cdk.Annotations.of(this).addWarningV2(
 				'@aws-cdk-blocks/bb-auth:RemovalPolicyUnset',
 				`Auth '${this.fullId}': \`removalPolicy\` is not set, so the user pool follows the stack default ` +
-					`('${resolved}'). Set \`removalPolicy: 'retain'\` explicitly for any pool that holds real users — ` +
-					'deleting the pool deletes every user in it, and they cannot be recovered.',
+					"('destroy'), and this deployment is not a sandbox: deleting the stack deletes the pool and " +
+					'every user in it, and they cannot be recovered. ' +
+					"Set `removalPolicy: 'retain'` for a pool that holds real users.",
 			);
 		}
 	}

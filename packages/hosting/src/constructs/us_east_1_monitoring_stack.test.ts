@@ -10,10 +10,17 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert';
-import { App } from 'aws-cdk-lib';
+import { Annotations as CdkAnnotations, App } from 'aws-cdk-lib';
 import { Match, Template, Annotations } from 'aws-cdk-lib/assertions';
 import * as subs from 'aws-cdk-lib/aws-sns-subscriptions';
 import { UsEast1MonitoringStack } from './us_east_1_monitoring_stack.js';
+
+// The trailing `[ack: <id>]` tag addInfoV2 / addWarningV2 append to the
+// no-subscriber note; the `$` pins the match to the tag, not the message body.
+const NO_SUBSCRIBER_NOTE_ID = '@aws-cdk-blocks/hosting:MonitoringAlarmTopicHasNoSubscribers';
+const NO_SUBSCRIBER_ACK_TAG = Match.stringLikeRegexp(
+  '\\[ack: @aws-cdk-blocks/hosting:MonitoringAlarmTopicHasNoSubscribers\\]$',
+);
 
 void describe('UsEast1MonitoringStack', () => {
   const build = (subscriptions?: subs.EmailSubscription[]) => {
@@ -98,7 +105,7 @@ void describe('UsEast1MonitoringStack', () => {
     assert.ok(stack.alarm, 'alarm should be exposed');
   });
 
-  void it('warns when its own topic has the 5xx alarm but no subscriber', () => {
+  void it('notes, as an info, when its own topic has the 5xx alarm but no subscriber', () => {
     // Off-region the 5xx alarm lives HERE, not in the regional construct, so
     // this stack must flag its own undeliverable topic — the zero-subscriber
     // scenario an earlier revision let slip through once the regional gate
@@ -108,26 +115,32 @@ void describe('UsEast1MonitoringStack', () => {
       env: { account: '123456789012', region: 'us-east-1' },
       distributionId: 'E1234567890ABC',
     });
-    Annotations.fromStack(stack).hasWarning(
-      '/CfMon',
-      Match.stringLikeRegexp(
-        '\\[ack: @aws-cdk-blocks/hosting:MonitoringAlarmTopicHasNoSubscribers\\]$',
-      ),
-    );
+    Annotations.fromStack(stack).hasInfo('/CfMon', NO_SUBSCRIBER_ACK_TAG);
+    // An info, not a warning: an unsubscribed topic is the default's open
+    // decision, and a warning would fail `cdk synth --strict` on an untouched app.
+    Annotations.fromStack(stack).hasNoWarning('*', NO_SUBSCRIBER_ACK_TAG);
   });
 
-  void it('does NOT warn when its topic is subscribed', () => {
+  void it('does NOT note when its topic is subscribed', () => {
     const app = new App();
     const stack = new UsEast1MonitoringStack(app, 'CfMon', {
       env: { account: '123456789012', region: 'us-east-1' },
       distributionId: 'E1234567890ABC',
       subscriptions: [new subs.EmailSubscription('oncall@example.com')],
     });
-    Annotations.fromStack(stack).hasNoWarning(
-      '/CfMon',
-      Match.stringLikeRegexp(
-        '\\[ack: @aws-cdk-blocks/hosting:MonitoringAlarmTopicHasNoSubscribers\\]$',
-      ),
-    );
+    Annotations.fromStack(stack).hasNoInfo('/CfMon', NO_SUBSCRIBER_ACK_TAG);
+  });
+
+  void it('stays silent once the note is acknowledged, as an info or as the warning it used to be', () => {
+    for (const acknowledge of ['acknowledgeInfo', 'acknowledgeWarning'] as const) {
+      const app = new App();
+      const stack = new UsEast1MonitoringStack(app, 'CfMon', {
+        env: { account: '123456789012', region: 'us-east-1' },
+        distributionId: 'E1234567890ABC',
+      });
+      CdkAnnotations.of(stack)[acknowledge](NO_SUBSCRIBER_NOTE_ID);
+      Annotations.fromStack(stack).hasNoInfo('*', NO_SUBSCRIBER_ACK_TAG);
+      Annotations.fromStack(stack).hasNoWarning('*', NO_SUBSCRIBER_ACK_TAG);
+    }
   });
 });

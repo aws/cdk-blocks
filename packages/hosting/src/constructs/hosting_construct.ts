@@ -122,6 +122,75 @@ const CFN_MAX_RESOURCES_PER_STACK = 500;
 const CFN_RESOURCE_WARNING_THRESHOLD = 450;
 /** Stable id of the plain-HTTP front-door warning; also the `acknowledgeWarning` id. */
 const PLAIN_HTTP_FRONT_DOOR_WARNING_ID = '@aws-cdk-blocks/hosting:PlainHttpFrontDoor';
+/**
+ * Stable id of the note on a CloudFront 5xx alarm created in an
+ * environment-agnostic stack; also its acknowledgement id (`acknowledgeInfo`
+ * or `acknowledgeWarning`, whichever level it is emitted at).
+ */
+const CLOUDFRONT_ALARM_REGION_UNRESOLVED_ID = '@aws-cdk-blocks/hosting:CloudFrontAlarmRegionUnresolved';
+
+/**
+ * The level and text of the note on a CloudFront 5xx alarm created in an
+ * environment-agnostic stack (region is an unresolved token), by the region the
+ * CDK CLI targets.
+ *
+ * `AWS/CloudFront` metrics only publish in us-east-1, so the alarm works only
+ * when the stack is deployed there. The stack does not say where it goes, but
+ * the CDK CLI does: it exports `CDK_DEFAULT_REGION` to the app and deploys an
+ * environment-agnostic stack to that same region, which makes the variable the
+ * one synth-time signal of the deploy target.
+ *
+ * - `'us-east-1'`: the alarm works where the CLI deploys it, so this is an
+ *   info, not a warning (a warning would make `cdk synth --strict` fail on an
+ *   app that has nothing to fix). Not silent either: an assembly synthesized
+ *   under us-east-1 can still be deployed to another region later, and there
+ *   the alarm never fires.
+ * - any other region: the alarm never fires in this deployment. A warning.
+ * - unset (a synth outside the CDK CLI): the target is unknown. A warning.
+ *
+ * @param cliRegion `process.env.CDK_DEFAULT_REGION`.
+ * @internal Framework-only. Exported for the unit tests, not re-exported by the package.
+ */
+export const cloudFrontAlarmRegionNote = (
+  cliRegion: string | undefined,
+): { level: 'info' | 'warning'; message: string } => {
+  if (cliRegion === 'us-east-1') {
+    return {
+      level: 'info',
+      message:
+        `The hosting stack is environment-agnostic (region is an ` +
+        `unresolved token), so the CloudFront 5xx alarm is created in the ` +
+        `stack itself. AWS/CloudFront metrics only publish in us-east-1, ` +
+        `which is where the CDK CLI deploys this stack (CDK_DEFAULT_REGION), ` +
+        `so the alarm works there. Deployed to any other region it will ` +
+        `never fire: set env: { account, region } on the stack so the alarm ` +
+        `can be placed in a us-east-1 support stack (issue #481).`,
+    };
+  }
+  if (cliRegion) {
+    return {
+      level: 'warning',
+      message:
+        `The hosting stack is environment-agnostic (region is an ` +
+        `unresolved token), so the CloudFront 5xx alarm is created in the ` +
+        `stack itself, and the CDK CLI deploys this stack to '${cliRegion}' ` +
+        `(CDK_DEFAULT_REGION). AWS/CloudFront metrics only publish in ` +
+        `us-east-1, so the alarm will never fire. Set env: { account, region } ` +
+        `on the stack so the alarm can be placed in a us-east-1 support ` +
+        `stack (issue #481).`,
+    };
+  }
+  return {
+    level: 'warning',
+    message:
+      `The hosting stack is environment-agnostic (region is an ` +
+      `unresolved token), so the CloudFront 5xx alarm is created ` +
+      `locally. AWS/CloudFront metrics only publish in us-east-1, so ` +
+      `if this app deploys outside us-east-1 the alarm will never ` +
+      `fire. Set env: { account, region } on the stack so the alarm ` +
+      `can be placed in a us-east-1 support stack (issue #481).`,
+  };
+};
 
 // ---- Public types ----
 
@@ -1813,27 +1882,44 @@ export class HostingConstruct extends Construct {
         //   - region === 'us-east-1'      → alarm created locally (correct).
         //   - region resolved, off-region → alarm deferred to the us-east-1
         //     support stack below.
-        //   - region UNRESOLVED (token)   → we cannot decide at synth where
-        //     the app deploys, so the alarm is created locally. If that
-        //     deploy target turns out NOT to be us-east-1, the alarm can
-        //     never fire (the #481 bug). We can't fix that at synth, but we
-        //     refuse to do it silently. Warn so it's visible in build
-        //     output rather than a green-but-dead alarm.
+        //   - region UNRESOLVED (token)   → the stack does not say where it
+        //     deploys, so the alarm is created locally. If the deploy target
+        //     is NOT us-east-1, the alarm can never fire (the #481 bug). We
+        //     can't fix that at synth, but we refuse to do it silently, so
+        //     the synth output says it. How loudly depends on the one
+        //     synth-time signal of where the stack goes: the CDK CLI exports
+        //     CDK_DEFAULT_REGION and deploys an environment-agnostic stack to
+        //     that same region.
+        //       · 'us-east-1'  → info: the alarm works where the CLI deploys
+        //         it. Still an info rather than nothing, because an assembly
+        //         synthesized under us-east-1 can be deployed elsewhere later.
+        //       · other region → warning: the alarm never fires there.
+        //       · unset (a synth outside the CDK CLI) → warning: target unknown.
+        //     See `cloudFrontAlarmRegionNote`.
         const hostingStack = Stack.of(this);
         const region = hostingStack.region;
         const regionResolved = !Token.isUnresolved(region);
         const offRegion = regionResolved && region !== 'us-east-1';
 
         if (!regionResolved && this._distribution) {
-          Annotations.of(this).addWarningV2(
-            '@aws-cdk-blocks/hosting:CloudFrontAlarmRegionUnresolved',
-            `The hosting stack is environment-agnostic (region is an ` +
-              `unresolved token), so the CloudFront 5xx alarm is created ` +
-              `locally. AWS/CloudFront metrics only publish in us-east-1, so ` +
-              `if this app deploys outside us-east-1 the alarm will never ` +
-              `fire. Set env: { account, region } on the stack so the alarm ` +
-              `can be placed in a us-east-1 support stack (issue #481).`,
-          );
+          // Read while the app's code runs, which is when the CDK CLI's value
+          // is in the environment.
+          const note = cloudFrontAlarmRegionNote(process.env.CDK_DEFAULT_REGION);
+          // Emitted from a validation, not here: CDK keeps one acknowledgement
+          // set for both levels and applies it when an annotation is added, so
+          // an `acknowledgeInfo` / `acknowledgeWarning` made any time before
+          // synth (after this construct too) silences the note at either level.
+          this.node.addValidation({
+            validate: (): string[] => {
+              const annotations = Annotations.of(this);
+              if (note.level === 'info') {
+                annotations.addInfoV2(CLOUDFRONT_ALARM_REGION_UNRESOLVED_ID, note.message);
+              } else {
+                annotations.addWarningV2(CLOUDFRONT_ALARM_REGION_UNRESOLVED_ID, note.message);
+              }
+              return [];
+            },
+          });
         }
 
         const monitoring = new MonitoringConstruct(this, 'Monitoring', {

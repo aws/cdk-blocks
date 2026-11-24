@@ -133,19 +133,21 @@ export interface BlocksDefaults {
 	 * Enabling it is therefore safe for **one CDK Blocks stack per region** — see
 	 * `ensureApiGatewayAccount` for the full multi-stack teardown caveat.
 	 *
-	 * Because a durable deployment then has no request-level audit trail, a
-	 * **synth-time warning** is emitted whenever the resolved `defaults` combine a
+	 * Because a durable deployment then has no request-level audit trail, synth
+	 * prints an **info** (not a warning) whenever the resolved `defaults` combine a
 	 * durable removal policy (any {@link removalPolicy} other than
 	 * `RemovalPolicy.DESTROY`) with access logging off, so the tradeoff is visible
-	 * at `cdk synth`. It is a warning only — synth does not fail (unless you run
-	 * `cdk synth`/`deploy --strict`, which treats warnings as errors — opt in or
-	 * acknowledge it as below) — and clears once you opt in with the override
-	 * above. If leaving it off is a deliberate choice (for example a multi-stack
-	 * deployment where another stack owns access logging), acknowledge the warning
-	 * by calling
-	 * `Annotations.of(stack).acknowledgeWarning('blocks:apigateway:access-logging-disabled')`
+	 * at `cdk synth`. It is an info because this is the `production` preset's own
+	 * default: synth does not fail, with or without `cdk synth`/`deploy --strict`
+	 * (which treats warnings, not infos, as errors). It clears once you opt in
+	 * with the override above. If leaving it off is a deliberate choice (for
+	 * example a multi-stack deployment where another stack owns access logging),
+	 * acknowledge the info by calling
+	 * `Annotations.of(stack).acknowledgeInfo('blocks:apigateway:access-logging-disabled')`
 	 * on the stack or backend returned by `create()`, after it resolves
-	 * (acknowledging on the `App` before `create()` does not suppress it).
+	 * (acknowledging on the `App` does not suppress it). An
+	 * `acknowledgeWarning` call with the same id, which this annotation asked for
+	 * while it was a warning, still silences it.
 	 *
 	 * This governs **API Gateway** access logging only. The shared framework config
 	 * bucket (`BlocksConfigBucket`) always ships S3 server access logs to a dedicated

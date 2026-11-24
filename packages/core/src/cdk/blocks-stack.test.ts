@@ -13,7 +13,7 @@ import * as lambda from 'aws-cdk-lib/aws-lambda-nodejs';
 import type { Construct } from 'constructs';
 import type { ScopeParent } from '../common/index.js';
 import { BLOCKS_RPC_PREFIX } from '../constants.js';
-import { AUDIT_WARNING } from './audit-warning-matcher.js';
+import { ACCESS_LOGGING_NOTE, ACCESS_LOGGING_NOTE_ACK_TAG } from './access-logging-note-matcher.js';
 import { BlocksBackend } from './blocks-backend.js';
 import { ComputeBase } from './compute/compute.js';
 import { getComputes } from './compute/compute-registry.js';
@@ -346,20 +346,44 @@ describe('assertCdkConditionActive', () => {
 	});
 });
 
-describe('production access-logging audit-gap synth warning (BlocksStack path)', () => {
-	// setupBlocksInfra runs the warning on the scope it is passed. BlocksStack
+describe('production access-logging audit-gap synth info (BlocksStack path)', () => {
+	// setupBlocksInfra adds the info on the scope it is passed. BlocksStack
 	// (index.ts) passes itself, so the annotation lands on the stack node — a
 	// different node than the BlocksBackend construct path. This covers the path a
 	// real create-blocks-app takes (`BlocksStack.create` with a durable posture).
-	// AUDIT_WARNING is the shared matcher (see audit-warning-matcher.ts).
+	// ACCESS_LOGGING_NOTE is the shared matcher (see access-logging-note-matcher.ts).
 
-	test('BlocksStack with a durable posture and accessLogging off warns at synth', async () => {
+	test('BlocksStack with a durable posture and accessLogging off prints an info at synth, not a warning', async () => {
 		const app = new cdk.App();
 
 		// makeStack uses BlocksPresets.production (durable, accessLogging: false).
-		const stack = await makeStack(app, 'AuditWarnStackLevel', sideEffectBackendPath);
+		const stack = await makeStack(app, 'AuditNoteStackLevel', sideEffectBackendPath);
 
-		Annotations.fromStack(stack).hasWarning('*', AUDIT_WARNING);
+		Annotations.fromStack(stack).hasInfo('*', ACCESS_LOGGING_NOTE);
+		// Pins the level: an untouched app must pass `cdk synth --strict`.
+		Annotations.fromStack(stack).hasNoWarning('*', ACCESS_LOGGING_NOTE_ACK_TAG);
+	});
+
+	test('BlocksStack on the production preset synthesizes without any warning', async () => {
+		const app = new cdk.App();
+
+		// What an app from a template has: `BlocksPresets.production`, unchanged.
+		// Nothing may be a warning there, whatever its id, or `cdk synth --strict`
+		// fails on an app with nothing to fix.
+		const stack = await makeStack(app, 'NoWarningStackLevel', sideEffectBackendPath);
+
+		assert.deepStrictEqual(Annotations.fromStack(stack).findWarning('*', Match.anyValue()), []);
+	});
+
+	test('an acknowledgeWarning on the stack create() returned, as the old warning asked for, still silences it', async () => {
+		const app = new cdk.App();
+
+		// The info is added at validation time, after the app's own code, so an
+		// acknowledgement made here is seen (see blocks-backend.test.ts).
+		const stack = await makeStack(app, 'AuditLegacyAckStackLevel', sideEffectBackendPath);
+		cdk.Annotations.of(stack).acknowledgeWarning('blocks:apigateway:access-logging-disabled');
+
+		Annotations.fromStack(stack).hasNoInfo('*', ACCESS_LOGGING_NOTE_ACK_TAG);
 	});
 });
 
