@@ -139,11 +139,22 @@ describe("upstreamRegistryUrl", () => {
 		assert.equal(upstreamRegistryUrl("/registry/zod"), `${UPSTREAM_REGISTRY}/zod`);
 	});
 
-	it("forwards a third-party scoped package with its encoding intact", () => {
+	it("forwards a third-party scoped package as one encoded segment", () => {
 		assert.equal(
 			upstreamRegistryUrl("/registry/@types%2fnode"),
-			`${UPSTREAM_REGISTRY}/@types%2fnode`,
+			`${UPSTREAM_REGISTRY}/%40types%2Fnode`,
 		);
+	});
+
+	it("forwards a third-party scoped tarball with the name as one segment", () => {
+		assert.equal(
+			upstreamRegistryUrl("/registry/@types%2fnode/-/node-22.0.0.tgz"),
+			`${UPSTREAM_REGISTRY}/%40types%2Fnode/-/node-22.0.0.tgz`,
+		);
+	});
+
+	it("drops a query string from a forwarded request", () => {
+		assert.equal(upstreamRegistryUrl("/registry/zod?write=true"), `${UPSTREAM_REGISTRY}/zod`);
 	});
 
 	it("forwards a third-party tarball", () => {

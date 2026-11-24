@@ -146,8 +146,15 @@ export function upstreamRegistryUrl(rawUrl: string): string | undefined {
 		return undefined;
 	}
 
-	// Forwarded exactly as npm spelled it, so a scoped name keeps its %2f. The
-	// host is written out (it equals UPSTREAM_REGISTRY, which a unit test
-	// checks) so the forwarded URL's host is a literal, not taken from a value.
-	return `https://registry.npmjs.org/${raw}`;
+	// Re-encode each path segment, so the forwarded path is the package path npm
+	// asked for and nothing in it is read as URL structure. A scoped name npm
+	// sends as `@types%2fnode` is forwarded as `%40types%2Fnode`, which the
+	// registry treats the same. Any query string is dropped: npm's install GETs
+	// do not send one.
+	const path = raw
+		.split("?")[0]
+		.split("/")
+		.map((segment) => encodeURIComponent(decodeURIComponent(segment)))
+		.join("/");
+	return `${UPSTREAM_REGISTRY}/${path}`;
 }

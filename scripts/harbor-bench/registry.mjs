@@ -65,10 +65,23 @@ createServer(async (request, response) => {
 		response.writeHead(404).end();
 		return;
 	}
+	// Re-encode each path segment, so the forwarded path is the package path npm asked for and
+	// nothing in it is read as URL structure. `@types%2fnode` goes out as `%40types%2Fnode`,
+	// which the registry treats the same. Any query string is dropped: npm's install GETs do not
+	// send one. Same encoding as scripts/publish/local-registry.ts.
+	let path;
 	try {
-		// The host is written out (it equals UPSTREAM) so the fetched URL's host is a literal and
-		// never taken from the request; the origin check above is the backstop for the path.
-		const upstream = await fetch(`https://registry.npmjs.org/${rawPath}`);
+		path = rawPath
+			.split('?')[0]
+			.split('/')
+			.map((segment) => encodeURIComponent(decodeURIComponent(segment)))
+			.join('/');
+	} catch {
+		response.writeHead(404).end();
+		return;
+	}
+	try {
+		const upstream = await fetch(`${UPSTREAM}/${path}`);
 		// Read the body before writeHead: a mid-body disconnect rejects here, and calling
 		// writeHead(502) after the head is already sent throws ERR_HTTP_HEADERS_SENT inside
 		// the catch. Unhandled, that takes the registry down and the rest of the trial's
