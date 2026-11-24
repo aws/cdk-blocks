@@ -48,9 +48,10 @@ describe('Secret (mock)', () => {
 	});
 
 	describe('allowRuntimeWrite', () => {
-		// Build/type behavior for all three cases. These never run; they fail the
-		// unit build if the type contract regresses (an unused @ts-expect-error is
-		// itself a compile error). Runtime behavior is asserted by the tests below.
+		// Build/type behavior for all three cases, plus the runtime rejection of a
+		// forced non-string. The type checks fail the unit build if the type
+		// contract regresses (an unused @ts-expect-error is itself a compile
+		// error). Other runtime behavior is asserted by the tests below.
 		test('types: put present only when allowRuntimeWrite: true', async () => {
 			const omitted = new Secret(freshScope(), 'ro-omitted');
 			const explicitFalse = new Secret(freshScope(), 'ro-false', { allowRuntimeWrite: false });
@@ -65,7 +66,6 @@ describe('Secret (mock)', () => {
 			const forced = writableSecret.put(123);
 			// Forced past the types, the value is rejected at runtime too.
 			await assert.rejects(forced, { name: SecretErrors.ValidationFailed });
-			assert.ok(true);
 		});
 
 		test('put is absent from the instance by default (read-only)', () => {

@@ -141,6 +141,17 @@ export function secretTests(_getApi: () => typeof apiType) {
       );
     });
 
+    // Pins that the limit counts UTF-8 bytes, not characters: 21,846 three-byte
+    // characters are under 65,536 characters but 65,538 bytes, which
+    // PutSecretValue rejects (LimitExceededException) on AWS.
+    test('Secret - put rejects a multi-byte value over 65,536 bytes but under 65,536 characters', async () => {
+      const { testSupport, secret } = await getTestSupport();
+      await assert.rejects(
+        () => testSupport.secretPutApiKey(secret, '€'.repeat(21_846)),
+        /ValidationFailedException/,
+      );
+    });
+
     test('Secret - get with a malformed or unknown versionId reads null', async () => {
       const { testSupport, secret } = await getTestSupport();
       assert.strictEqual((await testSupport.secretGetApiKeyVersion(secret, 'nope')).value, null);

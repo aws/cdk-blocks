@@ -99,6 +99,10 @@ interface PutCase {
 	error: string | null;
 }
 
+/** An object whose `self` key points back at it: `JSON.stringify` throws a TypeError naming `self`. */
+const circular: Record<string, unknown> = {};
+circular.self = circular;
+
 const putCases: PutCase[] = [
 	{ label: 'a non-empty string', value: 'sk_live_1', error: null },
 	{ label: 'a single space', value: ' ', error: null },
@@ -107,6 +111,8 @@ const putCases: PutCase[] = [
 	{ label: 'a number without a schema', value: 5432, error: SecretErrors.ValidationFailed },
 	{ label: 'an object with a schema', schema: true, value: { host: 'db' }, error: null },
 	{ label: 'undefined with a schema', schema: true, value: undefined, error: SecretErrors.ValidationFailed },
+	{ label: 'a bigint with a schema', schema: true, value: 10n, error: SecretErrors.ValidationFailed },
+	{ label: 'a circular object with a schema', schema: true, value: circular, error: SecretErrors.ValidationFailed },
 	{ label: 'exactly 65,536 bytes', value: 'a'.repeat(65_536), error: null },
 	{ label: '65,537 bytes', value: 'a'.repeat(65_537), error: SecretErrors.ValidationFailed },
 	{ label: 'a 70 KB value', value: 'a'.repeat(70 * 1024), error: SecretErrors.ValidationFailed },
@@ -154,6 +160,19 @@ describe('Secret.put() parity: mock vs AWS', () => {
 			}
 		});
 	}
+
+	test('a value that JSON.stringify throws on is rejected without quoting its keys', async () => {
+		const secret = new MockSecret<unknown>(new Scope('app'), uniqueId(), {
+			allowRuntimeWrite: true,
+			schema: anySchema,
+		});
+		const outcome = await outcomeOf(() => secret.put(circular));
+		assert.deepStrictEqual(outcome, {
+			ok: false,
+			name: SecretErrors.ValidationFailed,
+			message: `${SecretErrors.ValidationFailed}: The secret value has no JSON representation`,
+		});
+	});
 
 	test('a rejected value leaves the stored value unchanged in the mock', async () => {
 		const secret = new MockSecret(new Scope('app'), uniqueId(), { allowRuntimeWrite: true });

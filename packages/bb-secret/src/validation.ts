@@ -36,6 +36,14 @@ export function secretValidationFailed(issues: ReadonlyArray<StandardSchemaV1.Is
  * Secrets Manager's `SecretString` limit: 1 to 65,536 bytes. The API also caps
  * the length at 65,536 characters, but a UTF-8 byte count is never smaller than
  * the UTF-16 length, so the byte check covers both.
+ *
+ * The limit is in UTF-8 bytes, not characters, as observed against the real
+ * `PutSecretValue` API (us-east-1, 2026-11-24): `'€'.repeat(21_846)`, which is
+ * 21,846 characters and 65,538 bytes, fails with `LimitExceededException` ("The
+ * secure secret must be between 1 and 65536 bytes in size"), and 65,536 ASCII
+ * characters succeed. The quotas page's "number of characters" wording for
+ * strings does not match the service. `test/secret.test.ts` in the
+ * comprehensive test app pins this on deployed runs.
  */
 export const MAX_SECRET_VALUE_BYTES = 65_536;
 
@@ -58,7 +66,8 @@ function invalidValue(message: string): Error {
  * - Without a schema the value must be a string: an object would reach the SDK
  *   as a structure and fail with `SerializationException`.
  * - With a schema the value is stored as its JSON text, which must exist
- *   (`JSON.stringify(undefined)` has none).
+ *   (`JSON.stringify(undefined)` has none, and a `bigint` or a circular object
+ *   makes it throw a `TypeError` whose message can quote the value's keys).
  * - The stored text must be 1 to {@link MAX_SECRET_VALUE_BYTES} UTF-8 bytes.
  *
  * @returns The `SecretString` to store.
@@ -67,7 +76,14 @@ function invalidValue(message: string): Error {
 export function serializeSecretValue(value: unknown, hasSchema: boolean): string {
 	let serialized: string | undefined;
 	if (hasSchema) {
-		serialized = JSON.stringify(value);
+		// A throw (bigint, circular reference) is treated like a missing JSON
+		// text: the TypeError is unnamed for isBlocksError() and its message can
+		// quote the value's own key names, so it must not reach the caller.
+		try {
+			serialized = JSON.stringify(value);
+		} catch {
+			serialized = undefined;
+		}
 		if (serialized === undefined) {
 			throw invalidValue('The secret value has no JSON representation');
 		}
