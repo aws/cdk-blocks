@@ -36,7 +36,11 @@ export interface FileBucketOptions {
 	 * Each `allowedOrigins` entry is written in lower case, as a browser sends
 	 * the scheme and host in its `Origin` header (S3 matches them
 	 * case-sensitively): an ALB door's `HostingUrl`, which keeps the capitals of
-	 * the load balancer's DNS name, matches as copied.
+	 * the load balancer's DNS name, matches as copied. An entry that is an
+	 * unresolved CDK token (such as the ALB door's `url`, built from the load
+	 * balancer's DNS name at deploy time) is written unchanged, because
+	 * CloudFormation can't change its case: copy the deployed `HostingUrl` into
+	 * the list as a string, or lower-case the value yourself.
 	 *
 	 * @example
 	 * ```ts

@@ -400,8 +400,10 @@ DNS name, which keeps the capitals of the load balancer's generated name
 can't change the case of that value. A browser sends the host in lower case in
 its `Origin` header. The backend's CORS check compares the origin
 case-insensitively, and `FileBucket` writes its `corsRules` origins in lower
-case, so the URL works as copied in both. Lower-case it yourself anywhere else
-that compares origins exactly.
+case, so the URL works as copied in both. `FileBucket` writes a token origin
+unchanged, so pass the copied `HostingUrl` string there, not the door's `url`
+token, which resolves to the DNS name with its capitals. Lower-case it yourself
+anywhere else that compares origins exactly.
 
 **Internal ALB.** `internal: true` with the default VPC places the ALB in
 isolated private subnets (the VPC still has no NAT gateway). With your own VPC,
