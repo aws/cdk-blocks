@@ -1,6 +1,6 @@
 ---
 name: verify-auth-session-refresh
-description: Check a change to the bb-auth session refresh and sign-out path against its TLA+ model. Use when a diff touches resolveSession, sessionAfterLostWrite, refreshRecord or signOut in packages/bb-auth/src/auth-base.ts, SessionStore in packages/bb-auth/src/sessions.ts, or anything under formal/auth-session-refresh, and when `npm run check:formal` or the Formal Models workflow fails.
+description: Check a change to the bb-auth session refresh and sign-out path against its TLA+ model. Use when a diff touches resolveSession, sessionAfterLostWrite, refreshRecord or signOut in packages/bb-auth/src/auth-base.ts, SessionStore in packages/bb-auth/src/sessions.ts, or anything under formal/auth-session-refresh, and when `npm run check:formal` or the "Check the formal models" step of PR Checks fails.
 ---
 
 # Verify the auth session refresh
