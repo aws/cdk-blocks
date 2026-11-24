@@ -1454,20 +1454,25 @@ export async function startDevServer(options: DevServerOptions) {
 
     // ── API/RawRoute requests ──────────────────────────────────────────
     if (isApiRequest(method, url.pathname)) {
-      // API Gateway answers a path with malformed percent-encoding with a 400
-      // before the Lambda runs. Do the same here, so a handler never receives
-      // the undecodable text as if it were a literal parameter value.
-      if (hasMalformedPercentEncoding(url.pathname)) {
-        res.writeHead(400, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: 'Bad Request' }));
-        return;
-      }
       if (isSandbox && apiProxy) {
         // The dispatcher and handleApiRequest apply the Origin and Content-Type
         // checks to local requests; a request proxied to the sandbox API gets
         // the same checks here, before it is forwarded with the browser's cookies.
         if (refuseProxiedApiRequest(req, res, url, method, host)) return;
         apiProxy.web(req, res);
+        return;
+      }
+      // API Gateway answers a path holding a `%` not followed by two hex digits
+      // with a 400 before the Lambda runs. Do the same here, so a local handler
+      // never receives that text as if it were a literal parameter value. The
+      // status matches API Gateway; the body follows the dispatcher's
+      // `{"error": ...}` shape. Only matched API paths reach this check: a
+      // malformed path that matches no route still gets the 404 below, where an
+      // API-only deployment would answer 400. (The sandbox branch above
+      // forwards to the real API Gateway, which gives its own answer.)
+      if (hasMalformedPercentEncoding(url.pathname)) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Bad Request' }));
         return;
       }
       handleApiRequest(req, res, url, method, dispatch, bound);
@@ -2300,17 +2305,14 @@ function unsupportedMediaTypeResponse(): string {
 }
 
 /**
- * Whether `pathname` holds a `%` escape that doesn't decode to valid UTF-8
- * (e.g. `/users/%E0%A4%A`). API Gateway refuses such a request with a 400
- * before it reaches the Lambda, so the dev server refuses it too.
+ * Whether `pathname` holds a `%` that isn't followed by two hex digits
+ * (e.g. `/users/%E0%A4%A`, `/users/100%`). API Gateway refuses such a request
+ * with a 400 before it reaches the Lambda, so the dev server refuses it too.
+ * Well-formed escapes that aren't valid UTF-8 (`%FF`) reach the Lambda
+ * deployed, so they are not refused here.
  */
 function hasMalformedPercentEncoding(pathname: string): boolean {
-  try {
-    decodeURIComponent(pathname);
-    return false;
-  } catch {
-    return true;
-  }
+  return /%(?![0-9A-Fa-f]{2})/.test(pathname);
 }
 
 /**
