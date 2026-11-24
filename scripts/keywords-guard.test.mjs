@@ -184,6 +184,18 @@ describe("verify-discovery-tag: every published package carries the discovery ke
 		assert.match(output, /@aws-cdk-blocks\/bb-queue/);
 	});
 
+	it("checks the unscoped create-blocks-app, which no scope test would see", (t) => {
+		const dir = baseRepo(t, {
+			"packages/create-blocks-app-unscoped/package.json": pkgJson("create-blocks-app", {
+				keywords: ["cli"],
+			}),
+		});
+
+		const { status, output } = guard(dir, "verify-discovery-tag");
+		assert.equal(status, 1, output);
+		assert.match(output, /create-blocks-app {2}\(packages\/create-blocks-app-unscoped\/package\.json\)/);
+	});
+
 	it("fails loudly on a malformed package.json instead of skipping it", (t) => {
 		const dir = baseRepo(t, {
 			"packages/bb-queue/package.json": "{ not json",

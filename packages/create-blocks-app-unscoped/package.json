@@ -1,0 +1,37 @@
+{
+  "name": "create-blocks-app",
+  "version": "1.0.1",
+  "description": "Create an AWS CDK Blocks app with `npm create blocks-app`. Runs @aws-cdk-blocks/create-blocks-app.",
+  "keywords": [
+    "aws-blocks",
+    "cli",
+    "scaffolding",
+    "starter",
+    "template"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/aws/cdk-blocks.git",
+    "directory": "packages/create-blocks-app-unscoped"
+  },
+  "homepage": "https://github.com/aws/cdk-blocks/tree/main/packages/create-blocks-app-unscoped#readme",
+  "bugs": {
+    "url": "https://github.com/aws/cdk-blocks/issues"
+  },
+  "author": "Amazon Web Services",
+  "license": "Apache-2.0",
+  "type": "module",
+  "bin": {
+    "create-blocks-app": "./bin.js"
+  },
+  "scripts": {
+    "test": "node --test bin.test.js"
+  },
+  "dependencies": {
+    "@aws-cdk-blocks/create-blocks-app": "1.0.1"
+  },
+  "files": [
+    "bin.js",
+    "LICENSE"
+  ]
+}

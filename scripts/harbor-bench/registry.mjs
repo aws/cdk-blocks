@@ -12,8 +12,11 @@ const UPSTREAM = 'https://registry.npmjs.org';
 // a missing one stays a real installation failure. Everything else is forwarded upstream, which is
 // what lets the bench npmrc set the DEFAULT registry here — npm resolves a registry per scope, so a
 // scope line cannot route the unscoped `aws-cdk-blocks` umbrella.
+// `create-blocks-app` is the unscoped name of @aws-cdk-blocks/create-blocks-app (`npm create blocks-app`).
+const UNSCOPED_CANDIDATES = ['aws-cdk-blocks', 'create-blocks-app'];
 const isCandidate = (name) =>
-	name.startsWith('@aws-cdk-blocks/') || name === 'aws-cdk-blocks' || name.startsWith('aws-cdk-blocks/');
+	name.startsWith('@aws-cdk-blocks/') ||
+	UNSCOPED_CANDIDATES.some((candidate) => name === candidate || name.startsWith(`${candidate}/`));
 createServer(async (request, response) => {
 	let uri;
 	try {

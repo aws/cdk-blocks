@@ -25,6 +25,7 @@ export const EXCLUDED = new Set([
 	'blocks',
 	'foundations',
 	'create-blocks-app',
+	'create-blocks-app-unscoped',
 	'create-block',
 	'bb-lambda-compute',
 	'bb-container-compute',

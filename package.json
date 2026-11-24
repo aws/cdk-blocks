@@ -28,6 +28,7 @@
     "packages/bb-compute",
     "packages/blocks",
     "packages/create-blocks-app",
+    "packages/create-blocks-app-unscoped",
     "packages/admin-ui",
     "packages/create-block",
     "test-apps/comprehensive",

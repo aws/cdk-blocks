@@ -72,7 +72,10 @@ const NATIVE_DIR = join(ROOT, "native");
 const SCOPE = "@aws-cdk-blocks/";
 const UMBRELLA_PKG = "aws-cdk-blocks";
 // The umbrella publishes unscoped, so a scope test alone would stop covering it.
-const isReleasedPackage = (name: string): boolean => name.startsWith(SCOPE) || name === UMBRELLA_PKG;
+// `create-blocks-app` is the unscoped name of @aws-cdk-blocks/create-blocks-app (`npm create blocks-app`).
+const CREATE_APP_PKG = "create-blocks-app";
+const isReleasedPackage = (name: string): boolean =>
+	name.startsWith(SCOPE) || name === UMBRELLA_PKG || name === CREATE_APP_PKG;
 
 // changesets/action opens its "Version Packages" PR with this title.
 const RELEASE_PR_TITLE_PREFIX = "chore: version packages";
@@ -124,7 +127,7 @@ function parseEntries(file: string, content: string): Entry[] {
 		// The umbrella publishes unscoped, so it has to be matched by name. Anchored at the line
 		// start so a key like `my-aws-cdk-blocks` or `@other/aws-cdk-blocks` is not read as it.
 		const entryMatch = line.match(
-			/^\s*['"]?(@aws-cdk-blocks\/[^'":\s]+|aws-cdk-blocks)['"]?\s*:\s*['"]?(major|minor|patch)['"]?/,
+			/^\s*['"]?(@aws-cdk-blocks\/[^'":\s]+|aws-cdk-blocks|create-blocks-app)['"]?\s*:\s*['"]?(major|minor|patch)['"]?/,
 		);
 		if (entryMatch) {
 			entries.push({ file, pkg: entryMatch[1], type: entryMatch[2] as BumpType });

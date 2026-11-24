@@ -33,6 +33,8 @@ const OTHER_SIBLING = "@aws-cdk-blocks/bb-kv-store";
 // In the workspace but not re-exported by the umbrella, so releasing it alone
 // must never trigger the umbrella requirement.
 const NON_SIBLING = "@aws-cdk-blocks/create-blocks-app";
+// The unscoped name of NON_SIBLING, published from packages/create-blocks-app-unscoped.
+const UNSCOPED_CREATE_APP = "create-blocks-app";
 
 // Keeps the fixture repo free of the host's git config (signing hooks, aliases,
 // templates) so the tests behave the same on a laptop and on a runner.
@@ -487,6 +489,29 @@ describe("verify-coverage", () => {
 			assert.equal(status, 1, output);
 			assert.match(output, /@aws-cdk-blocks\/core/);
 			assert.match(output, /@aws-cdk-blocks\/create-blocks-app/);
+		});
+	});
+
+	describe("the unscoped create-blocks-app, which no scope test would see", () => {
+		const unscoped = { "packages/create-blocks-app-unscoped/package.json": pkgJson(UNSCOPED_CREATE_APP) };
+		const change = { "packages/create-blocks-app-unscoped/bin.js": "// changed\n" };
+
+		it("fails when it changes without a changeset entry", (t) => {
+			const dir = baseRepo(t, unscoped);
+			commitPr(dir, { ...change, ".changeset/cli.md": changeset({ [NON_SIBLING]: "patch" }) });
+
+			const { status, output } = guard(dir, "verify-coverage");
+			assert.equal(status, 1, output);
+			assert.match(output, /• create-blocks-app\b/);
+		});
+
+		it("passes when a changeset names it", (t) => {
+			const dir = baseRepo(t, unscoped);
+			commitPr(dir, { ...change, ".changeset/cli.md": changeset({ [UNSCOPED_CREATE_APP]: "patch" }) });
+
+			const { status, output } = guard(dir, "verify-coverage");
+			assert.equal(status, 0, output);
+			assert.match(output, /are covered by changesets/);
 		});
 	});
 

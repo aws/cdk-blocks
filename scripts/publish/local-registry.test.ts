@@ -161,6 +161,8 @@ describe("upstreamRegistryUrl", () => {
 		["a scoped tarball", "/registry/@aws-cdk-blocks/core/-/core-0.1.0.tgz"],
 		["the unscoped umbrella", "/registry/aws-cdk-blocks"],
 		["the unscoped umbrella's tarball", "/registry/aws-cdk-blocks/-/aws-cdk-blocks-0.1.0.tgz"],
+		["the unscoped create-blocks-app", "/registry/create-blocks-app"],
+		["the unscoped create-blocks-app's tarball", "/registry/create-blocks-app/-/create-blocks-app-0.1.0.tgz"],
 	] as const) {
 		it(`never forwards this repo's own packages: ${label}`, () => {
 			assert.equal(upstreamRegistryUrl(url), undefined);
@@ -171,6 +173,13 @@ describe("upstreamRegistryUrl", () => {
 		assert.equal(
 			upstreamRegistryUrl("/registry/aws-cdk-blocks-community"),
 			`${UPSTREAM_REGISTRY}/aws-cdk-blocks-community`,
+		);
+	});
+
+	it("forwards a third-party package whose name merely starts with create-blocks-app", () => {
+		assert.equal(
+			upstreamRegistryUrl("/registry/create-blocks-app-community"),
+			`${UPSTREAM_REGISTRY}/create-blocks-app-community`,
 		);
 	});
 

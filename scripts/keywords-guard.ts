@@ -39,7 +39,10 @@ const PACKAGES_DIR = join(ROOT, "packages");
 const SCOPE = "@aws-cdk-blocks/";
 // The umbrella publishes unscoped, so a scope test alone would exempt it from the guard.
 const UMBRELLA_PKG = "aws-cdk-blocks";
-const isReleasedPackage = (name: string): boolean => name.startsWith(SCOPE) || name === UMBRELLA_PKG;
+// `create-blocks-app` is the unscoped name of @aws-cdk-blocks/create-blocks-app (`npm create blocks-app`).
+const CREATE_APP_PKG = "create-blocks-app";
+const isReleasedPackage = (name: string): boolean =>
+	name.startsWith(SCOPE) || name === UMBRELLA_PKG || name === CREATE_APP_PKG;
 const DISCOVERY_KEYWORD = "aws-blocks";
 
 /**
