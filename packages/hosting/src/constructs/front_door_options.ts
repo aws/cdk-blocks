@@ -47,7 +47,7 @@ import type { EmailSubscription, UrlSubscription } from 'aws-cdk-lib/aws-sns-sub
 import { HostingError } from '../hosting_error.js';
 import type { DoorFeatures, DoorInput, FrontDoor } from './front_door.js';
 import type { AccessLogFormat, AccessLogPartitioning } from './access_logging.js';
-import type { HostingDomainConfig, HostingWafConfig } from './hosting_construct.js';
+import type { HostingDomainConfig, HostingWafSettings } from './hosting_construct.js';
 import type { QuotaOverrides } from './quota_budget.js';
 import type { SkewProtectionConfig } from './skew_protection.js';
 
@@ -178,7 +178,7 @@ export type CloudFrontDoorFeatures<TDomain = HostingDomainConfig> = {
   /** Custom domain(s): ACM certificate (us-east-1), distribution aliases, Route 53 records, `wwwRedirect`. */
   domain?: TDomain;
   /** A CLOUDFRONT-scoped web ACL: a rate-limited one built for you (`enabled`), or yours (`webAclArn`, in us-east-1). */
-  waf?: HostingWafConfig;
+  waf?: HostingWafSettings;
   /** CloudFront and asset-bucket access logs. @default \{ enabled: true \} */
   logging?: HostingLoggingConfig;
   /** CloudFront 5xx, Lambda error/throttle and revalidation-queue alarms. @default \{ enabled: true \} */
@@ -244,7 +244,7 @@ export type AlbDoorFeatures<TDomain = HostingDomainConfig> = {
    * A REGIONAL web ACL on the load balancer: a rate-limited one built for you
    * (`enabled`), or yours (`webAclArn`, a REGIONAL ACL in the stack's region).
    */
-  waf?: HostingWafConfig;
+  waf?: HostingWafSettings;
   /**
    * The ALB's own access logs (a dedicated bucket): off unless set (and not
    * `enabled: false`). The asset bucket's access logs are on by default on
@@ -289,7 +289,7 @@ export type CustomDoorFeatures<TDomain = HostingDomainConfig> = {
   /** Custom domain(s), with `wwwRedirect` → `input.features.domain`. */
   domain?: TDomain;
   /** Request filtering → `input.features.waf`. */
-  waf?: HostingWafConfig;
+  waf?: HostingWafSettings;
   /** Access logging → `input.features.logging` (also the asset bucket's access logs). */
   logging?: HostingLoggingConfig;
   /** Alarms → `input.features.monitoring`. */
@@ -785,6 +785,23 @@ export function validateVerifySecretRotation(rotation: unknown, prop: string): v
 }
 
 /**
+ * Check a `waf` given as your own web ACL alone (`{ webAclArn }`, no
+ * `enabled`): the ARN must be non-empty, or no web ACL would be attached and
+ * none built, silently.
+ *
+ * @param waf the effective `waf` setting.
+ * @param prop where the app wrote the `waf` setting (e.g. `frontDoor.features.waf`).
+ * @throws HostingError('InvalidFrontDoorSettingError') for an empty `webAclArn` without `enabled`.
+ */
+const validateWebAclArn = (waf: { enabled?: unknown; webAclArn?: unknown } | undefined, prop: string): void => {
+  if (!waf || waf.enabled !== undefined || typeof waf.webAclArn !== 'string' || waf.webAclArn.trim().length > 0) return;
+  throw new HostingError('InvalidFrontDoorSettingError', {
+    message: `\`${prop}.webAclArn\` is empty, so no web ACL would be attached.`,
+    resolution: 'Pass the ARN of your web ACL, or `{ enabled: true }` for a rate-limited web ACL built for you.',
+  });
+};
+
+/**
  * The geo restriction with its type normalized to `'allowlist'` / `'denylist'`.
  *
  * @throws HostingError('InvalidFrontDoorSettingError') for any other type.
@@ -826,7 +843,7 @@ const normalizeGeo = (geo: HostingGeoRestriction, prop: string): HostingGeoRestr
  * @returns the door kind and its effective settings.
  * @throws HostingError('UnsupportedFrontDoorError') when `frontDoor` is not a known door.
  * @throws HostingError('InvalidFrontDoorOptionError') for an unknown or mistyped door option.
- * @throws HostingError('InvalidFrontDoorSettingError') for an unknown key inside a setting, an unknown geo type, or a `serverOrigin.verifySecretRotation` that is not a non-negative integer.
+ * @throws HostingError('InvalidFrontDoorSettingError') for an unknown key inside a setting, an unknown geo type, a `serverOrigin.verifySecretRotation` that is not a non-negative integer, or an empty `waf.webAclArn` without `enabled`.
  * @throws HostingError('FrontDoorSettingConflictError') when a setting is set twice.
  * @throws HostingError('UnsupportedFrontDoorSettingError') when the kind doesn't implement a setting.
  * @internal Framework-only: the merge `HostingConstruct` and the `@aws-cdk-blocks/core` `Hosting` share.
@@ -883,6 +900,7 @@ export function resolveFrontDoorFeatures<TDomain>(
   }
   if (features.geoRestriction) features.geoRestriction = normalizeGeo(features.geoRestriction, propOf('geoRestriction'));
   validateVerifySecretRotation(features.serverOrigin?.verifySecretRotation, propOf('serverOrigin'));
+  validateWebAclArn(features.waf, propOf('waf'));
 
   return { kind, features };
 }

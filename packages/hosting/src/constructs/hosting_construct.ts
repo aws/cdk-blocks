@@ -190,10 +190,28 @@ export type HostingDomainConfig = {
 
 /**
  * WAF configuration for CloudFront protection.
+ */
+export type HostingWafConfig = {
+  enabled: boolean;
+  /** Requests per 5-minute window per IP. Default: 1000 */
+  rateLimit?: number;
+  /**
+   * ARN of an existing WAFv2 WebACL in us-east-1. When provided, the
+   * construct uses this ACL directly instead of creating a new one.
+   * Enables cross-region deployments.
+   */
+  webAclArn?: string;
+};
+
+/**
+ * The `waf` setting a front door takes: a {@link HostingWafConfig}, or your own
+ * web ACL's ARN alone.
  *
  * Either `enabled` (a rate-limited web ACL built for you) or `webAclArn` (your
- * own web ACL) is required. With `webAclArn`, `enabled` is not needed and has
- * no effect: your ACL is attached and none is built.
+ * own web ACL) is required. With `webAclArn`, `enabled` is not needed: the
+ * CloudFront and ALB doors attach your ACL and build none, whatever `enabled`
+ * says. A custom door (`defineFrontDoor`) receives `enabled` as written
+ * (`false` when omitted) in `features.waf`.
  *
  * @example
  * ```ts
@@ -201,21 +219,13 @@ export type HostingDomainConfig = {
  * waf: { webAclArn: myWebAcl.attrArn }     // your own web ACL
  * ```
  */
-export type HostingWafConfig =
+export type HostingWafSettings =
+  | HostingWafConfig
   | {
-      /** Build a rate-limited web ACL. Ignored when `webAclArn` is set. */
-      enabled: boolean;
-      /** Requests per 5-minute window per IP. Default: 1000 */
-      rateLimit?: number;
       /**
-       * ARN of an existing WAFv2 WebACL in us-east-1. When provided, the
-       * construct uses this ACL directly instead of creating a new one.
-       * Enables cross-region deployments.
+       * Not needed with `webAclArn`. The CloudFront and ALB doors ignore it (your
+       * ACL is attached and none is built); a custom door receives it as written.
        */
-      webAclArn?: string;
-    }
-  | {
-      /** Not needed with `webAclArn`, and ignored: your ACL is attached and none is built. */
       enabled?: boolean;
       /** Requests per 5-minute window per IP. Default: 1000 */
       rateLimit?: number;
@@ -265,7 +275,7 @@ export type HostingConstructProps = {
    * WAF configuration.
    * @deprecated Use `frontDoor.features.waf` (CloudFront, ALB, custom doors).
    */
-  waf?: HostingWafConfig;
+  waf?: HostingWafSettings;
   /** Compute (Lambda) overrides for all compute resources. */
   compute?: {
     /**

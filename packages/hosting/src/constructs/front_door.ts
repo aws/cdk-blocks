@@ -223,7 +223,7 @@ export type DoorFeatures = {
    * Request filtering. `webAclArn` when the app brought a web ACL; `rateLimit` per 5-minute window per IP.
    * `enabled` is always set here (`false` when the app gave only `webAclArn`).
    */
-  readonly waf?: Readonly<HostingWafConfig & { enabled: boolean }>;
+  readonly waf?: Readonly<HostingWafConfig>;
   /** Access logging (`enabled` is always `true` here). */
   readonly logging?: Readonly<HostingLoggingConfig>;
   /** Alarms on the door's metrics, with the endpoints to notify. */

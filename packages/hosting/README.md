@@ -255,7 +255,10 @@ frontDoor: { kind: 'alb', features: { geoRestriction: { type: 'allowlist', count
 
 `waf` takes `{ enabled: true }` (and an optional `rateLimit`) for a
 rate-limited web ACL built for you, or `{ webAclArn }` for a web ACL of your
-own; with `webAclArn`, `enabled` is not needed and has no effect.
+own; with `webAclArn`, `enabled` is not needed. The CloudFront and ALB doors
+attach your web ACL and build none, whatever `enabled` says; a custom door
+receives `enabled` as written (`false` when omitted). An empty `webAclArn`
+without `enabled` fails synth.
 
 | Setting | CloudFront | ALB | API Gateway | Custom (BYO) |
 |---|---|---|---|---|

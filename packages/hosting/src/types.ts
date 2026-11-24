@@ -144,7 +144,10 @@ export type HostingProps = {
         webAclArn?: string;
       }
     | {
-        /** Not needed with `webAclArn`, and ignored: your ACL is attached and none is built. */
+        /**
+         * Not needed with `webAclArn`. The CloudFront and ALB doors ignore it (your
+         * ACL is attached and none is built); a custom door receives it as written.
+         */
         enabled?: boolean;
         /** Requests per 5-minute window per IP. Default: 1000 */
         rateLimit?: number;

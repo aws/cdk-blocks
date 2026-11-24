@@ -22,7 +22,7 @@ import type {
   HostingFrontDoor,
   StackedDoorFeatures,
 } from './front_door_options.js';
-import type { HostingConstructProps } from './hosting_construct.js';
+import type { HostingConstructProps, HostingWafConfig } from './hosting_construct.js';
 
 const ACL = 'arn:aws:wafv2:us-east-1:111111111111:global/webacl/acl/1';
 const door = defineFrontDoor({ service: 'x', build: () => ({ url: 'https://x.example.com' }) });
@@ -127,6 +127,16 @@ const negatives: HostingFrontDoor[] = [
 ];
 // The deprecated top-level `waf` takes a web ACL of your own without `enabled` too.
 const releasedWebAcl: Partial<HostingConstructProps> = { waf: { webAclArn: ACL } };
+// `HostingWafConfig` keeps a required `enabled`, so code that reads it as a boolean compiles as before.
+const readsWafConfig = (config: HostingWafConfig): boolean => config.enabled;
+// A door built with `defineFrontDoor` receives `features.waf.enabled` as a boolean.
+const readsDoorWaf = defineFrontDoor({
+  service: 'waf-reader',
+  build: (_scope, input) => {
+    const enabled: boolean = input.features.waf ? input.features.waf.enabled : false;
+    return { url: `https://${enabled ? 'on' : 'off'}.example.com` };
+  },
+});
 const stackedNegatives: StackedDoorFeatures[] = [
   // @ts-expect-error — the edge builds no web ACL; it takes yours (`webAclArn`).
   { edge: { waf: { enabled: true } } },
@@ -159,7 +169,9 @@ describe('frontDoor.features — compile-time contract', () => {
     assert.equal(positives.length, 14);
     assert.ok(stackedPositive.edge && stackedPositive.router);
     assert.ok(released.cdn);
-    assert.equal(releasedWebAcl.waf?.webAclArn, ACL);
+    assert.ok(releasedWebAcl.waf);
+    assert.equal(readsWafConfig({ enabled: true }), true);
+    assert.ok(readsDoorWaf);
     assert.equal(negatives.length, 19);
     assert.equal(stackedNegatives.length, 4);
     assert.ok(noneWithFeatures);

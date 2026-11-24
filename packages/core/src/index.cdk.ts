@@ -114,6 +114,7 @@ export {
 	type HostingDomainConfig,
 	type HostingProps,
 	type HostingWafConfig,
+	type HostingWafSettings,
 	type HostingPreset,
 	HostingPresets,
 } from './hosting.js';

@@ -19,6 +19,7 @@ export {
 	HostingConstructProps,
 	HostingDomainConfig,
 	HostingWafConfig,
+	HostingWafSettings,
 } from './hosting_construct.js';
 export type { SkewProtectionConfig } from './skew_protection.js';
 export {
