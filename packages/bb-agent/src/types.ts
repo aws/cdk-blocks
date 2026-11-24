@@ -30,20 +30,35 @@ export interface ModelConfig {
 	 * - `{ strategy: 'auto' }` — let Strands place cache points at optimal positions
 	 *   (after tools, after the last user message) for known Bedrock model IDs. This is
 	 *   the recommended default for the {@link BedrockModels} presets.
-	 * - `{ strategy: 'anthropic' }` — force-enable Anthropic-style caching. Use this
-	 *   when `modelId` is an ARN application inference profile, where `'auto'` cannot
-	 *   detect the underlying model and therefore won't enable caching.
+	 * - `{ strategy: 'anthropic' }` — add Anthropic-style cache points *without* the
+	 *   model-support check. Use this when `modelId` is an ARN application inference
+	 *   profile, where `'auto'` cannot detect the underlying model and therefore won't
+	 *   enable caching. **The underlying model must support prompt caching** (e.g. an
+	 *   Anthropic Claude model): otherwise Bedrock rejects every invocation with a
+	 *   `ModelError`. Nothing is validated at construction time.
 	 *
 	 * Caching has per-model minimum token thresholds (e.g. ~1,024 for Claude Sonnet)
 	 * and cache entries expire after ~5 minutes of inactivity.
 	 *
-	 * @see https://strandsagents.com/docs/user-guide/concepts/model-providers/amazon-bedrock/#caching
+	 * @see https://strandsagents.com/docs/user-guide/sdk/model-providers/amazon-bedrock-prompt-caching/
 	 */
 	cacheConfig?: CacheConfig;
 }
 
-/** Prompt-caching strategy for the `bedrock` provider. @see {@link ModelConfig.cacheConfig} */
+/**
+ * Prompt-caching strategy for the `bedrock` provider. @see {@link ModelConfig.cacheConfig}
+ *
+ * This is a deliberately minimal surface: only `strategy` is passed through to the
+ * Strands `BedrockModel`. Other Strands caching options (TTL and per-section
+ * controls such as `toolsTTL`, `systemPromptTTL`, `messagesTTL`) are not exposed
+ * here, so cache entries use the provider's default TTL.
+ */
 export interface CacheConfig {
+	/**
+	 * - `'auto'` — cache points for known Bedrock model IDs; no-op (with a warning) on unsupported models.
+	 * - `'anthropic'` — cache points without the model-support check; requires an underlying
+	 *   model that supports prompt caching, or invocation fails with a `ModelError`.
+	 */
 	strategy: 'auto' | 'anthropic';
 }
 

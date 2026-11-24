@@ -13,5 +13,8 @@ system prompts, many tools, or multi-turn conversations.
 Off by default and additive — existing configs are unaffected. Use
 `'auto'` for the `BedrockModels` presets (Strands places cache points for
 known model IDs) and `'anthropic'` when `modelId` is an ARN application
-inference profile that `'auto'` can't detect. Ignored by the `openai-api`
-and `canned` providers.
+inference profile that `'auto'` can't detect. `'anthropic'` skips the
+model-support check, so the underlying model must support prompt caching or
+Bedrock rejects the invocation with a `ModelError`. Only `strategy` is
+exposed; TTL and per-section caching options are not passed through. Ignored
+by the `openai-api` and `canned` providers.

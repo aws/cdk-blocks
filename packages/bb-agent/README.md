@@ -231,9 +231,15 @@ model: { deployed: { ...BedrockModels.BALANCED, cacheConfig: { strategy: 'auto' 
 | Strategy | When to use |
 |----------|-------------|
 | `'auto'` | Recommended default. Strands places cache points automatically for known Bedrock model IDs — including all [`BedrockModels`](#bedrock-presets) presets. |
-| `'anthropic'` | Use when `modelId` is an ARN application inference profile, where `'auto'` cannot detect the underlying model and won't enable caching. Same performance, no extra permissions. |
+| `'anthropic'` | Use when `modelId` is an ARN application inference profile, where `'auto'` cannot detect the underlying model and won't enable caching. Same performance, no extra permissions. **Requires an underlying model that supports prompt caching** (e.g. Anthropic Claude). |
 
-> Caching has per-model minimum token thresholds (e.g. ~1,024 tokens for Claude Sonnet) and cache entries expire after ~5 minutes of inactivity. See the [Strands caching docs](https://strandsagents.com/docs/user-guide/concepts/model-providers/amazon-bedrock/#caching).
+> **`'anthropic'` only works on models that support prompt caching.** It adds cache points *without* the model-support check that `'auto'` performs. If the underlying model doesn't support prompt caching, Bedrock rejects every invocation with a `ModelError` ("You invoked an unsupported model or your request did not allow prompt caching"). Nothing is validated when the agent is constructed, so the error only shows up at invocation. With `'auto'`, an unsupported model logs a warning and runs uncached instead.
+
+`cacheConfig` is a deliberately minimal surface: only `strategy` is passed through to the Strands `BedrockModel`. Other Strands caching options, such as TTL and per-section controls (`toolsTTL`, `systemPromptTTL`, `messagesTTL`), are not exposed, so cache entries use the provider's default TTL.
+
+OpenAI models on Bedrock (GPT-5.6 and later) also support explicit prompt caching, but Bedrock's Converse API, which the `bedrock` provider uses, doesn't accept explicit cache points for them. `cacheConfig` therefore doesn't enable explicit caching for these models; they still benefit from Bedrock's implicit caching. See the [Bedrock prompt caching docs](https://docs.aws.amazon.com/bedrock/latest/userguide/prompt-caching.html#prompt-caching-openai).
+
+> Caching has per-model minimum token thresholds (e.g. ~1,024 tokens for Claude Sonnet) and cache entries expire after ~5 minutes of inactivity. See the [Strands prompt caching docs](https://strandsagents.com/docs/user-guide/sdk/model-providers/amazon-bedrock-prompt-caching/).
 
 #### Ollama Presets
 

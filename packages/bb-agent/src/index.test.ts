@@ -9,6 +9,7 @@ import { CannedProvider } from './providers/canned.js';
 import { checkModelHealth } from './model-factory.js';
 import { z } from 'zod';
 import { createStrandsModel } from './model-factory.js';
+import { BedrockModel } from '@strands-agents/sdk';
 
 // ── AgentErrors ─────────────────────────────────────────────────────────────
 
@@ -1492,15 +1493,14 @@ describe('BedrockModels presets', () => {
 
 	test('cacheConfig flows through createStrandsModel to BedrockModel', async () => {
 		const model = await createStrandsModel({ ...BedrockModels.BALANCED, cacheConfig: { strategy: 'auto' } });
-		assert.ok(model, 'should create a model instance');
-		const config = (model as { getConfig(): { cacheConfig?: { strategy: string } } }).getConfig();
-		assert.deepStrictEqual(config.cacheConfig, { strategy: 'auto' }, 'cacheConfig should reach the BedrockModel');
+		assert.ok(model instanceof BedrockModel, 'should create a BedrockModel');
+		assert.deepStrictEqual(model.getConfig().cacheConfig, { strategy: 'auto' }, 'cacheConfig should reach the BedrockModel');
 	});
 
 	test('omitting cacheConfig leaves caching off', async () => {
 		const model = await createStrandsModel(BedrockModels.BALANCED);
-		const config = (model as { getConfig(): { cacheConfig?: { strategy: string } } }).getConfig();
-		assert.strictEqual(config.cacheConfig, undefined, 'caching should be off by default');
+		assert.ok(model instanceof BedrockModel, 'should create a BedrockModel');
+		assert.strictEqual(model.getConfig().cacheConfig, undefined, 'caching should be off by default');
 	});
 });
 
