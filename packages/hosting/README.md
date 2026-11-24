@@ -973,7 +973,7 @@ new HostingConstruct(stack, 'Hosting', {
     Synth reminds you to include the removal in a policy of your own, because
     Hosting can't inspect or extend it.
 
-### Reserved concurrency (`compute.type: 'lambda'`)
+### Reserved concurrency
 
 No hosting Lambda reserves concurrency by default. Each one scales up to the
 account's unreserved concurrency pool. To cap a function, opt in per function:
@@ -995,9 +995,13 @@ A reservation is a trade-off, so set it only once you know your traffic:
 
 - **It caps the function.** Requests beyond the reservation are throttled.
   The SSR and image-optimization Lambdas then return errors (429 or 5xx)
-  through the front door. The revalidation worker's SQS messages go back to
-  the queue and land in its dead-letter queue after 3 receives, so those pages
-  stay stale until they're revalidated again.
+  through the front door. For the revalidation worker, Hosting also sets the
+  SQS event source's maximum concurrency to the reservation (SQS accepts 2 to
+  1000), so messages beyond it wait in the queue instead of being throttled.
+  With a reservation of 0 or 1 the event source isn't capped: throttled
+  messages go back to the queue and land in its dead-letter queue after 3
+  receives, which trips the `RevalidationDlqDepth` alarm, and those pages stay
+  stale until they're revalidated again.
 - **It takes from the account pool.** The reserved executions are removed from
   the concurrency that every other function in the account and Region shares,
   even while this function is idle.
@@ -1011,8 +1015,11 @@ Reservations aren't applied to:
   Hosting doesn't reserve concurrency for them. CloudFront runs them as
   replicas in the Regions it serves from, and each replica draws on that
   Region's account concurrency.
-- **Web Functions** (`compute.type: 'web-function'`). `reservedConcurrency` is
-  ignored with a synth warning; cap scale with `webFunction.maxEnvironments`.
+- **Web Functions** (`compute.type: 'web-function'`). Only the top-level
+  `reservedConcurrency` is ignored, with a synth warning; cap scale with
+  `webFunction.maxEnvironments`. Only the SSR server moves to a Web Function,
+  so `imageOptimization.reservedConcurrency` and
+  `revalidation.reservedConcurrency` still apply to those Lambdas.
 - **Helper functions**: the asset and API proxies of the ALB and API Gateway
   doors, and deploy-time custom resources. They aren't app compute.
 
