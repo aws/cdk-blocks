@@ -216,23 +216,19 @@ function main(): void {
 
     // ── CDK synth warnings (no AWS account) ─────────────────
     // The e2e above runs on mocks, so it never loads the CDK entry points.
-    // Synth does: it resolves the scaffold's fresh `^` aws-cdk-lib range and
+    // Synth does: it resolves the scaffold's fresh aws-cdk-lib range and
     // builds every block's construct, catching a CDK-layer break (a new CDK
     // release, a construct that needs an account lookup) the day it lands
     // rather than on a customer's first deploy. The runner has no AWS
     // credentials, so this also proves a template synthesizes without them.
-    // An untouched scaffold must also synthesize without warnings, apart from
-    // the ones its template is meant to show: the check synthesizes the app
-    // in production, sandbox and preview mode and reads the annotations (see
-    // scripts/ci/template-synth-warnings.mjs). This daily run is what catches
-    // a new aws-cdk-lib release that adds a warning to untouched apps.
+    // The check fails on a warning an untouched scaffold isn't meant to show
+    // (scripts/ci/template-synth-warnings.mjs).
     console.log("\n=== CDK synth warnings (no AWS credentials) ===");
     const problems = checkTemplateSynthWarnings({
       template: args.template,
       appDir,
       outDir: join(workDir, "synth"),
       env,
-      root: workDir,
     });
     if (problems.length > 0) {
       throw new Error(

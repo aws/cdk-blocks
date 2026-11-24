@@ -149,31 +149,20 @@ export const createAlarmTopicKey = (scope: Construct): Key => {
   return key;
 };
 
-/**
- * Stable id of the no-subscriber note; also its acknowledgement id
- * (`Annotations.of(scope).acknowledgeInfo(id)`).
- */
-export const MONITORING_NO_SUBSCRIBER_NOTE_ID =
+/** Stable id of the no-subscriber info; also its `acknowledgeInfo` id. */
+export const MONITORING_NO_SUBSCRIBER_INFO_ID =
   '@aws-cdk-blocks/hosting:MonitoringAlarmTopicHasNoSubscribers';
 
 /**
- * Register a synth-time validation that notes (an info annotation) when
- * `topic` carries alarm notifications it can deliver to no one. An alarm topic
- * with no subscriber can flip to ALARM but drop the notification silently — the
- * gap the "no silent gap" monitoring principle guards against. The topic ARN is
+ * Register a synth-time validation that adds an info annotation when `topic`
+ * carries alarm notifications it can deliver to no one. An alarm topic with no
+ * subscriber can flip to ALARM but drop the notification silently — the gap
+ * the "no silent gap" monitoring principle guards against. The topic ARN is
  * also a CloudFormation output for out-of-band subscription, but that is easy
  * to miss, so say it in the synth output.
  *
- * An info, not a warning: monitoring is on by default and no scaffold can know
- * a subscriber, so an unsubscribed topic is the default's open decision, not a
- * mistake in the app. A warning would make `cdk synth --strict` fail on an
- * untouched app. The info still prints on every synth and deploy until the
- * topic is subscribed or the note is acknowledged.
- *
- * Acknowledge it with `Annotations.of(scope).acknowledgeInfo(id)`. The note is
- * emitted at validation time, after the app's code has run, and CDK keeps one
- * acknowledgement set for both levels, so an app that already called
- * `acknowledgeWarning(id)` (the note was a warning before) stays silent.
+ * An info, not a warning: monitoring is on by default and a new app has no
+ * subscriber (D-033).
  *
  * Judged on a single topic's OWN alarms and subscribers, so it is correct for
  * both the regional construct and the us-east-1 support stack — off-region the
@@ -187,9 +176,9 @@ export const MONITORING_NO_SUBSCRIBER_NOTE_ID =
  * this topic's stack. The topic is also treated as deliverable when every
  * alarm already routes to some OTHER action (the caller took delivery into
  * their own hands via `monitoring.alarms`), and skipped entirely when no alarm
- * is wired (nothing can enter ALARM, so the note would be spurious).
+ * is wired (nothing can enter ALARM, so the info would be spurious).
  */
-export const noteIfUndeliverable = (
+export const infoIfUndeliverable = (
   scope: Construct,
   topic: ITopic,
   alarms: Alarm[],
@@ -236,7 +225,7 @@ export const noteIfUndeliverable = (
 
       // Treat as deliverable when every alarm already has at least one action
       // OTHER than this topic — the caller routed delivery themselves via
-      // `monitoring.alarms`, so a "subscribe this topic" note is wrong.
+      // `monitoring.alarms`, so a "subscribe this topic" info is wrong.
       // (The construct wires its own topic action onto each alarm it creates,
       // so the test is "has a non-topic action too", not "has no topic action".)
       const everyAlarmRoutesElsewhere = alarms.every((alarm) => {
@@ -255,7 +244,7 @@ export const noteIfUndeliverable = (
       }
 
       Annotations.of(scope).addInfoV2(
-        MONITORING_NO_SUBSCRIBER_NOTE_ID,
+        MONITORING_NO_SUBSCRIBER_INFO_ID,
         'Hosting monitoring is enabled but an alarm topic has no subscriber, ' +
           'so an alarm can enter ALARM but deliver to no one. Subscribe an ' +
           'endpoint via `monitoring.subscriptions` (EmailSubscription / ' +
@@ -263,7 +252,7 @@ export const noteIfUndeliverable = (
           'MonitoringTopicArn stack output, or route the alarm actions ' +
           'elsewhere via `monitoring.alarms`. Set `monitoring: { enabled: ' +
           'false }` to turn monitoring off deliberately, or call ' +
-          `\`Annotations.of(scope).acknowledgeInfo('${MONITORING_NO_SUBSCRIBER_NOTE_ID}')\` ` +
+          `\`Annotations.of(scope).acknowledgeInfo('${MONITORING_NO_SUBSCRIBER_INFO_ID}')\` ` +
           'to accept the gap knowingly.',
       );
       return [];
@@ -313,10 +302,10 @@ export class MonitoringConstruct extends Construct {
     for (const sub of props.subscriptions ?? []) {
       topic.addSubscription(sub);
     }
-    // Note at synth if this topic's alarms have nowhere to deliver. The shared
+    // Say at synth if this topic's alarms have nowhere to deliver. The shared
     // helper reads `this.alarms` (populated below) lazily at validation time,
     // and the us-east-1 support stack runs the same check on its own topic.
-    noteIfUndeliverable(this, topic, this.alarms);
+    infoIfUndeliverable(this, topic, this.alarms);
     const action = new SnsAction(this.topic);
 
     if (props.distribution && (props.createCloudFrontAlarmLocally ?? true)) {

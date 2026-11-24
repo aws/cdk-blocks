@@ -243,16 +243,12 @@ async function main() {
 			continue;
 		}
 
-		// An untouched scaffold must synthesize without warnings, apart from the
-		// ones its template is meant to show (EXPECTED_TEMPLATE_WARNINGS). After
-		// test:e2e, the canary's order, and before vendorize, which replaces a block
-		// with its source: from there on the app is no longer an untouched scaffold.
-		// Not on Windows: annotations do not depend on the OS, and this would be the
-		// first per-PR Windows synth of every template. The Windows deploy smoke
-		// (windows-e2e.yml) synthesizes there.
+		// After test:e2e and before vendorize, which replaces a block with its
+		// source: from there on the app is no longer an untouched scaffold.
+		// Skipped on Windows: annotations do not depend on the OS.
 		if (!isWin) {
 			console.log('\n--- Checking synth warnings ---');
-			const problems = checkTemplateSynthWarnings({ template, appDir: app, outDir: join(appParent, 'synth'), env, root: ROOT });
+			const problems = checkTemplateSynthWarnings({ template, appDir: app, outDir: join(appParent, 'synth'), env });
 			if (problems.length > 0) {
 				for (const problem of problems) console.error(`  FAIL: ${problem}`);
 				failed.push(`${template} (synth warnings)`);

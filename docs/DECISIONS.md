@@ -1631,55 +1631,42 @@ The loud failures exist because the quiet ones are worse. An unwritable project 
 **Authors:** jairosp
 
 ### Context
-`cdk synth`, `cdk deploy` and `cdk explore` on an app from `create-blocks-app`, with nothing changed, reported five warnings in production mode, and one in sandbox mode:
-
-| Id | Why it fired on an unchanged app |
-|---|---|
-| `blocks:apigateway:access-logging-disabled` | `BlocksPresets.production` leaves `accessLogging` off |
-| `@aws-cdk-blocks/bb-auth:RemovalPolicyUnset` | `Auth` was constructed without `removalPolicy`, in every mode |
-| `@aws-cdk-blocks/hosting:MonitoringAlarmTopicHasNoSubscribers` | Hosting monitoring is on by default, and a new app has no subscriber |
-| `@aws-cdk-blocks/hosting:CloudFrontAlarmRegionUnresolved` | the scaffolded stack sets no `env` (D-016) |
-| `@aws-cdk/aws-cloudfront:minimumProtocolVersionWithoutCertificate` | Hosting passed `minimumProtocolVersion` without a certificate; aws-cdk-lib 2.264.0 began to warn about it |
-
-Each warning was added by its own change, with its own reason, and each change tested that its warning fires. Nothing looked at what an app reports as a whole. The result: `cdk synth --strict` failed on an app with nothing to fix, the first thing a new app showed was a list of problems, and a warning about a real mistake had to be found among five that were always there.
+`cdk synth`, `cdk deploy` and `cdk explore` on an app from `create-blocks-app`, with nothing changed, reported five warnings in production mode, and one in sandbox mode (the table below). Each was added by its own change, with its own reason and a test that it fires. Nothing looked at what an app reports as a whole. The result: `cdk synth --strict` failed on an app with nothing to fix, the first thing a new app showed was a list of problems, and a warning about a real mistake had to be found among five that were always there.
 
 ### Decision
 1. **A warning is about this app.** Something its own configuration or its deploy target makes wrong or risky, which the developer removes by changing the app. It is emitted with `addWarningV2` and a stable id, so it can be acknowledged.
-2. **A default's tradeoff is an info.** When the state comes from a preset or a block's defaults, and only the developer can decide what to do about it, the block says so with `addInfoV2` and a stable id. An info is printed by every synth and deploy, never fails `--strict`, and is acknowledged with `acknowledgeInfo`.
-3. **An app scaffolded from a template and left unchanged synthesizes with no warning**, in production, sandbox and preview mode. The exception is a warning about something the template itself ships and the developer must act on, such as a placeholder sender address. Each exception is listed with its reason in `EXPECTED_TEMPLATE_WARNINGS` (`scripts/ci/template-synth-warnings.mjs`).
+2. **A default's tradeoff is an info.** When the state comes from a preset or a block's defaults, and only the developer can decide what to do about it, the block says so with `addInfoV2` and a stable id. `cdk synth` and `cdk deploy` print an info, it never fails `--strict`, and it is acknowledged with `acknowledgeInfo`.
+3. **An app scaffolded from a template and left unchanged synthesizes with no warning**, in production, sandbox and preview mode. The exception is a warning about something the template itself ships and the developer must act on, such as a placeholder sender address. Each exception is listed with its reason in `EXPECTED_TEMPLATE_WARNINGS` (`scripts/ci/template-synth-warnings.mjs`), and a template never acknowledges an annotation.
 4. **CI checks it.** The per-PR template suite (`scripts/ci/templates-e2e.mjs`) and the daily canary synthesize every scaffolded template in each mode and fail on an error annotation, on a warning that is not listed, and on a listed warning that no longer fires. A scaffold installs the newest aws-cdk-lib its range allows, so the daily run also reports a new aws-cdk-lib release that adds a warning.
 
-Applied to the five:
+Applied to the five, without changing a synthesized template:
 
-| Id | Now |
-|---|---|
-| `blocks:apigateway:access-logging-disabled` | Info. The default is not changed (see the `accessLogging` field docs). |
-| `@aws-cdk-blocks/bb-auth:RemovalPolicyUnset` | A warning only when the user pool would be deleted outside a sandbox: `removalPolicy` unset, a stack default of `DESTROY`, and no `sandboxMode` context. |
-| `@aws-cdk-blocks/hosting:MonitoringAlarmTopicHasNoSubscribers` | Info. |
-| `@aws-cdk-blocks/hosting:CloudFrontAlarmRegionUnresolved` | Info when the CDK CLI deploys the stack to us-east-1, a warning otherwise (D-016, amendment). |
-| `@aws-cdk/aws-cloudfront:minimumProtocolVersionWithoutCertificate` | Not emitted: Hosting sets `minimumProtocolVersion` only with a certificate. The template is the same. |
-
-None of these changes a synthesized template.
+| Id | Why it fired on an unchanged app | Now |
+|---|---|---|
+| `blocks:apigateway:access-logging-disabled` | `BlocksPresets.production` leaves `accessLogging` off | Info. The default is not changed (see the `accessLogging` field docs). |
+| `@aws-cdk-blocks/bb-auth:RemovalPolicyUnset` | `Auth` was constructed without `removalPolicy`, in every mode | A warning only when the user pool would be deleted outside a sandbox: `removalPolicy` unset, a stack default of `DESTROY`, and no `sandboxMode` context. |
+| `@aws-cdk-blocks/hosting:MonitoringAlarmTopicHasNoSubscribers` | Hosting monitoring is on by default, and a new app has no subscriber | Info. |
+| `@aws-cdk-blocks/hosting:CloudFrontAlarmRegionUnresolved` | the scaffolded stack sets no `env` (D-016) | Info when the CDK CLI deploys the stack to us-east-1, a warning otherwise (D-016, amendment). |
+| `@aws-cdk/aws-cloudfront:minimumProtocolVersionWithoutCertificate` | Hosting passed `minimumProtocolVersion` without a certificate; aws-cdk-lib 2.264.0 began to warn about it | Not emitted: Hosting sets `minimumProtocolVersion` only with a certificate. |
 
 ### Rationale
 - A warning that every app shows carries no information about any one app, and it teaches developers to skip the warning block. `--strict` is how a team turns warnings into a gate, and it has to pass on an app with nothing to fix.
-- The tradeoffs are real, so they are not removed. An info keeps each one in the synth output of every durable deployment, which is what D-016's "no silent gap" asks for, without calling a default a problem.
-- The three annotations that changed level are emitted when the construct tree is validated, after the app's own code has run. CDK keeps one set of acknowledged ids for both levels, so an app that already called `acknowledgeWarning(id)` stays silent.
-- The check reads the cloud assembly rather than the exit code of `--strict`. The assembly has each annotation's id and construct path, and includes the stacks of a nested assembly, which `cdk synth` does not report.
+- The tradeoffs are real, so they are not removed. An info keeps each one in the `cdk synth` output, which is what D-016's "no silent gap" asks for, without calling a default a problem.
 
 ### Consequences
+- An app that acknowledged the access-logging or CloudFront alarm annotation with `acknowledgeWarning` sees it again as an info, until it calls `acknowledgeInfo`.
+- The `deploy` and `sandbox` tasks hide routine CDK annotations at the default log level; use `--verbose` to see them. That is unchanged.
 - An unchanged Hosting app whose CDK CLI region is not us-east-1 still gets one warning: its CloudFront 5xx alarm will never fire. That is a real fault in that deployment, and `env` on the stack fixes it.
 - A new default that needs the developer's attention is an info, and a new warning has to be one an unchanged scaffold does not trigger. Otherwise the template check fails.
-- The check pins the CDK CLI's region to us-east-1, because one annotation's level depends on it.
+- The check runs `cdk synth --region us-east-1`, because the level of `CloudFrontAlarmRegionUnresolved` follows `CDK_DEFAULT_REGION`.
 
 ### Alternatives Considered
 - **Acknowledge the warnings in the templates.** Rejected. It hides each gap from exactly the developers who never changed the default, leaves existing apps warning, and makes every scaffold start with a list of `acknowledgeWarning` calls.
 - **Remove the annotations and document the tradeoffs.** Rejected. A production app would again have alarms that notify no one and no API access log, with nothing in the synth output saying so.
 - **Turn the defaults on** (`accessLogging: true`, an `env` on the scaffolded stack). Rejected here. Access logging provisions an account-wide API Gateway role that a second stack can break. An `env` on the stack adds a second stack in us-east-1 for every app deployed elsewhere, which needs its own bootstrap and changes `destroy`. Each is a product change with its own review.
-- **`cdk synth --strict` as the check.** Rejected. It does not report a Stage's stacks, cannot allow one warning by id, and gives no id to list.
+- **`cdk synth --strict` as the check.** Rejected. It is all or nothing, so it cannot allow the warnings `demo` and `auth-oidc` are meant to show.
 
 ### References
 - D-016 and its amendment: the CloudFront 5xx alarm outside us-east-1
 - `scripts/ci/template-synth-warnings.mjs`: the check and `EXPECTED_TEMPLATE_WARNINGS`
-- `packages/core/src/cdk/blocks-backend.ts` (`noteIfDurableWithoutAccessLogging`), `packages/bb-auth/src/index.cdk.ts`, `packages/hosting/src/constructs/monitoring_construct.ts`, `hosting_construct.ts`, `cdn_construct.ts`
 - aws-cdk-lib README, "Annotations": warnings, infos, acknowledgements and `--strict`

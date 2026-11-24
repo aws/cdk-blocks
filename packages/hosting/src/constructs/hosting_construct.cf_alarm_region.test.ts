@@ -21,7 +21,7 @@ import * as os from 'node:os';
 import { Annotations as CdkAnnotations, App, Stack } from 'aws-cdk-lib';
 import { Annotations, Match, Template } from 'aws-cdk-lib/assertions';
 import * as subs from 'aws-cdk-lib/aws-sns-subscriptions';
-import { HostingConstruct, cloudFrontAlarmRegionNote } from './hosting_construct.js';
+import { HostingConstruct } from './hosting_construct.js';
 import type { DeployManifest } from '../manifest/types.js';
 
 let tmpDir: string;
@@ -42,8 +42,7 @@ const spaManifest = (staticDir: string): DeployManifest => ({
 
 const CF_ALARM = Match.objectLike({ Namespace: 'AWS/CloudFront' });
 
-// The trailing `[ack: <id>]` tag addInfoV2 / addWarningV2 append to the
-// environment-agnostic note; the `$` pins the match to the tag.
+// The trailing `[ack: <id>]` tag addInfoV2 / addWarningV2 append; `$` pins the match to the tag.
 const REGION_UNRESOLVED_ACK_TAG = Match.stringLikeRegexp(
   '\\[ack: @aws-cdk-blocks/hosting:CloudFrontAlarmRegionUnresolved\\]$',
 );
@@ -242,11 +241,9 @@ void describe('HostingConstruct — CloudFront alarm region (#481)', () => {
   // stack itself. The CDK CLI exports CDK_DEFAULT_REGION and deploys an
   // environment-agnostic stack to that same region, so that variable decides
   // how loudly synth says it.
-  void it('notes, as an info, an environment-agnostic stack the CDK CLI deploys to us-east-1', () => {
+  void it('adds an info for an environment-agnostic stack the CDK CLI deploys to us-east-1', () => {
     const stack = envAgnosticStack(createStaticDir(), 'us-east-1');
 
-    // The alarm works where the CLI deploys it: an info, so `cdk synth --strict`
-    // passes, and not nothing, because the assembly can be deployed elsewhere later.
     Annotations.fromStack(stack).hasInfo('/TestStack/Hosting', REGION_UNRESOLVED_ACK_TAG);
     Annotations.fromStack(stack).hasInfo(
       '/TestStack/Hosting',
@@ -257,10 +254,7 @@ void describe('HostingConstruct — CloudFront alarm region (#481)', () => {
   });
 
   void it('synthesizes Hosting with its defaults without any warning when the CDK CLI deploys to us-east-1', () => {
-    // What an app from a template has: no `env` on the stack and no Hosting
-    // option set. Nothing may be a warning there, whatever its id and whoever
-    // emits it (this construct or aws-cdk-lib), or `cdk synth --strict` fails
-    // on an app with nothing to fix.
+    // A template's configuration, unchanged: no warning of any id (D-033).
     const stack = envAgnosticStack(createStaticDir(), 'us-east-1');
     assert.deepStrictEqual(Annotations.fromStack(stack).findWarning('*', Match.anyValue()), []);
     assert.deepStrictEqual(Annotations.fromStack(stack).findError('*', Match.anyValue()), []);
@@ -291,7 +285,7 @@ void describe('HostingConstruct — CloudFront alarm region (#481)', () => {
   });
 
   void it('synthesizes the same template whatever region the CDK CLI targets', () => {
-    // CDK_DEFAULT_REGION only picks the level and text of the note.
+    // CDK_DEFAULT_REGION only picks the level and text of the annotation.
     const staticDir = createStaticDir();
     const [unset, usEast1, euWest1] = [undefined, 'us-east-1', 'eu-west-1'].map((cliRegion) =>
       Template.fromStack(envAgnosticStack(staticDir, cliRegion)).toJSON(),
@@ -300,7 +294,7 @@ void describe('HostingConstruct — CloudFront alarm region (#481)', () => {
     assert.deepStrictEqual(euWest1, unset);
   });
 
-  void it('adds no environment-agnostic note to a stack with a resolved region', () => {
+  void it('adds no environment-agnostic annotation to a stack with a resolved region', () => {
     const stack = withCliRegion('eu-west-1', () => {
       const s = new Stack(new App(), 'TestStack', {
         env: { account: '123456789012', region: 'us-east-1' },
@@ -312,41 +306,18 @@ void describe('HostingConstruct — CloudFront alarm region (#481)', () => {
     Annotations.fromStack(stack).hasNoInfo('*', REGION_UNRESOLVED_ACK_TAG);
   });
 
-  void it('picks the level and message from the region the CDK CLI targets (cloudFrontAlarmRegionNote)', () => {
-    const usEast1 = cloudFrontAlarmRegionNote('us-east-1');
-    assert.strictEqual(usEast1.level, 'info');
-    assert.match(usEast1.message, /which is where the CDK CLI deploys this stack \(CDK_DEFAULT_REGION\)/);
-
-    const offRegion = cloudFrontAlarmRegionNote('ap-northeast-1');
-    assert.strictEqual(offRegion.level, 'warning');
-    assert.match(offRegion.message, /deploys this stack to 'ap-northeast-1' \(CDK_DEFAULT_REGION\)/);
-    assert.match(offRegion.message, /the alarm will never fire/);
-
-    // Unset and empty both mean "not run by the CDK CLI": the target is unknown.
-    for (const unset of [undefined, '']) {
-      const unknown = cloudFrontAlarmRegionNote(unset);
-      assert.strictEqual(unknown.level, 'warning');
-      assert.doesNotMatch(unknown.message, /CDK_DEFAULT_REGION/);
-    }
-
-    // Every case names the fix.
-    for (const note of [usEast1, offRegion, cloudFrontAlarmRegionNote(undefined)]) {
-      assert.match(note.message, /set env: \{ account, region \} on the stack/i);
-    }
-  });
-
-  void it('stays silent once the environment-agnostic note is acknowledged, at either level', () => {
-    // The note is emitted at validation time and CDK keeps one acknowledgement
-    // set for both levels, so an acknowledgement made after the construct, with
-    // either method, silences the info and the warning alike.
+  void it('stays silent once acknowledged on the App, at either level', () => {
+    // Acknowledged after the construct, on the widest scope an app can use.
     const staticDir = createStaticDir();
-    for (const cliRegion of ['us-east-1', 'eu-west-1', undefined]) {
-      for (const acknowledge of ['acknowledgeInfo', 'acknowledgeWarning'] as const) {
-        const stack = envAgnosticStack(staticDir, cliRegion);
-        CdkAnnotations.of(stack)[acknowledge]('@aws-cdk-blocks/hosting:CloudFrontAlarmRegionUnresolved');
-        Annotations.fromStack(stack).hasNoInfo('*', REGION_UNRESOLVED_ACK_TAG);
-        Annotations.fromStack(stack).hasNoWarning('*', REGION_UNRESOLVED_ACK_TAG);
-      }
+    const cases = [
+      ['eu-west-1', 'acknowledgeWarning'],
+      ['us-east-1', 'acknowledgeInfo'],
+    ] as const;
+    for (const [cliRegion, acknowledge] of cases) {
+      const stack = envAgnosticStack(staticDir, cliRegion);
+      CdkAnnotations.of(stack.node.root)[acknowledge]('@aws-cdk-blocks/hosting:CloudFrontAlarmRegionUnresolved');
+      Annotations.fromStack(stack).hasNoInfo('*', REGION_UNRESOLVED_ACK_TAG);
+      Annotations.fromStack(stack).hasNoWarning('*', REGION_UNRESOLVED_ACK_TAG);
     }
   });
 });

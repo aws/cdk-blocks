@@ -490,14 +490,9 @@ export class Auth<const O extends AuthOptions = AuthOptions> extends BuildingBlo
 			);
 		}
 
-		// An unset `removalPolicy` on a pool we own means "follow the stack
-		// posture". That is the only way to say "retain in production, destroy in a
-		// sandbox" from the shared `cdk-blocks/index.ts` (the option takes one value,
-		// `'destroy' | 'retain'`, for every deployment), so it is not itself a
-		// problem. It warns only where that posture deletes users outside a sandbox:
-		// the stack default destroys, and this deployment is not a sandbox. Under a
-		// retaining default (`BlocksPresets.production`) the pool is kept, and in a
-		// sandbox losing it is the point.
+		// Unset means "follow the stack default", which is how one
+		// `cdk-blocks/index.ts` retains the pool in production and destroys it in a
+		// sandbox. Warn only where that deletes users outside a sandbox.
 		if (
 			this.userPool &&
 			!opts.userPool &&

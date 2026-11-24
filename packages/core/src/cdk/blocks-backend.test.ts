@@ -14,10 +14,10 @@ import * as lambda from 'aws-cdk-lib/aws-lambda-nodejs';
 import type { Construct } from 'constructs';
 import type { ScopeParent } from '../common/index.js';
 import {
-	ACCESS_LOGGING_NOTE,
-	ACCESS_LOGGING_NOTE_ACK_TAG,
-	ACCESS_LOGGING_NOTE_ID,
-} from './access-logging-note-matcher.js';
+	ACCESS_LOGGING_INFO,
+	ACCESS_LOGGING_INFO_ACK_TAG,
+	ACCESS_LOGGING_INFO_ID,
+} from './access-logging-info-matcher.js';
 import { BlocksBackend } from './blocks-backend.js';
 import { BlocksPresets } from './blocks-defaults.js';
 import { ComputeBase } from './compute/compute.js';
@@ -528,31 +528,29 @@ describe('VPC placement', () => {
 });
 
 describe('production access-logging audit-gap synth info', () => {
-	// Matchers are shared with blocks-stack.test.ts (see access-logging-note-matcher.ts)
-	// so both synth paths assert the same contract: ACCESS_LOGGING_NOTE pins the
+	// Matchers are shared with blocks-stack.test.ts (see access-logging-info-matcher.ts)
+	// so both synth paths assert the same contract: ACCESS_LOGGING_INFO pins the
 	// message, the opt-in remedy, and the id (anchored on the `[ack: …]` tag
-	// addInfoV2 appends); ACCESS_LOGGING_NOTE_ACK_TAG matches that tag alone for the
-	// negative cases. The annotation is an info, not a warning: the condition is
-	// BlocksPresets.production's own default, and a warning there would fail
-	// `cdk synth --strict` on every untouched app.
+	// addInfoV2 appends); ACCESS_LOGGING_INFO_ACK_TAG matches that tag alone for the
+	// negative cases.
 
-	test('durable posture with accessLogging off prints an info at synth, not a warning (message, remedy, and id pinned)', async () => {
+	test('durable posture with accessLogging off emits an info at synth, not a warning (message, remedy, and id pinned)', async () => {
 		const app = new cdk.App();
-		const parent = new cdk.Stack(app, 'AuditNoteProdStack');
+		const parent = new cdk.Stack(app, 'AuditInfoProdStack');
 
 		// BlocksPresets.production is durable (RETAIN) with accessLogging: false
 		// (opt-in), so the audit-gap info must be there. The single matcher asserts
 		// the message, the `accessLogging: true` remedy, and the id together.
 		await makeBackend(parent, 'Blocks', sideEffectBackendPath);
 
-		Annotations.fromStack(parent).hasInfo('*', ACCESS_LOGGING_NOTE);
-		// Pins the level: nothing carrying this id is a warning.
-		Annotations.fromStack(parent).hasNoWarning('*', ACCESS_LOGGING_NOTE_ACK_TAG);
+		Annotations.fromStack(parent).hasInfo('*', ACCESS_LOGGING_INFO);
+		// Pins the level (D-033).
+		Annotations.fromStack(parent).hasNoWarning('*', ACCESS_LOGGING_INFO_ACK_TAG);
 	});
 
 	test('durable posture with deletionProtection off still gets the info (keyed on durability, not the delete guard)', async () => {
 		const app = new cdk.App();
-		const parent = new cdk.Stack(app, 'AuditNoteNoDeleteGuardStack');
+		const parent = new cdk.Stack(app, 'AuditInfoNoDeleteGuardStack');
 
 		// The documented customization `{ ...production, deletionProtection: false }`
 		// is still a durable (RETAIN) stack, so it is still an audit gap and must
@@ -564,12 +562,12 @@ describe('production access-logging audit-gap synth info', () => {
 			defaultComputeFactory: stubComputeFactory,
 		});
 
-		Annotations.fromStack(parent).hasInfo('*', ACCESS_LOGGING_NOTE);
+		Annotations.fromStack(parent).hasInfo('*', ACCESS_LOGGING_INFO);
 	});
 
 	test('SNAPSHOT removal policy with accessLogging off gets the info (durable, not DESTROY)', async () => {
 		const app = new cdk.App();
-		const parent = new cdk.Stack(app, 'AuditNoteSnapshotStack');
+		const parent = new cdk.Stack(app, 'AuditInfoSnapshotStack');
 
 		// SNAPSHOT retains data on teardown — durable, so the audit gap applies even
 		// though it is neither RETAIN nor a named preset.
@@ -580,12 +578,12 @@ describe('production access-logging audit-gap synth info', () => {
 			defaultComputeFactory: stubComputeFactory,
 		});
 
-		Annotations.fromStack(parent).hasInfo('*', ACCESS_LOGGING_NOTE);
+		Annotations.fromStack(parent).hasInfo('*', ACCESS_LOGGING_INFO);
 	});
 
 	test('production posture with accessLogging overridden to true gets NO info', async () => {
 		const app = new cdk.App();
-		const parent = new cdk.Stack(app, 'AuditNoNoteOptInStack');
+		const parent = new cdk.Stack(app, 'AuditNoInfoOptInStack');
 
 		await BlocksBackend.create(parent, 'Blocks', {
 			backendHandlerPath: handlerPath,
@@ -594,13 +592,12 @@ describe('production access-logging audit-gap synth info', () => {
 			defaultComputeFactory: stubComputeFactory,
 		});
 
-		Annotations.fromStack(parent).hasNoInfo('*', ACCESS_LOGGING_NOTE_ACK_TAG);
-		Annotations.fromStack(parent).hasNoWarning('*', ACCESS_LOGGING_NOTE_ACK_TAG);
+		Annotations.fromStack(parent).hasNoInfo('*', ACCESS_LOGGING_INFO_ACK_TAG);
 	});
 
 	test('sandbox posture (DESTROY) gets NO info (disposable stack, not a durable audit gap)', async () => {
 		const app = new cdk.App();
-		const parent = new cdk.Stack(app, 'AuditNoNoteSandboxStack');
+		const parent = new cdk.Stack(app, 'AuditNoInfoSandboxStack');
 
 		await BlocksBackend.create(parent, 'Blocks', {
 			backendHandlerPath: handlerPath,
@@ -609,8 +606,7 @@ describe('production access-logging audit-gap synth info', () => {
 			defaultComputeFactory: stubComputeFactory,
 		});
 
-		Annotations.fromStack(parent).hasNoInfo('*', ACCESS_LOGGING_NOTE_ACK_TAG);
-		Annotations.fromStack(parent).hasNoWarning('*', ACCESS_LOGGING_NOTE_ACK_TAG);
+		Annotations.fromStack(parent).hasNoInfo('*', ACCESS_LOGGING_INFO_ACK_TAG);
 	});
 
 	test('acknowledging the info after create() on the returned backend suppresses it', async () => {
@@ -619,30 +615,12 @@ describe('production access-logging audit-gap synth info', () => {
 
 		// The working acknowledge form documented on BlocksDefaults.accessLogging:
 		// ack on the stack/backend RETURNED by create(), after it resolves (acking
-		// on the App would not suppress it). Covers the ack path, which no other
-		// test exercises.
+		// on the App before create() would not suppress it). Covers the ack path,
+		// which no other test exercises.
 		const backend = await makeBackend(parent, 'Blocks', sideEffectBackendPath);
-		cdk.Annotations.of(backend).acknowledgeInfo(ACCESS_LOGGING_NOTE_ID);
+		cdk.Annotations.of(backend).acknowledgeInfo(ACCESS_LOGGING_INFO_ID);
 
-		Annotations.fromStack(parent).hasNoInfo('*', ACCESS_LOGGING_NOTE_ACK_TAG);
-	});
-
-	test('an acknowledgeWarning made after create(), as the old warning asked for, still silences it', async () => {
-		const app = new cdk.App();
-		const parent = new cdk.Stack(app, 'AuditLegacyAckAfterCreateStack');
-
-		// While this annotation was a warning, its message told apps to call
-		// acknowledgeWarning with this id on the stack or backend create() returned.
-		// Those apps must stay silent. CDK keeps one set of acknowledged ids for
-		// both levels, but only consults it when an annotation is added — so the
-		// info is added at validation time, after this call. Added eagerly inside
-		// create(), it would already be recorded and this call would not remove it.
-		// The id is spelled out: it is the string those apps have in their code.
-		const backend = await makeBackend(parent, 'Blocks', sideEffectBackendPath);
-		cdk.Annotations.of(backend).acknowledgeWarning('blocks:apigateway:access-logging-disabled');
-
-		Annotations.fromStack(parent).hasNoInfo('*', ACCESS_LOGGING_NOTE_ACK_TAG);
-		Annotations.fromStack(parent).hasNoWarning('*', ACCESS_LOGGING_NOTE_ACK_TAG);
+		Annotations.fromStack(parent).hasNoInfo('*', ACCESS_LOGGING_INFO_ACK_TAG);
 	});
 });
 

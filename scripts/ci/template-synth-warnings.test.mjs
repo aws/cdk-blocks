@@ -1,16 +1,10 @@
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-// Unit tests for scripts/ci/template-synth-warnings.mjs: reading annotations
-// out of a cloud assembly, deciding which of them are problems, the synth
-// modes of an app, the shape of EXPECTED_TEMPLATE_WARNINGS, and the scan for
-// acknowledgement calls (which also runs over the templates in this repo).
-//
-// The assemblies are fixtures written to a temp dir, in the shapes aws-cdk-lib
-// writes: a manifest whose stack artifacts name a `<stack>.metadata.json`
-// sidecar (`additionalMetadataFile`) and may carry inline `metadata`, and a
-// subdirectory with its own manifest for a nested assembly. Nothing here runs
-// `cdk`; the synth itself runs in the template driver and the canary.
+// Unit tests for scripts/ci/template-synth-warnings.mjs. The assemblies are
+// fixtures written to a temp dir in the shapes aws-cdk-lib writes; nothing
+// here runs `cdk`. The acknowledgement scan also runs over the templates in
+// this repo.
 //
 // Run: node --test scripts/ci/template-synth-warnings.test.mjs
 
@@ -65,7 +59,7 @@ const OTHER_ENTRIES = [
 	{ type: 'aws:cdk:logicalId', data: 'Topic1234ABCD' },
 ];
 
-const annotation = (level, id, path, message, stack) => ({ level, id, path, message, stack });
+const annotation = (level, id, path, message) => ({ level, id, path, message });
 
 describe('readAnnotations', () => {
 	it('reads every level, with and without an id, from the metadata sidecar', () => {
@@ -88,45 +82,27 @@ describe('readAnnotations', () => {
 			},
 		});
 		assert.deepEqual(readAnnotations(dir), [
-			annotation('warning', 'my:pkg:WarnV2', '/Main/A', 'v2 warning message', 'Main'),
-			annotation('warning', undefined, '/Main/A', 'legacy warning message', 'Main'),
-			annotation('info', 'my:pkg:InfoV2', '/Main/A', 'v2 info message', 'Main'),
-			annotation('info', undefined, '/Main/A', 'legacy info message', 'Main'),
-			annotation('error', undefined, '/Main/B', 'error message', 'Main'),
+			annotation('warning', 'my:pkg:WarnV2', '/Main/A', 'v2 warning message'),
+			annotation('warning', undefined, '/Main/A', 'legacy warning message'),
+			annotation('info', 'my:pkg:InfoV2', '/Main/A', 'v2 info message'),
+			annotation('info', undefined, '/Main/A', 'legacy info message'),
+			annotation('error', undefined, '/Main/B', 'error message'),
 		]);
 	});
 
-	it('reads metadata stored inline in the manifest', () => {
-		const dir = writeDir({
-			'manifest.json': manifest({
-				Main: stackArtifact({
-					metadata: {
-						'/Main/A': [...OTHER_ENTRIES, entry('warning', 'inline warning [ack: my:pkg:Inline]'), entry('error', 'inline error')],
-					},
-				}),
-			}),
-		});
-		// No displayName on the artifact: the stack is named by its artifact id.
-		assert.deepEqual(readAnnotations(dir), [
-			annotation('warning', 'my:pkg:Inline', '/Main/A', 'inline warning', 'Main'),
-			annotation('error', undefined, '/Main/A', 'inline error', 'Main'),
-		]);
-	});
-
-	it('merges the sidecar with the inline metadata', () => {
+	it('also reads metadata stored inline in the manifest', () => {
 		const dir = writeDir({
 			'manifest.json': manifest({
 				Main: stackArtifact({
 					additionalMetadataFile: 'Main.metadata.json',
-					displayName: 'Main',
-					metadata: { '/Main/A': [entry('warning', 'from the manifest [ack: my:pkg:Inline]')] },
+					metadata: { '/Main/A': [...OTHER_ENTRIES, entry('warning', 'from the manifest [ack: my:pkg:Inline]')] },
 				}),
 			}),
 			'Main.metadata.json': { '/Main/A': [entry('warning', 'from the sidecar [ack: my:pkg:Sidecar]')] },
 		});
 		assert.deepEqual(readAnnotations(dir), [
-			annotation('warning', 'my:pkg:Sidecar', '/Main/A', 'from the sidecar', 'Main'),
-			annotation('warning', 'my:pkg:Inline', '/Main/A', 'from the manifest', 'Main'),
+			annotation('warning', 'my:pkg:Inline', '/Main/A', 'from the manifest'),
+			annotation('warning', 'my:pkg:Sidecar', '/Main/A', 'from the sidecar'),
 		]);
 	});
 
@@ -143,9 +119,7 @@ describe('readAnnotations', () => {
 				'/Stg/Inner': [entry('warning', 'stage stack warning [ack: my:pkg:InStage]')],
 			},
 		});
-		assert.deepEqual(readAnnotations(dir), [
-			annotation('warning', 'my:pkg:InStage', '/Stg/Inner', 'stage stack warning', 'Stg/Inner'),
-		]);
+		assert.deepEqual(readAnnotations(dir), [annotation('warning', 'my:pkg:InStage', '/Stg/Inner', 'stage stack warning')]);
 	});
 
 	it('reads every stack of the assembly', () => {
@@ -164,55 +138,33 @@ describe('readAnnotations', () => {
 			'Support.metadata.json': { '/Support': [entry('warning', 'support stack warning [ack: my:pkg:SupportStack]')] },
 		});
 		assert.deepEqual(readAnnotations(dir), [
-			annotation('info', 'my:pkg:MainInfo', '/Main', 'main stack info', 'Main'),
-			annotation('warning', 'my:pkg:SupportStack', '/Support', 'support stack warning', 'Support'),
+			annotation('info', 'my:pkg:MainInfo', '/Main', 'main stack info'),
+			annotation('warning', 'my:pkg:SupportStack', '/Support', 'support stack warning'),
 		]);
 	});
 
-	it('keeps a message that is not a string as JSON', () => {
-		const dir = writeDir({
-			'manifest.json': manifest({ Main: stackArtifact({ metadata: { '/Main': [entry('warning', { reason: 'structured' })] } }) }),
+	it('throws when the manifest, a named metadata file or a nested assembly is missing', () => {
+		assert.throws(() => readAnnotations(join(tmp, 'never-synthesized')), /manifest\.json/);
+		const noSidecar = writeDir({
+			'manifest.json': manifest({ Main: stackArtifact({ additionalMetadataFile: 'Main.metadata.json' }) }),
 		});
-		assert.deepEqual(readAnnotations(dir), [annotation('warning', undefined, '/Main', '{"reason":"structured"}', 'Main')]);
-	});
-
-	it('throws when there is no manifest', () => {
-		assert.throws(() => readAnnotations(join(tmp, 'never-synthesized')), /cannot read the cloud assembly manifest/);
-	});
-
-	it('throws when a stack names a metadata file that is missing', () => {
-		const dir = writeDir({
-			'manifest.json': manifest({ Main: stackArtifact({ additionalMetadataFile: 'Main.metadata.json', displayName: 'Main' }) }),
-		});
-		assert.throws(() => readAnnotations(dir), /cannot read the metadata file of stack Main/);
-	});
-
-	it('throws when a nested assembly is missing', () => {
-		const dir = writeDir({
+		assert.throws(() => readAnnotations(noSidecar), /Main\.metadata\.json/);
+		const noNested = writeDir({
 			'manifest.json': manifest({
-				Main: stackArtifact({ displayName: 'Main' }),
 				'assembly-Stg': { type: 'cdk:cloud-assembly', properties: { directoryName: 'assembly-Stg' } },
 			}),
 		});
-		assert.throws(() => readAnnotations(dir), /cannot read the cloud assembly manifest/);
-	});
-
-	it('throws when the assembly holds no stack', () => {
-		const dir = writeDir({
-			'manifest.json': manifest({ Tree: { type: 'cdk:tree', properties: { file: 'tree.json' } } }),
-		});
-		assert.throws(() => readAnnotations(dir), /holds no stack/);
-		assert.throws(() => readAnnotations(writeDir({ 'manifest.json': { version: '55.0.0' } })), /holds no stack/);
+		assert.throws(() => readAnnotations(noNested), /assembly-Stg/);
 	});
 });
 
 describe('findProblems', () => {
-	const warning = (id, message = 'something to act on') => annotation('warning', id, '/app-prod/Thing', message, 'app-prod');
+	const warning = (id, message = 'something to act on') => annotation('warning', id, '/app-prod/Thing', message);
 
 	it('passes a synth without annotations, and ignores infos', () => {
 		assert.deepEqual(findProblems([]), []);
-		assert.deepEqual(findProblems([annotation('info', 'my:pkg:Info', '/app-prod', 'a default tradeoff', 'app-prod')]), []);
-		assert.deepEqual(findProblems([annotation('info', undefined, '/app-prod', 'legacy info', 'app-prod')], []), []);
+		assert.deepEqual(findProblems([annotation('info', 'my:pkg:Info', '/app-prod', 'a default tradeoff')]), []);
+		assert.deepEqual(findProblems([annotation('info', undefined, '/app-prod', 'legacy info')], []), []);
 	});
 
 	it('reports a warning that is not expected, with its id, construct path and message', () => {
@@ -227,9 +179,9 @@ describe('findProblems', () => {
 	});
 
 	it('reports every error, also one whose id is listed as expected', () => {
-		const error = annotation('error', undefined, '/app-prod/Thing', 'cannot deploy this', 'app-prod');
+		const error = annotation('error', undefined, '/app-prod/Thing', 'cannot deploy this');
 		assert.deepEqual(findProblems([error]), ['error (no id) at /app-prod/Thing: cannot deploy this']);
-		const tagged = annotation('error', 'my:pkg:Fired', '/app-prod/Thing', 'cannot deploy this', 'app-prod');
+		const tagged = annotation('error', 'my:pkg:Fired', '/app-prod/Thing', 'cannot deploy this');
 		assert.deepEqual(findProblems([tagged, warning('my:pkg:Fired')], ['my:pkg:Fired']), [
 			'error my:pkg:Fired at /app-prod/Thing: cannot deploy this',
 		]);
@@ -237,7 +189,7 @@ describe('findProblems', () => {
 
 	it('passes an expected warning that fired, also on several constructs', () => {
 		assert.deepEqual(findProblems([warning('my:pkg:Fired')], ['my:pkg:Fired']), []);
-		const twice = [warning('my:pkg:Fired'), annotation('warning', 'my:pkg:Fired', '/app-prod/Other', 'again', 'app-prod')];
+		const twice = [warning('my:pkg:Fired'), annotation('warning', 'my:pkg:Fired', '/app-prod/Other', 'again')];
 		assert.deepEqual(findProblems(twice, new Set(['my:pkg:Fired'])), []);
 	});
 
@@ -246,7 +198,7 @@ describe('findProblems', () => {
 		assert.deepEqual(findProblems([], ['my:pkg:Gone']), [stale]);
 		assert.deepEqual(findProblems([warning('my:pkg:Fired')], ['my:pkg:Fired', 'my:pkg:Gone']), [stale]);
 		// An info with the id is not the warning.
-		assert.deepEqual(findProblems([annotation('info', 'my:pkg:Gone', '/app-prod', 'now an info', 'app-prod')], ['my:pkg:Gone']), [stale]);
+		assert.deepEqual(findProblems([annotation('info', 'my:pkg:Gone', '/app-prod', 'now an info')], ['my:pkg:Gone']), [stale]);
 	});
 
 	it('shows the start of a long message on one line', () => {
@@ -337,12 +289,14 @@ describe('findAcknowledgements', () => {
 				"Annotations.of(blocksStack).acknowledgeWarning('blocks:example:warning');",
 				'',
 				"  Annotations.of(hosting).acknowledgeInfo( 'blocks:example:info', 'known' );",
+				"Validations.of(blocksStack).acknowledge({ id: 'blocks:example:warning', reason: 'known' });",
 			].join('\n'),
 			'cdk-blocks/index.ts': "export const api = 'no annotations here';\n",
 		});
 		assert.deepEqual(findAcknowledgements(dir), [
 			`${join('cdk-blocks', 'index.cdk.ts')}:2: Annotations.of(blocksStack).acknowledgeWarning('blocks:example:warning');`,
 			`${join('cdk-blocks', 'index.cdk.ts')}:4: Annotations.of(hosting).acknowledgeInfo( 'blocks:example:info', 'known' );`,
+			`${join('cdk-blocks', 'index.cdk.ts')}:5: Validations.of(blocksStack).acknowledge({ id: 'blocks:example:warning', reason: 'known' });`,
 		]);
 	});
 

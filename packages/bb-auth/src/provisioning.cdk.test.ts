@@ -267,9 +267,7 @@ describe('Auth — pool durability follows the stack defaults', () => {
 			assert.strictEqual(table.Properties?.DeletionProtectionEnabled, false);
 		});
 
-		// The harness sets no `sandboxMode` context, so this is a destroying
-		// default on a deployment that is not a sandbox: the stack's teardown would
-		// delete the users.
+		// The harness sets no `sandboxMode` context: not a sandbox deployment.
 		test('removalPolicy unset, on a deployment that is not a sandbox → warns at synth, naming the resolved default', () => {
 			const warnings = removalWarnings(synth(CONFIGS.default, 'sandbox'));
 			assert.strictEqual(warnings.length, 1);
@@ -328,16 +326,11 @@ describe('Auth — pool durability follows the stack defaults', () => {
 			assert.strictEqual(table.Properties?.DeletionProtectionEnabled, true);
 		});
 
-		// Unset is how the shared `cdk-blocks/index.ts` follows the stack posture,
-		// and this posture keeps the pool: nothing to warn about.
 		test('removalPolicy unset → does not warn (the pool is retained)', () => {
 			assert.deepStrictEqual(removalWarnings(synth(CONFIGS.default, 'production')), []);
 		});
 
-		// What an app from a template has, in each mode it deploys in: the default
-		// `Auth`, the preset and its secrets store unchanged, and the `sandboxMode`
-		// context only for a sandbox. Nothing may be a warning there, whatever its
-		// id, or `cdk synth --strict` fails on an app with nothing to fix.
+		// A template's configuration, unchanged: no warning of any id (D-033).
 		test('the default Auth synthesizes without any warning, on the production preset and in a sandbox', () => {
 			const production = synthIdentity(CONFIGS.default, 'production', [], 'secrets-manager');
 			assert.deepStrictEqual(production.warnings, []);

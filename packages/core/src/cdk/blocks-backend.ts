@@ -127,16 +127,12 @@ export interface CoreBlocksBackendProps extends BlocksBackendProps {
 }
 
 /**
- * Print a synth-time info when the stack is deployed with a durable removal
+ * Emit a synth-time info when the stack is deployed with a durable removal
  * policy but API Gateway access logging is off — so the tradeoff is visible at
  * `cdk synth` rather than discovered as a missing audit trail later.
  *
- * It is an info, not a warning, because the condition is
- * `BlocksPresets.production`'s own default: a warning there fails
- * `cdk synth --strict` on every app that has not touched its `defaults`, and
- * tells its owner about a choice the framework made. An info is still printed
- * by `cdk synth` / `cdk deploy` on every durable synth, so the gap is not
- * silent, and never fails `--strict`.
+ * An info, not a warning: the condition is `BlocksPresets.production`'s own
+ * default (D-033).
  *
  * `accessLogging` is deliberately off by default in BOTH presets (see the
  * {@link BlocksDefaults.accessLogging} field doc): enabling it provisions the
@@ -156,45 +152,32 @@ export interface CoreBlocksBackendProps extends BlocksBackendProps {
  * excluded; any other falsy `accessLogging` still gets the info, so a plain-JS
  * caller who omits the field gets both the default-off behavior AND this info
  * (the truthiness check matches how consumer blocks read
- * `defaults.accessLogging`). Info only — never throws, never fails the synth —
- * and printed at most once per BlocksStack/BlocksBackend (so multiple backends
- * in one stack each get it for their own posture).
- *
- * The info is added when the construct tree is validated (during synthesis),
- * not here. This annotation used to be a warning, whose message told apps to
- * call `acknowledgeWarning(id)` on the stack or backend returned by `create()`.
- * CDK keeps one set of acknowledged ids per stack for warnings and infos, and
- * `addInfoV2` skips an id that is already in it — but an `acknowledgeWarning`
- * made after an info was added does not remove that info. Adding the info at
- * validation, after the app's own code has run, keeps those apps silent.
+ * `defaults.accessLogging`). Info only — never throws — and emitted at most once
+ * per BlocksStack/BlocksBackend (so multiple backends in one stack each get it
+ * for their own posture).
  *
  * To silence it deliberately, acknowledge the info on the stack or backend
  * returned by `create()` after it resolves — see the message for the exact call.
  */
-function noteIfDurableWithoutAccessLogging(scope: Construct, defaults: BlocksDefaults): void {
+function infoIfDurableWithoutAccessLogging(scope: Construct, defaults: BlocksDefaults): void {
 	const isDurableAuditGap = defaults.removalPolicy !== cdk.RemovalPolicy.DESTROY && !defaults.accessLogging;
 	if (!isDurableAuditGap) return;
 
-	scope.node.addValidation({
-		validate: () => {
-			cdk.Annotations.of(scope).addInfoV2(
-				'blocks:apigateway:access-logging-disabled',
-				'This deployment has a durable removal policy (its stateful resources are not destroyed on ' +
-					'teardown) but API Gateway access logging is disabled, so it has no request-level audit ' +
-					'trail. It is off by default because enabling it provisions the account/region-level API ' +
-					'Gateway CloudWatch Logs role — an AWS-side singleton that a second AWS CDK Blocks stack in the ' +
-					'same account+region can repoint on deploy or leave broken on teardown (see the `accessLogging` ' +
-					'field docs on the backend `defaults`). Once you have confirmed a single CDK Blocks stack ' +
-					"owns that role in the region, opt in by setting `accessLogging: true` in this backend's " +
-					'`defaults`; opting in also enables S3 server access logging for any FileBucket, each of ' +
-					'which then gets its own log bucket. If leaving it off is deliberate (for example a ' +
-					'multi-stack deployment where another stack owns access logging), acknowledge this info ' +
-					"by calling `Annotations.of(stack).acknowledgeInfo('blocks:apigateway:access-logging-disabled')` " +
-					'on the stack or backend returned by `create()`.',
-			);
-			return [];
-		},
-	});
+	cdk.Annotations.of(scope).addInfoV2(
+		'blocks:apigateway:access-logging-disabled',
+		'This deployment has a durable removal policy (its stateful resources are not destroyed on ' +
+			'teardown) but API Gateway access logging is disabled, so it has no request-level audit ' +
+			'trail. It is off by default because enabling it provisions the account/region-level API ' +
+			'Gateway CloudWatch Logs role — an AWS-side singleton that a second AWS CDK Blocks stack in the same ' +
+			'account+region can repoint on deploy or leave broken on teardown (see the `accessLogging` ' +
+			'field docs on the backend `defaults`). Once you have confirmed a single CDK Blocks stack owns ' +
+			"that role in the region, opt in by setting `accessLogging: true` in this backend's " +
+			'`defaults`; opting in also enables S3 server access logging for any FileBucket, each of ' +
+			'which then gets its own log bucket. If leaving it off is deliberate (for example a ' +
+			'multi-stack deployment where another stack owns access logging), acknowledge this info ' +
+			"by calling `Annotations.of(stack).acknowledgeInfo('blocks:apigateway:access-logging-disabled')` " +
+			'on the stack or backend returned by `create()`.',
+	);
 }
 
 /**
@@ -262,8 +245,8 @@ export function setupBlocksInfra(scope: Construct, props: BlocksBackendProps, id
 	assertBlocksDefaults(props, 'BlocksBackend');
 
 	// Surface the audit-trail tradeoff at synth when running a durable posture
-	// with access logging off. Non-fatal: an info, added at validation time.
-	noteIfDurableWithoutAccessLogging(scope, props.defaults);
+	// with access logging off. Non-fatal: info only.
+	infoIfDurableWithoutAccessLogging(scope, props.defaults);
 
 	// ── Shared execution role ───────────────────────────────────────────────
 	// A single IAM role that every Building Block grants to. Provisioned here so

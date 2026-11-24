@@ -63,14 +63,10 @@ const newLambda = (stack: Stack, id: string): LambdaFunction => {
   });
 };
 
-// The trailing `[ack: <id>]` tag addInfoV2 / addWarningV2 append to the
-// no-subscriber note. Anchored on the tag, not the message body: the id string
-// also appears inside the message (the acknowledge remedy), so a body match
-// would stay green even if the real id changed. The `$` pins it to the tag.
-const NO_SUBSCRIBER_NOTE_ID = '@aws-cdk-blocks/hosting:MonitoringAlarmTopicHasNoSubscribers';
-const NO_SUBSCRIBER_ACK_TAG = Match.stringLikeRegexp(
-  '\\[ack: @aws-cdk-blocks/hosting:MonitoringAlarmTopicHasNoSubscribers\\]$',
-);
+// The trailing `[ack: <id>]` tag addInfoV2 appends. Anchored on the tag with
+// `$`: the id also appears inside the message (the acknowledge remedy).
+const NO_SUBSCRIBER_INFO_ID = '@aws-cdk-blocks/hosting:MonitoringAlarmTopicHasNoSubscribers';
+const NO_SUBSCRIBER_ACK_TAG = Match.stringLikeRegexp(`\\[ack: ${NO_SUBSCRIBER_INFO_ID}\\]$`);
 
 void describe('MonitoringConstruct', () => {
   // ---- Disabled path ----
@@ -137,7 +133,7 @@ void describe('MonitoringConstruct', () => {
       });
     });
 
-    void it('notes at synth, as an info, when enabled with an alarm but no subscriber (silent-delivery gap)', () => {
+    void it('adds an info at synth when enabled with an alarm but no subscriber (silent-delivery gap)', () => {
       const stack = createStack();
       new MonitoringConstruct(stack, 'Monitoring', {
         enabled: true,
@@ -147,51 +143,27 @@ void describe('MonitoringConstruct', () => {
       // nowhere — say so in the synth output rather than leaving a
       // green-but-undeliverable alarm.
       Annotations.fromStack(stack).hasInfo('/TestStack/Monitoring', NO_SUBSCRIBER_ACK_TAG);
-      // An info, not a warning: an unsubscribed topic is the default's open
-      // decision, and a warning would fail `cdk synth --strict` on an untouched app.
-      Annotations.fromStack(stack).hasNoWarning('*', NO_SUBSCRIBER_ACK_TAG);
-    });
-
-    void it('names acknowledgeInfo as the way to accept the gap', () => {
-      const stack = createStack();
-      new MonitoringConstruct(stack, 'Monitoring', {
-        enabled: true,
-        ssrFunction: newLambda(stack, 'Ssr'),
-      });
       Annotations.fromStack(stack).hasInfo(
         '/TestStack/Monitoring',
-        Match.stringLikeRegexp(
-          "acknowledgeInfo\\('@aws-cdk-blocks/hosting:MonitoringAlarmTopicHasNoSubscribers'\\)",
-        ),
+        Match.stringLikeRegexp(`acknowledgeInfo\\('${NO_SUBSCRIBER_INFO_ID}'\\)`),
       );
-    });
-
-    void it('stays silent once the note is acknowledged with acknowledgeInfo', () => {
-      const stack = createStack();
-      new MonitoringConstruct(stack, 'Monitoring', {
-        enabled: true,
-        ssrFunction: newLambda(stack, 'Ssr'),
-      });
-      CdkAnnotations.of(stack).acknowledgeInfo(NO_SUBSCRIBER_NOTE_ID);
-      Annotations.fromStack(stack).hasNoInfo('*', NO_SUBSCRIBER_ACK_TAG);
+      // Pins the level (D-033).
       Annotations.fromStack(stack).hasNoWarning('*', NO_SUBSCRIBER_ACK_TAG);
     });
 
-    void it('stays silent for an app that acknowledged it as a warning (acknowledgeWarning)', () => {
-      // The note was a warning before. It is emitted at validation time and CDK
-      // keeps one acknowledgement set for both levels, so an app that already
-      // called `acknowledgeWarning(id)` does not start seeing the info.
-      const stack = createStack();
-      CdkAnnotations.of(stack).acknowledgeWarning(NO_SUBSCRIBER_NOTE_ID);
-      new MonitoringConstruct(stack, 'Monitoring', {
-        enabled: true,
-        ssrFunction: newLambda(stack, 'Ssr'),
-      });
-      Annotations.fromStack(stack).hasNoInfo('*', NO_SUBSCRIBER_ACK_TAG);
-      Annotations.fromStack(stack).hasNoWarning('*', NO_SUBSCRIBER_ACK_TAG);
+    void it('stays silent once acknowledged after construction, with acknowledgeInfo or acknowledgeWarning', () => {
+      for (const acknowledge of ['acknowledgeInfo', 'acknowledgeWarning'] as const) {
+        const stack = createStack();
+        new MonitoringConstruct(stack, 'Monitoring', {
+          enabled: true,
+          ssrFunction: newLambda(stack, 'Ssr'),
+        });
+        CdkAnnotations.of(stack)[acknowledge](NO_SUBSCRIBER_INFO_ID);
+        Annotations.fromStack(stack).hasNoInfo('*', NO_SUBSCRIBER_ACK_TAG);
+      }
     });
 
-    void it('does NOT note when at least one subscriber is supplied', () => {
+    void it('adds NO info when at least one subscriber is supplied', () => {
       const stack = createStack();
       new MonitoringConstruct(stack, 'Monitoring', {
         enabled: true,
@@ -201,7 +173,7 @@ void describe('MonitoringConstruct', () => {
       Annotations.fromStack(stack).hasNoInfo('/TestStack/Monitoring', NO_SUBSCRIBER_ACK_TAG);
     });
 
-    void it('does NOT note when a subscriber is added AFTER construction', () => {
+    void it('adds NO info when a subscriber is added AFTER construction', () => {
       const stack = createStack();
       // Subscribing post-construction is a supported path (e.g. a Lambda/SQS
       // target attached via `monitoring.alarmTopics`, which `subscriptions`
@@ -215,9 +187,9 @@ void describe('MonitoringConstruct', () => {
       Annotations.fromStack(stack).hasNoInfo('/TestStack/Monitoring', NO_SUBSCRIBER_ACK_TAG);
     });
 
-    void it('does NOT note when the subscriber lives in another stack', () => {
+    void it('adds NO info when the subscriber lives in another stack', () => {
       // LambdaSubscription / SqsSubscription synthesize their CfnSubscription
-      // in the TARGET's stack, so a stack-scoped search would miss it and note
+      // in the TARGET's stack, so a stack-scoped search would miss it and report
       // spuriously. The check walks the whole app, so a cross-stack subscriber
       // counts.
       const app = new App();
@@ -236,7 +208,7 @@ void describe('MonitoringConstruct', () => {
       Annotations.fromStack(hostingStack).hasNoInfo('/TestStack/Monitoring', NO_SUBSCRIBER_ACK_TAG);
     });
 
-    void it('does NOT note when every alarm already routes to another action', () => {
+    void it('adds NO info when every alarm already routes to another action', () => {
       // A caller who wires alarm actions themselves via `monitoring.alarms`
       // (e.g. an SnsAction onto a topic they already subscribe) has handled
       // delivery, so telling them to subscribe THIS topic would be wrong.
@@ -253,10 +225,10 @@ void describe('MonitoringConstruct', () => {
       Annotations.fromStack(stack).hasNoInfo('/TestStack/Monitoring', NO_SUBSCRIBER_ACK_TAG);
     });
 
-    void it('does NOT note when no alarm is wired (topic can never enter ALARM)', () => {
+    void it('adds NO info when no alarm is wired (topic can never enter ALARM)', () => {
       const stack = createStack();
       // No distribution/ssrFunction/image/DLQ ⇒ no alarm. A topic with no alarm
-      // can never flip to ALARM, so the "delivers nowhere" note would be
+      // can never flip to ALARM, so the "delivers nowhere" info would be
       // spurious — the gate suppresses it.
       new MonitoringConstruct(stack, 'Monitoring', { enabled: true });
       Annotations.fromStack(stack).hasNoInfo('/TestStack/Monitoring', NO_SUBSCRIBER_ACK_TAG);

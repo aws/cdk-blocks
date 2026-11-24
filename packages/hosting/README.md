@@ -1547,13 +1547,23 @@ endpoint to subscribe yet. To clear it, do one of these:
 
 - Pass `monitoring.subscriptions`, as above.
 - Subscribe an endpoint to the topic outside the app. Its ARN is the
-  `MonitoringTopicArn` stack output (the output key carries the construct
-  path and a hash: `HostingMonitoringTopicArn2624A49E` in an app made by
-  `create-blocks-app`). Synth can't see a subscription made outside the app,
-  so acknowledge the info too.
+  `MonitoringTopicArn` stack output (CDK prefixes the output key with the
+  construct path and appends a hash). Synth can't see a subscription made
+  outside the app, so acknowledge the info too.
 - Add your own action to every alarm in `hosting.monitoring.alarms`.
-- Acknowledge it, to leave the topic unsubscribed on purpose:
-  `Annotations.of(stack).acknowledgeInfo('@aws-cdk-blocks/hosting:MonitoringAlarmTopicHasNoSubscribers')`.
+- Acknowledge it, to leave the topics unsubscribed on purpose. Each topic
+  reports on its own stack, and outside `us-east-1` the companion stack has
+  the second one:
+
+  ```ts
+  import { Annotations, Stack } from 'aws-cdk-lib';
+
+  for (const topic of hosting.monitoring?.alarmTopics ?? []) {
+    Annotations.of(Stack.of(topic)).acknowledgeInfo(
+      '@aws-cdk-blocks/hosting:MonitoringAlarmTopicHasNoSubscribers',
+    );
+  }
+  ```
 
 ## Secrets & config
 
