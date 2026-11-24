@@ -1184,7 +1184,19 @@ export class HostingConstruct extends Construct {
           this.cacheTable.grantReadWriteData(revalidationFn);
         }
 
-        revalidationFn.addEventSource(new SqsEventSource(this.revalidationQueue, { batchSize: 5 }));
+        // Cap the SQS poller at the reservation so messages beyond it wait in the
+        // queue instead of being throttled into the DLQ. SQS maximum concurrency
+        // is 2-1000: a reservation of 0 or 1 leaves the poller uncapped, and one
+        // above 1000 caps it at 1000.
+        const revalidationReservation = props.compute?.revalidation?.reservedConcurrency;
+        revalidationFn.addEventSource(
+          new SqsEventSource(this.revalidationQueue, {
+            batchSize: 5,
+            ...(revalidationReservation !== undefined && revalidationReservation >= 2
+              ? { maxConcurrency: Math.min(revalidationReservation, 1000) }
+              : {}),
+          }),
+        );
 
         this.computeFunctions.set('revalidation', revalidationFn);
       }

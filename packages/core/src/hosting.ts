@@ -159,7 +159,9 @@ export type ComputeConfig = {
    * `reservedConcurrency` defaults to undefined (no reservation), for the same
    * fresh-account reason as {@link ComputeConfig.imageOptimization}. While the
    * worker is throttled, revalidation messages go back to the queue and land
-   * in its dead-letter queue after 3 receives.
+   * in its dead-letter queue after 3 receives. A reservation of 2 or more also
+   * caps the SQS event source's maximum concurrency at the reservation (at most
+   * 1000), so messages beyond it wait in the queue instead of being throttled.
    *
    * @example
    * ```ts

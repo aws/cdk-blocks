@@ -889,6 +889,50 @@ void describe('HostingConstruct — Cache/ISR', () => {
     assert.equal(revalidationReservation({ revalidation: { reservedConcurrency: 2 } }), 2);
   });
 
+  void it('caps the revalidation event source at the reservation so excess messages wait instead of being dead-lettered', () => {
+    const staticDir = createStaticDir();
+    const bundleDir = createBundleDir();
+    const revalDir = path.join(tmpDir, 'revalidation-fn');
+    fs.mkdirSync(revalDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(revalDir, 'index.mjs'),
+      'export const handler = async () => {};',
+    );
+    const manifest: DeployManifest = {
+      ...ssrManifest(staticDir, bundleDir),
+      cache: {
+        computeResource: 'default',
+        tagRevalidation: true,
+        revalidationQueue: true,
+        revalidationFunction: {
+          bundle: revalDir,
+          handler: 'index.handler',
+        },
+      },
+    };
+    const eventSourceScaling = (compute: HostingConstructProps['compute']): unknown => {
+      const stack = createStack();
+      new HostingConstruct(stack, 'Hosting', {
+        manifest,
+        skipRegionValidation: true,
+        compute,
+      });
+      const mappings = Template.fromStack(stack).findResources('AWS::Lambda::EventSourceMapping');
+      const values = Object.values(mappings);
+      assert.equal(values.length, 1, 'one SQS event source mapping for the revalidation worker');
+      return values[0].Properties.ScalingConfig;
+    };
+
+    // No reservation: the poller isn't capped.
+    assert.equal(eventSourceScaling(undefined), undefined);
+    // A reservation caps the poller at the same value.
+    assert.deepEqual(eventSourceScaling({ revalidation: { reservedConcurrency: 5 } }), { MaximumConcurrency: 5 });
+    // SQS maximum concurrency starts at 2, so a reservation below 2 leaves the poller uncapped.
+    assert.equal(eventSourceScaling({ revalidation: { reservedConcurrency: 1 } }), undefined);
+    // SQS maximum concurrency tops out at 1000, so a larger reservation caps the poller there.
+    assert.deepEqual(eventSourceScaling({ revalidation: { reservedConcurrency: 1500 } }), { MaximumConcurrency: 1000 });
+  });
+
   void it('does not deploy revalidation worker when revalidationFunction is not configured', () => {
     const staticDir = createStaticDir();
     const bundleDir = createBundleDir();
