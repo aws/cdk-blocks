@@ -1077,6 +1077,8 @@ describe('inputs DynamoDB rejects fail the same way on the mock and the AWS runt
 		class Point {
 			x = 1;
 		}
+		class Tags extends Set<string> {}
+		class Fields extends Map<string, number> {}
 		const cases: [string, unknown, RegExp][] = [
 			['nan', Number.NaN, /: value field 'data' holds NaN, which DynamoDB cannot store$/],
 			['inf', Number.NEGATIVE_INFINITY, /: value field 'data' holds -Infinity, which/],
@@ -1090,8 +1092,25 @@ describe('inputs DynamoDB rejects fail the same way on the mock and the AWS runt
 			['neg-1e21', -1e21, /: value field 'data' holds the number -1e\+21, outside/],
 			['nested', { list: [1, { at: Number.NaN }] }, /: value field 'data\.list\[1\]\.at' holds NaN, which/],
 			['map', new Map([['m', new Date(0)]]), /: value field 'data\.m' holds a Date, which/],
+			[
+				'constructor-field',
+				{ constructor: 'Toyota' },
+				/: value field 'data' holds an object with a field named 'constructor', which/,
+			],
+			['set-of-booleans', new Set([true]), /: value field 'data' holds a Set of boolean values, which/],
+			['set-of-objects', new Set([{}]), /: value field 'data' holds a Set of objects, which/],
+			['set-of-undefined', new Set([undefined]), /: value field 'data' holds an empty Set, which/],
+			['set-subclass', new Tags(['a']), /: value field 'data' holds an instance of Tags, which/],
+			['map-subclass', new Fields([['a', 1]]), /: value field 'data' holds an instance of Fields, which/],
+			['boxed-nan', new Number(Number.NaN), /: value field 'data' holds NaN, which/],
 		];
 		for (const [id, data, message] of cases) {
+			const error = await rejects(
+				mockStore(`unmarshallable-cause-${id}`, options).put(key('a'), { data }),
+				KVStoreErrors.ValidationFailed,
+			);
+			assert.ok(error.cause instanceof Error, `${id}: the marshaller's error is kept as cause`);
+			assert.ok(!Object.keys(error).includes('cause'), `${id}: cause is not enumerable`);
 			assert.match(
 				await failsOnBoth(`unmarshallable-${id}`, KVStoreErrors.ValidationFailed, (store) =>
 					store.put(key('a'), { data }),
@@ -1149,6 +1168,20 @@ describe('inputs DynamoDB rejects fail the same way on the mock and the AWS runt
 		await bothReject('num-key-query', (store) =>
 			Array.fromAsync(store.query({ where: { pk: { equals: 'p' }, sk: { greaterThan: 1e21 } } })),
 		);
+		await bothReject('num-key-get-batch', (store) => store.getBatch([{ pk: 'p', sk: 1e21 }]));
+		await bothReject('num-key-delete-batch', (store) => store.deleteBatch([{ pk: 'p', sk: 1e21 }]));
+		// A cursor's key values pass the same check, and a cursor reports a failure as a bad cursor.
+		const unsafeCursor = Buffer.from(JSON.stringify({ v: 1, index: null, key: { pk: 'p', sk: 1e21 } })).toString(
+			'base64url',
+		);
+		const aws = awsStore('num-key-cursor', numeric);
+		for (const s of [mockStore('num-key-cursor', numeric), aws.store]) {
+			await rejects(
+				() => Array.fromAsync(s.query({ where: { pk: { equals: 'p' } }, cursor: unsafeCursor })),
+				KVStoreErrors.InvalidQuery,
+			);
+		}
+		assert.equal(aws.sent.length, 0);
 		const store = mockStore('num-key-safe', numeric);
 		await store.put({ pk: 'p', sk: Number.MAX_SAFE_INTEGER }, {});
 		await store.put({ pk: 'p', sk: 1.5 }, {});

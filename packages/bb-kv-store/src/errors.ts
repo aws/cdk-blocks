@@ -205,10 +205,12 @@ export const KVStoreMessages = {
 	reservedField: (field: string) => `value field '${field}' uses the reserved prefix '_bkv_'`,
 	unstorableField: (field: string) =>
 		`a value cannot have a field named '${field}', at any depth: DynamoDB cannot store that field name`,
-	unstorableValue: (subject: string, path: string, part: string) =>
-		path === ''
-			? `${subject} is ${part}, which DynamoDB cannot store`
-			: `${subject} field '${path}' holds ${part}, which DynamoDB cannot store`,
+	unstorableValue: (subject: string, path: string, part: string | undefined) =>
+		part === undefined
+			? `${subject} holds data that DynamoDB cannot store`
+			: path === ''
+				? `${subject} is ${part}, which DynamoDB cannot store`
+				: `${subject} field '${path}' holds ${part}, which DynamoDB cannot store`,
 	keyValueDisagree: (field: string) => `value field '${field}' does not equal the key`,
 	valueMustBeObject: 'a store with a declared key takes an object value',
 	limitInvalid: (received: string) => `limit must be a positive integer (received ${received})`,
