@@ -70,16 +70,28 @@ Local Mock
 **Decision:** `schedule` and `timezone` are validated up front in **both** layers, via the shared `schedule` module (`schedule.ts`):
 - The **mock** constructor fully parses the expression (`parseSchedule`) — it must model the schedule to fire locally — and throws synchronously on anything it can't parse.
 - The **CDK** construct validates at synth (`validateSchedule`) so an invalid expression fails in seconds rather than minutes into an EventBridge-rejected deploy.
+- The **AWS runtime** constructor runs the same `validateSchedule`/`validateTimezone` as synth, and the mock runs them before its own parser. All three reject the same inputs; the runtime is never stricter than synth, so a schedule that deployed always constructs in Lambda. `src/parity.test.ts` checks mock and runtime agree.
 
 **The synth gate is deliberately more lenient than the mock parser**, so it never rejects a schedule EventBridge would run:
 - `rate(...)` is fully validated (unit ∈ minute/hour/day, plural agreement, value ≥ 1) — this catches `rate(10 seconds)`, `rate(1 minutes)`, etc.
-- `cron(...)` is validated for its **6-field shape only**. Field-level semantics — `L` (last day), `W` (nearest weekday), `#` (nth weekday), named days, and the year field — are **left to EventBridge**, because the mock parser models only a subset and gating the deploy on it would reject advanced-but-valid cron.
+- `cron(...)` is validated for its **6-field shape**, plus two rules that hold for every EventBridge cron: exactly one of day-of-month and day-of-week is `?`, and a plain numeric day-of-month must exist in at least one listed month (Feb 29 counts, Feb 30 does not). Other field-level semantics — `L` (last day), `W` (nearest weekday), `#` (nth weekday), named days, value ranges such as minute `100`, and the year field — are **left to EventBridge**, because the mock parser models only a subset and gating the deploy on it would reject advanced-but-valid cron.
+
+**Evidence for the day-field rules.** The Scheduler and EventBridge cron docs only state the `*`/value-without-`?` case. The rest was observed by calling `CreateSchedule` in us-east-1 (2026-11-23) with a placeholder target, so a valid expression gets past expression validation and fails only on the target role:
+
+| Expression | `CreateSchedule` result |
+|---|---|
+| `cron(0 12 * * ? *)`, `cron(0 0 29 2 ? *)` | Expression accepted (fails later on the placeholder role) |
+| `cron(0 12 * * MON *)` | `ValidationException: Invalid Schedule Expression cron(0 12 * * MON *).` |
+| `cron(0 0 ? * ? *)` | `ValidationException: Invalid Schedule Expression cron(0 0 ? * ? *).` |
+| `cron(0 0 30 2 ? *)`, `cron(0 0 31 4 ? *)` | `ValidationException: The schedule expression cron(0 0 30 2 ? *), with StartDate null and EndDate null, is invalid because it will never schedule an invocation.` |
+
+So none of these rules rejects a schedule that could have been deployed.
 
 **Rationale:**
 - **Fail fast** — clear mistakes (`rate(10 seconds)`, malformed shape) fail at synth/local dev, not after a 2-minute deploy.
 - **No partial state** — if the mock constructor throws, no timer is started.
 - **No false negatives at the gate** — the CDK synth check is a superset of what EventBridge accepts for cron, so it never blocks a schedule EventBridge would run. (Trade-off: the **mock** still can't *fire* advanced cron forms locally — those work on deploy but not in local dev; see the Mock vs AWS table.)
-- **Local "unsupported" ≠ "invalid"** — when the mock can't model an advanced-but-valid form (`L`/`W`/`#`, year field), it throws `CronJobErrors.ScheduleNotSupported` (not `InvalidSchedule`), so local dev doesn't call a deployable schedule "invalid". Genuinely bad values (e.g. minute `100`, an inverted range, `rate(10 seconds)`) still throw `InvalidSchedule` in both the mock and the gate.
+- **Local "unsupported" ≠ "invalid"** — when the mock can't model an advanced-but-valid form (`L`/`W`/`#`, year field), it throws `CronJobErrors.ScheduleNotSupported` (not `InvalidSchedule`), so local dev doesn't call a deployable schedule "invalid". Genuinely bad values (e.g. minute `100`, an inverted range) still throw `InvalidSchedule` in the mock; `rate(10 seconds)` and the day-field rules above throw it in the mock, the gate and the AWS runtime.
 
 ### D-CJ-5: Shared IAM role across CronJob instances
 
@@ -156,6 +168,7 @@ No `fromExisting()` — wrapping an existing EventBridge schedule is not support
 - **Rate schedules** — `setInterval` with the computed interval in milliseconds when it fits a timer (`MAX_TIMEOUT_MS`, 2^31-1 ms, about 24.8 days); a longer interval waits in `setTimeout` steps toward an absolute fire time, fires, then schedules the first slot still in the future on the same cadence, so slots missed during a clock jump (for example sleep) are not run. Timers on both paths are `unref()`'d to avoid blocking process exit.
 - **Cron schedules** — `setTimeout` to the next fire time, computed via `nextCronTime()`. After each fire, the next timeout is scheduled recursively.
 - **Timezone support** — `Intl.DateTimeFormat` with the specified timezone extracts local time components for cron matching.
+- **`scheduledTime`** — the schedule slot the timer was set for, not the moment it ran, formatted to whole seconds (`2026-03-01T00:10:00Z`) like EventBridge Scheduler's `<aws.scheduler.scheduled-time>`. Rate slots count from the start time rounded down to the second. Rate slots are counted from the wall clock, so after a suspend or clock jump the next run of either rate path reports the latest slot that was due.
 - **Console logging** — logs `[CronJob:{id}] triggered at {timestamp}` on each fire, and `[CronJob:{id}] registered (disabled)` when `enabled: false`.
 - **Error handling** — handler errors are caught and logged with a warning that AWS would retry.
 - **Validation** — `parseSchedule()` validates cron/rate expressions; `validateTimezone()` validates IANA timezone strings.
@@ -178,7 +191,7 @@ This is a brute-force approach that trades performance for correctness. Acceptab
 
 | Behavior Difference | Impact | Mitigation |
 |------------|--------|------------|
-| Local cron timing may drift | Schedule fires at slightly different times than EventBridge | No mitigation — timing precision is not critical for correctness |
+| Local cron timing may drift | Schedule fires at slightly different times than EventBridge. `scheduledTime` still reports the exact slot, as on AWS | No mitigation — timing precision is not critical for correctness |
 | No EventBridge retry in mock | Failed handlers are not retried locally | Mock logs the error with a warning that AWS would retry |
 | Handler runs in-process (not isolated) | Shared memory, no cold start, no timeout enforcement | Lambda jobs share the selected function's environment; container deliveries use worker threads and enforce configured timeouts. Use a sandbox to exercise those paths. |
 | `compute` and `timeoutSeconds` are ignored | A container job runs in-process and is not stopped at `timeoutSeconds` locally | Same as AsyncJob's mock; deploy to a sandbox to exercise container delivery |

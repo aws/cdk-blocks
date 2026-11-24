@@ -600,12 +600,14 @@ new Hosting(stack, 'Web', {
 
 The `framework` option selects the frontend type: `'spa' | 'static' | 'nextjs'`. When omitted, it is detected from your app's own `package.json` (not `node_modules`): a `next` dependency → `nextjs`; otherwise `spa`; and `static` when there is no `package.json`. Set `framework: 'spa'` to override the detection, for example when a stray `next` dependency would trigger a Next.js/OpenNext build.
 
-`buildCommand` runs during synth, with `BLOCKS_API_URL` set to the backend the frontend talks to, and then the framework adapter runs its own build (OpenNext, Nitro, Astro, SvelteKit). Two synths skip both:
+`buildCommand` runs during synth, with `BLOCKS_API_URL` set to the backend the frontend talks to, and then the framework adapter runs its own build (OpenNext, Nitro, Astro, SvelteKit). Before `buildCommand` runs, `Hosting` refuses a framework version its adapter doesn't support, so a deploy doesn't wait for a build that is then rejected: SvelteKit 3 fails with `UnsupportedSvelteKitVersionError` (Hosting supports SvelteKit 2; see the `@aws-cdk-blocks/hosting` README). Two synths skip both:
 
 - **Destroy.** `npm run destroy` and `npm run sandbox:destroy` reuse the build output already on disk and build only when there is none, for example on a fresh clone. Each framework adapter checks the output it deploys: a Next.js destroy reuses the `.open-next/` output of an earlier deploy, and with only `.next/` (after a plain `next build`) OpenNext still builds. An exported `BLOCKS_SKIP_FRONTEND_BUILD=1` doesn't apply to a destroy.
 - **A deploy with `BLOCKS_SKIP_FRONTEND_BUILD=1`**, for example `BLOCKS_SKIP_FRONTEND_BUILD=1 npm run deploy`, deploys what is already in the build output directory. A missing build output (the output directory, or the output the framework adapter deploys, such as Next.js's `.open-next/`) fails the synth with a message naming the variable. The build bakes in `BLOCKS_API_URL`, so only reuse a build made for the same backend; a deploy never reuses one on its own.
 
 `buildRetentionDays` (default 30) is how many days superseded builds are kept for rollback. It maps to the hosting construct's `storage.buildRetentionDays` and must be ≥ `skewProtection.maxAge` in days. The [`@aws-cdk-blocks/hosting` README](../hosting/README.md) has the retention and cleanup rules.
+
+**The Lambda@Edge stack.** An app with Lambda@Edge functions (a Next.js `runtime: 'edge'` route, or middleware built as Lambda@Edge) in a stack outside `us-east-1` gets a second stack in `us-east-1` that holds them. CDK names it `edge-lambda-stack-<hash>`, a name that doesn't say which app it belongs to; with `defaults.appIdentity` set, `Hosting` names it `<id>-edge` (see [Running many apps in one AWS account](#running-many-apps-in-one-aws-account-a-shared-platform)). `NODE_OPTIONS="--conditions=cdk" npx cdk ls` lists it with the app's stacks, and `npm run sandbox:destroy` deletes it with the sandbox. `npm run destroy` doesn't select stacks, so delete a production app's stacks by name, the app stack first; the `@aws-cdk-blocks/hosting` README's "Edge routes" section has the steps.
 
 ### Front door and its settings
 
@@ -639,7 +641,7 @@ A `config()` domain works in `frontDoor.features.domain` too, through the async 
 The [`@aws-cdk-blocks/hosting` README](../hosting/README.md) documents each door: the settings each kind takes, the stacked door's settings per layer, and writing your own. The rules that fail a synth or a deploy:
 
 - **Plain HTTP.** A door without a certificate serves plain HTTP: the `{ kind: 'alb' }` door without a `certificate` and `features.domain`, and the stacked door's edge → router hop without a router `certificate` and `features.router.domain`. Outside a sandbox deploy, synth fails for the `alb` door with an API (`PlainHttpFrontDoorError`) and for a stacked door whose router is not `internal: true` (`OriginSecretOverPlainHttpError`); a sandbox deploy warns. If the network path is trusted (a private network, or TLS ended upstream), `allowPlainHttp: true` on the `alb`, `custom` or `stacked` door lets a production deploy synthesize.
-- **Switching `frontDoor` on a deployed app** replaces the front door: the URL changes (sessions scoped to the old host end), and a custom domain moving from one door to another collides in Route 53 while both exist. Remove it from the old door first.
+- **Switching `frontDoor` on a deployed app** replaces the front door: the URL changes (sessions scoped to the old host end), and a custom domain moving from one door to another collides in Route 53 while both exist. Remove it from the old door first. The ALB and API Gateway doors have no edge cache, so moving to one from the CloudFront door (or the stacked door) sends every request to the server: `s-maxage` and `stale-while-revalidate` store nothing there, Next.js ISR and Nuxt `swr` cache only server-side, and synth warns (`@aws-cdk-blocks/hosting:NoEdgeCache`) when the app's header rules ask for edge caching. See the `@aws-cdk-blocks/hosting` README.
 - **Top-level props.** The top-level `domain`, `waf`, `logging`, `monitoring`, `skewProtection`, `contentSecurityPolicy`, `priceClass`, `geoRestriction`, `quotas`, `ssrDefaultTtl`, `cacheKeyCookies` and `cacheKeyHeaders` props are deprecated aliases of the same names in `frontDoor.features`. Setting one both ways fails synth (`FrontDoorSettingConflictError`), and so does a top-level prop the chosen kind doesn't implement (`UnsupportedFrontDoorSettingError`; the stacked door takes its settings per layer only).
 
 ### Preview mode and `HostingPresets`
@@ -663,7 +665,7 @@ new Hosting(stack, 'Web', { ...HostingPresets.preview, imageOptimization: true, 
 
 | Prop | Value | Effect |
 |---|---|---|
-| `frontDoor` | `{ kind: 'apiGateway' }` | The API Gateway HTTP API door: no CloudFront; buffered server responses, about 6 MB each |
+| `frontDoor` | `{ kind: 'apiGateway' }` | The API Gateway HTTP API door: no CloudFront; buffered server responses, about 6 MB each; no edge cache, so `s-maxage` and `stale-while-revalidate` routes reach the server on every request (a preview doesn't show how the CloudFront door caches) |
 | `imageOptimization` | `false` | No image function; the image endpoints serve the source image (a remote one is redirected only when its host is in the app's image allowlist, else 404) |
 | `incrementalRegeneration` | `false` | Next.js builds without the tag cache and revalidation queue; prerendered pages come from the build's snapshot |
 | `edgeRoutes` | `'regional'` | Next.js `runtime: 'edge'` routes run as regional Lambda functions, not Lambda@Edge |
