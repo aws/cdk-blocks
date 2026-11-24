@@ -203,7 +203,7 @@ function getState(): RawRouteRegistryState {
     state.copies += 1;
     if (state.copies > 1) {
       console.warn(
-        `AWS Blocks: ${state.copies} copies of @aws-cdk-blocks/core loaded in this process. ` +
+        `AWS CDK Blocks: ${state.copies} copies of @aws-cdk-blocks/core loaded in this process. ` +
           'They now share one RawRoute registry, but duplicate copies indicate a ' +
           'dependency-tree problem — deduplicate @aws-cdk-blocks/core.',
       );
@@ -315,6 +315,9 @@ export function clearRouteRegistry(): void {
 /**
  * Match an incoming HTTP request against registered routes.
  *
+ * The root path (`/`, or a run of slashes that collapses to it) never matches,
+ * not even a `/*` wildcard: no route can be registered at the root.
+ *
  * @returns The matched route and extracted path parameters, or `null` if no match.
  */
 export function matchRoute(
@@ -322,6 +325,11 @@ export function matchRoute(
   path: string,
 ): { route: RegisteredRoute; params: Record<string, string> } | null {
   path = canonicalBlocksPath(path.replace(/\/+/g, '/'));
+
+  // The root is never a route (registerRoute rejects '/'). A `/*` wildcard
+  // compiles to `^/(.*)$`, which would match '/' with an empty capture, so a
+  // stage-root request would run a catch-all handler instead of answering 404.
+  if (path === '/') return null;
 
   for (const route of getState().routes) {
     if (route.method !== method) continue;

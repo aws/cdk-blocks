@@ -43,7 +43,7 @@ const ALLOWLIST = [
 	{ at: 'packages/core/src/scripts/cleanup.ts:22', reason: LSOF_CLEANUP },
 	{ at: 'test-apps/native-bindings/cdk-blocks/scripts/cleanup.ts:9', reason: LSOF_CLEANUP },
 	{ at: 'test-apps/native-bindings/cdk-blocks/scripts/cleanup.ts:11', reason: LSOF_CLEANUP },
-	{ at: 'packages/core/src/hosting.ts:1224', reason: `Hosting buildCommand. ${APP_COMMAND}` },
+	{ at: 'packages/core/src/hosting.ts:1230', reason: `Hosting buildCommand. ${APP_COMMAND}` },
 	{ at: 'packages/core/src/scripts/dev-server.ts:1278', reason: `Frontend dev command. ${APP_COMMAND}` },
 	{
 		at: 'packages/core/src/scripts/run-command.ts:89',
@@ -54,8 +54,8 @@ const ALLOWLIST = [
 		reason: 'CIM query of Windows processes: the only interpolated values are pids through Math.trunc into a fixed Get-CimInstance -Filter template, run with -NoProfile -NonInteractive and an argv array.',
 	},
 	{ at: 'packages/create-block/src/index.ts:287', reason: `npm view of an @aws-cdk-blocks/* name: ${WINDOWS_NPM}` },
-	{ at: 'packages/create-block/src/index.ts:632', reason: `npm run build -w <validated name>: ${WINDOWS_NPM}` },
-	{ at: 'packages/create-block/src/index.ts:637', reason: `npm test -w <validated name>: ${WINDOWS_NPM}` },
+	{ at: 'packages/create-block/src/index.ts:640', reason: `npm run build -w <validated name>: ${WINDOWS_NPM}` },
+	{ at: 'packages/create-block/src/index.ts:645', reason: `npm test -w <validated name>: ${WINDOWS_NPM}` },
 	{ at: 'scripts/ci/_proc.mjs:53', reason: CI_WINDOWS },
 	{ at: 'scripts/ci/windows-template-e2e.mjs:54', reason: CI_WINDOWS },
 	{

@@ -46,7 +46,7 @@ import { HTTP_ERROR_STATUS_EXPORTS } from './rpc-dispatch.js';
 // ================================================================
 // Hosting construct tests
 //
-// These validate that the Blocks wrapper around HostingConstruct
+// These validate that the CDK Blocks wrapper around HostingConstruct
 // produces the expected CloudFormation resources for SPA and SSR.
 // ================================================================
 
@@ -1002,7 +1002,7 @@ describe('Hosting', () => {
 			);
     });
 
-    // Regression: /api/* is the framework SSR namespace; Blocks must
+    // Regression: /api/* is the framework SSR namespace; CDK Blocks must
     // not synthesize a CloudFront behavior there.
     it('does NOT claim the framework-reserved /api or /api/* prefix', () => {
       createSpaBuildOutput(tmpDir);
@@ -1023,11 +1023,11 @@ describe('Hosting', () => {
       const apiExact = cacheBehaviors.find((b: any) => b.PathPattern === '/api');
       const apiWildcard = cacheBehaviors.find((b: any) => b.PathPattern === '/api/*');
 
-      assert.strictEqual(apiExact, undefined, '/api must not be claimed by Blocks (framework SSR API namespace)');
+      assert.strictEqual(apiExact, undefined, '/api must not be claimed by AWS CDK Blocks (framework SSR API namespace)');
 			assert.strictEqual(
 				apiWildcard,
 				undefined,
-				'/api/* must not be claimed by Blocks (framework SSR API namespace)',
+				'/api/* must not be claimed by AWS CDK Blocks (framework SSR API namespace)',
 			);
     });
 
@@ -2492,7 +2492,7 @@ describe('Hosting', () => {
 
       const template = Template.fromStack(stack);
 
-      // secret → Secrets Manager: slash-free locator under the Blocks /blocks/secrets namespace.
+      // secret → Secrets Manager: slash-free locator under the CDK Blocks /blocks/secrets namespace.
       template.hasResourceProperties('AWS::Lambda::Function', {
         Environment: {
           Variables: Match.objectLike({ HOSTING_SECRET_PARAM_STRIPE_KEY: 'blocks/secrets/STRIPE_KEY' }),
@@ -2853,7 +2853,7 @@ describe('Hosting', () => {
       const app = new App();
       const stack = new Stack(app, 'EdgeVisitorStack', { env: { account: '123456789012', region: 'eu-west-1' } });
       const backend = makeBackend(stack, 'Blocks');
-      // A test-only consumer of the shared role visitor: stamp a tag on every Blocks role.
+      // A test-only consumer of the shared role visitor: stamp a tag on every CDK Blocks role.
       const visited = new Set<string>();
       forEachBlocksRole(backend as unknown as Construct, (role) => {
         visited.add(`${Stack.of(role).node.id}/${Stack.of(role).resolve(role.logicalId)}`);
@@ -3001,7 +3001,7 @@ describe('Hosting', () => {
       const entries = configOf(stack)?.entries;
       assert.strictEqual(entries?.get('BLOCKS_PUBLIC_ORIGIN'), 'https://edge.example.com');
       assert.strictEqual(entries?.get('CORS_HOSTING_ORIGINS'), 'https://edge.example.com');
-      // A BYO door is not a built-in CloudFront door: Blocks adds no API behaviors
+      // A BYO door is not a built-in CloudFront door: CDK Blocks adds no API behaviors
       // of its own, and `distribution` (still typed as before) is not available.
       assert.throws(() => hosting.distribution, /only available for a CloudFront front door/);
     });
@@ -4367,7 +4367,7 @@ describe('Hosting — frontDoor.features', () => {
   });
 });
 
-// Compile-time contract on the Blocks `Hosting`: each kind accepts exactly the
+// Compile-time contract on the CDK Blocks `Hosting`: each kind accepts exactly the
 // settings its door implements (this file is typechecked by the build).
 const _blocksFrontDoorTypes: Array<HostingProps['frontDoor']> = [
   { features: { domain: { domainName: config('DOMAIN_PROD') }, priceClass: cdk.aws_cloudfront.PriceClass.PRICE_CLASS_ALL } },
@@ -4470,6 +4470,57 @@ describe('Hosting — skipping the frontend build', () => {
     process.env.BLOCKS_SKIP_FRONTEND_BUILD = '1';
     synth({ reuseFrontendBuild: 'true' });
     assert.ok(built(), 'buildCommand should run when dist/ is missing');
+  });
+});
+
+// An unsupported framework version is refused before `buildCommand` runs, so
+// the user doesn't wait for a full build that the adapter then rejects.
+describe('Hosting — unsupported framework version', () => {
+  let tmpDir: string;
+  // Records that it ran, then writes the adapter-node output a real build would.
+  const BUILD = `node -e "const f=require('fs');f.writeFileSync('built.txt','1');f.mkdirSync('build',{recursive:true})"`;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bb-hosting-kit3-'));
+    fs.writeFileSync(
+      path.join(tmpDir, 'package.json'),
+      JSON.stringify({ name: 'kit3', devDependencies: { '@sveltejs/kit': '^3.2.0' } }),
+    );
+    const kitDir = path.join(tmpDir, 'node_modules', '@sveltejs', 'kit');
+    fs.mkdirSync(kitDir, { recursive: true });
+    fs.writeFileSync(path.join(kitDir, 'package.json'), JSON.stringify({ name: '@sveltejs/kit', version: '3.3.1' }));
+  });
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('refuses SvelteKit 3 before running buildCommand', () => {
+    const stack = new Stack(new App(), 'Kit3Stack');
+    assert.throws(
+      () =>
+        new Hosting(stack, 'Hosting', {
+          root: tmpDir,
+          api: MOCK_API,
+          framework: 'sveltekit',
+          buildCommand: BUILD,
+          buildOutputDir: 'build',
+        }),
+      (err: Error) => {
+        assert.ok(err instanceof HostingError, 'expected a HostingError');
+        assert.strictEqual(err.code, 'UnsupportedSvelteKitVersionError');
+        return true;
+      },
+    );
+    assert.ok(!fs.existsSync(path.join(tmpDir, 'built.txt')), 'buildCommand should not run');
+  });
+
+  it('refuses a detected SvelteKit 3 project the same way', () => {
+    const stack = new Stack(new App(), 'Kit3DetectStack');
+    assert.throws(
+      () => new Hosting(stack, 'Hosting', { root: tmpDir, api: MOCK_API, buildCommand: BUILD }),
+      /UnsupportedSvelteKitVersionError|SvelteKit 3\.3\.1/,
+    );
+    assert.ok(!fs.existsSync(path.join(tmpDir, 'built.txt')), 'buildCommand should not run');
   });
 });
 

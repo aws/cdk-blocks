@@ -42,7 +42,7 @@ const ALLOWLIST = [
 		reason: 'allowedOrigins regex entries are intentionally regexes: validateCorsOriginEntry() runs first (bare dots, globs, nested quantifiers, standalone compile) and the entry is anchored as ^(?:…)$.',
 	},
 	{
-		at: 'packages/core/src/raw-route.ts:443',
+		at: 'packages/core/src/raw-route.ts:451',
 		reason: 'Built one character at a time: every character in REGEX_SPECIAL is escaped and `{` `}` `*` are parsed as params and the wildcard.',
 	},
 	{
@@ -54,7 +54,7 @@ const ALLOWLIST = [
 		reason: 'Joins the keys of the NETWORK_ERRORS object literal (Node error codes such as ECONNREFUSED) declared in this file.',
 	},
 	{
-		at: 'packages/hosting/src/adapters/nextjs.ts:1049',
+		at: 'packages/hosting/src/adapters/nextjs.ts:1054',
 		reason: '`key` is one of the literal OpenNext option names passed by the callers in this file; `value` goes through escapeRegex().',
 	},
 	{
