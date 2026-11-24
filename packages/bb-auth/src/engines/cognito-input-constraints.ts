@@ -21,7 +21,17 @@
  *   as a search, so it only asks for one non-whitespace character, which the
  *   password policy's minimum length already implies.
  *
- * Lengths count Unicode code points, as Smithy's `@length` does on a string.
+ * Lengths count Unicode code points, as Smithy's `@length` does on a string
+ * (and as Cognito does, checked live).
+ *
+ * Cognito collects every violation into one message ("2 validation errors
+ * detected: …"); these checks report only the first one. The client gets
+ * `InvalidParameterException`'s fixed message either way, so only the server
+ * log text differs.
+ *
+ * The pattern's character classes come from the Node runtime's Unicode tables,
+ * while Cognito uses Unicode 13's, so a character assigned in Unicode 14 or
+ * later (newer emoji, some scripts) is accepted here and refused by Cognito.
  *
  * @internal
  */

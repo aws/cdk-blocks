@@ -18,7 +18,8 @@ import { afterEach, beforeEach, describe, test } from 'node:test';
 import type { ScopeParent } from '@aws-cdk-blocks/core';
 import { AuthErrors } from './errors.js';
 import { Auth as MockAuth } from './index.mock.js';
-import { cognitoError, makeAwsAuth, wireView } from './test-support/aws-harness.js';
+import { Browser as AwsBrowser, cognitoError, makeAwsAuth, signInAs, wireView } from './test-support/aws-harness.js';
+import { Browser } from './test-helpers.js';
 import type { CodeDeliveryPurpose } from './types.js';
 
 beforeEach(() => rmSync('.cdk-blocks/local/data', { recursive: true, force: true }));
@@ -171,6 +172,41 @@ describe('parity: a password over Cognito’s 256 characters is refused', () => 
 			awsRefusing('ConfirmForgotPasswordCommand').confirmResetPassword('alice', '123456', LONG_PASSWORD),
 		);
 
+		assert.deepStrictEqual(mock, aws);
+		assert.strictEqual(mock.name, AuthErrors.InvalidParameter);
+	});
+
+	/** `updatePassword` from a signed-in session on each runtime; AWS refuses `ChangePassword`. */
+	async function updatePasswordOnBoth(oldPassword: string, newPassword: string) {
+		const local = localAuth();
+		await local.auth.signUp('alice', GOOD, { attributes: { email: 'alice@example.com' } });
+		await local.auth.confirmSignUp('alice', local.last('signUp'));
+		const b = new Browser();
+		await b.request((ctx) => local.auth.signIn('alice', GOOD, ctx));
+		const mock = await failure(b.request((ctx) => local.auth.updatePassword(ctx, oldPassword, newPassword)));
+
+		const h = makeAwsAuth(OPTIONS);
+		const ab = new AwsBrowser();
+		await signInAs(h, ab, 'alice');
+		h.on('ChangePasswordCommand', () => {
+			throw cognitoError(
+				'InvalidParameterException',
+				"1 validation error detected: Value at 'proposedPassword' failed to satisfy constraint: Member must have length less than or equal to 256",
+			);
+		});
+		const aws = await failure(ab.request((ctx) => h.auth.updatePassword(ctx, oldPassword, newPassword)));
+		return { mock, aws };
+	}
+
+	test('updatePassword, a new password over 256 characters', async () => {
+		const { mock, aws } = await updatePasswordOnBoth(GOOD, LONG_PASSWORD);
+		assert.deepStrictEqual(mock, aws);
+		assert.strictEqual(mock.name, AuthErrors.InvalidParameter);
+	});
+
+	test('updatePassword, an old password over 256 characters: refused before the comparison', async () => {
+		// Cognito length-checks `PreviousPassword` first: InvalidParameter, not NotAuthorized.
+		const { mock, aws } = await updatePasswordOnBoth(LONG_PASSWORD, `${GOOD}2`);
 		assert.deepStrictEqual(mock, aws);
 		assert.strictEqual(mock.name, AuthErrors.InvalidParameter);
 	});

@@ -858,6 +858,8 @@ export class MockNativeEngine implements NativeEngine {
 		// token or the comparison. An empty old password (a passwordless user) is skipped.
 		this.store.enforcePasswordFormat(input.oldPassword);
 		this.store.enforcePasswordFormat(input.newPassword);
+		// Both are a `PasswordType`, so both are length-checked (an empty old password passes).
+		enforcePasswordLength(input.oldPassword, 'previousPassword');
 		enforcePasswordLength(input.newPassword, 'proposedPassword');
 		const { user } = this.store.userForAccessToken(input.accessToken);
 		if (user.password !== input.oldPassword) {
