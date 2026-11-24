@@ -4,8 +4,14 @@ name: Canary
 # Tests the full packaging + scaffold + build + e2e + cdk synth path using
 # published artifacts (not workspace links). No AWS credentials are configured,
 # so the synth step also proves each template synthesizes without an account.
+# The synth step runs in production, sandbox and preview mode and fails on any
+# warning an untouched scaffold isn't meant to show
+# (scripts/ci/template-synth-warnings.mjs). The scaffold installs the newest
+# aws-cdk-lib its range allows, so the daily run also catches a new aws-cdk-lib
+# release that adds a warning.
 # Not a PR gate. Runs on a daily schedule against the default branch, and on
-# PRs that touch the canary itself or a template's package.json / tests.
+# PRs that touch the canary itself, the synth-warning check, or a template's
+# package.json, tests or CDK code.
 
 on:
   workflow_dispatch:
@@ -27,6 +33,13 @@ on:
       # typechecks a template's tests, and it also runs on fork PRs, which
       # E2E Templates skips.
       - 'packages/create-blocks-app/templates/*/test/**'
+      # The synth-warning check and the process helper it spawns `cdk` through.
+      # The canary is the lane that runs that check on fork PRs, which E2E
+      # Templates skips, so it also runs when a template's CDK code changes:
+      # that is where a template can add a warning.
+      - 'scripts/ci/template-synth-warnings.mjs'
+      - 'scripts/ci/_proc.mjs'
+      - 'packages/create-blocks-app/templates/*/cdk-blocks/**'
 
 concurrency:
   group: canary-${{ github.ref }}
