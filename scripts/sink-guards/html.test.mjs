@@ -21,9 +21,10 @@
 //
 // Scans every tracked production TypeScript/JavaScript file (tests excluded) on
 // the TypeScript AST. A template counts as HTML when its text has an HTML
-// element tag, comment or doctype. Allowlist entries name a site by file and
-// code (`site`, as the failure report prints it), not line, with a reason; an
-// entry that stops matching a site fails the test, so the list only shrinks.
+// element tag, comment or doctype. Allowlist entries name a site by file,
+// enclosing function (`in`) and full code (`site`), as the failure report
+// prints them, not by line, with a reason; an entry that stops matching a site
+// fails the test, so the list only shrinks.
 //
 // Run: node --test scripts/sink-guards/html.test.mjs
 
@@ -51,36 +52,36 @@ const TODO_HANDLERS = (escape) =>
 	['onchange', 'onblur', 'onchange', 'onclick'].map((attr) => `${attr}=: ${escape}(todo.todoId)`);
 
 const ALLOWLIST = [
-	{ at: 'scripts/agent-bench/steps/analyze.mjs', site: 'MODEL_ID', reason: BENCH_SUMMARY },
-	{ at: 'scripts/agent-bench/steps/analyze.mjs', site: 'head', reason: BENCH_SUMMARY },
+	{ at: 'scripts/agent-bench/steps/analyze.mjs', in: 'main', site: 'MODEL_ID', reason: BENCH_SUMMARY },
+	{ at: 'scripts/agent-bench/steps/analyze.mjs', in: 'main', site: 'head', reason: BENCH_SUMMARY },
 	{
-		at: 'scripts/build-tech-design-pdf.mjs', site: 'src=: b64',
+		at: 'scripts/build-tech-design-pdf.mjs', in: 'replaceMermaid', site: 'src=: b64',
 		reason: 'Base64 of a PNG this script rendered, after a constant data:image/png scheme; the base64 alphabet holds no HTML metacharacters.',
 	},
 	{
-		at: 'packages/bb-auth/src/engines/stub-idp.ts', site: 'action=: escapeHtml(action)',
+		at: 'packages/bb-auth/src/engines/stub-idp.ts', in: 'renderLoginPage', site: 'action=: escapeHtml(action)',
 		reason: "Form action is this stub IdP's own authorize URL (stubIssuerUrl: the request's base URL or BLOCKS_API_URL plus a fixed path), so it always has an http(s) scheme.",
 	},
 	{
-		at: 'packages/bb-dashboard/src/local-dashboard.ts', site: 'metrics',
+		at: 'packages/bb-dashboard/src/local-dashboard.ts', in: 'renderLocalDashboard', site: 'metrics',
 		reason:
 			"`metrics` joins, per metrics source, `<h3>${escapeHtml(namespace)}</h3><ul>${names}</ul>` or '', and `names` joins `<li><code>${escapeHtml(name)}</code></li>`. This guard checks both templates (lines 12 and 13) on their own; it flags the join only because it follows `.map()` callbacks with an expression body, and this one has a block body.",
 	},
 	{
-		at: 'packages/core/src/scripts/dashboard.ts', site: 'escaped',
+		at: 'packages/core/src/scripts/dashboard.ts', in: 'buildRedirectDocument', site: 'escaped',
 		reason:
 			'Loopback dashboard URL this process built itself: `http://127.0.0.1:<port>` from the server it just started, plus a hex session token from randomBytes. No external input reaches it, and it is escaped for &, " and < before entering the attribute.',
 	},
 	// The todo list's inline handlers.
-	...TODO_HANDLERS('escapeHtml').map((site) => ({ at: 'native/kotlin/example/typescript/src/index.ts', site, reason: TODO_ID })),
-	...TODO_HANDLERS('esc').map((site) => ({ at: 'native/swift/Demo/typescript-demo/src/index.ts', site, reason: TODO_ID })),
-	...TODO_HANDLERS('escapeHtml').map((site) => ({ at: 'packages/create-blocks-app/templates/demo/src/index.ts', site, reason: TODO_ID })),
-	...TODO_HANDLERS('esc').map((site) => ({ at: 'test-apps/native-bindings/src/index.ts', site, reason: `${TODO_ID} ${NATIVE_BINDINGS}` })),
-	{ at: 'native/kotlin/example/typescript/src/index.ts', site: 'style=: escapeHtml(color)', reason: PEER_COLOR },
-	{ at: 'native/swift/Demo/typescript-demo/src/index.ts', site: 'style=: esc(color)', reason: PEER_COLOR },
-	{ at: 'test-apps/comprehensive/src/index.ts', site: 'style=: escapeHtml(color)', reason: PEER_COLOR },
+	...TODO_HANDLERS('escapeHtml').map((site) => ({ at: 'native/kotlin/example/typescript/src/index.ts', in: 'refreshTodos', site, reason: TODO_ID })),
+	...TODO_HANDLERS('esc').map((site) => ({ at: 'native/swift/Demo/typescript-demo/src/index.ts', in: 'refreshTodos', site, reason: TODO_ID })),
+	...TODO_HANDLERS('escapeHtml').map((site) => ({ at: 'packages/create-blocks-app/templates/demo/src/index.ts', in: 'refreshTodos', site, reason: TODO_ID })),
+	...TODO_HANDLERS('esc').map((site) => ({ at: 'test-apps/native-bindings/src/index.ts', in: 'refreshTodos', site, reason: `${TODO_ID} ${NATIVE_BINDINGS}` })),
+	{ at: 'native/kotlin/example/typescript/src/index.ts', in: 'initCursorTracking.getOrCreateCursor', site: 'style=: escapeHtml(color)', reason: PEER_COLOR },
+	{ at: 'native/swift/Demo/typescript-demo/src/index.ts', in: 'getOrCreateCursor', site: 'style=: esc(color)', reason: PEER_COLOR },
+	{ at: 'test-apps/comprehensive/src/index.ts', in: 'getOrCreateCursor', site: 'style=: escapeHtml(color)', reason: PEER_COLOR },
 	{
-		at: 'test-apps/native-bindings/src/index.ts', site: 'style=: esc(color)',
+		at: 'test-apps/native-bindings/src/index.ts', in: 'getOrCreateCursor', site: 'style=: esc(color)',
 		reason: `style= value with a realtime peer colour (escaped, not yet validated). ${NATIVE_BINDINGS}`,
 	},
 ];
@@ -88,7 +89,7 @@ const ALLOWLIST = [
 // Escape helpers that miss a character, with where they are used.
 const WEAK_HELPER_ALLOWLIST = [
 	{
-		at: 'test-apps/native-bindings/src/index.ts', site: "esc: function esc(str: string): string { return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replac",
+		at: 'test-apps/native-bindings/src/index.ts', in: '(top level)', site: 'esc: function esc(str: string): string { return str.replace(/&/g, \'&amp;\').replace(/</g, \'&lt;\').replace(/>/g, \'&gt;\').replace(/"/g, \'&quot;\'); }',
 		reason: "esc() misses `'`; every use is element text or a double-quoted attribute. The file is being reworked by open PR #1259.",
 	},
 ];

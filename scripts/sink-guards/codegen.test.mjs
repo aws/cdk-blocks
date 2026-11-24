@@ -18,7 +18,7 @@
 // There is no Kotlin/Swift/Dart parser in the Node toolchain, so this is a
 // line scan: a line that hands text to the generated source and opens a quoted
 // literal right before a raw interpolation (`"\"$x"`, `"\"\(x)"`, `"'$x"`).
-// Allowlist entries name a site by file and code (`site`, as the failure
+// Allowlist entries name a site by file and full code (`site`, as the failure
 // report prints it), not line, with a reason; an entry that stops matching a
 // site fails the test, so the list only shrinks.
 //
@@ -55,12 +55,12 @@ const ALLOWLIST = [
 	// The DynamicKey encode/decode lines of a generated custom Codable conformance.
 	...[
 		'body.append("        try c.encode(self.\\(safe), forKey: DynamicKey(stringValue: \\"\\(key)\\")!)")  (raw: key)',
-		'body.append("        try c.encodeIfPresent(self.\\(safe), forKey: DynamicKey(stringValue: \\"\\(key)\\")  (raw: key)',
-		'body.append("        self.\\(safe) = try c.decode(\\(baseType).self, forKey: DynamicKey(stringValue: \\  (raw: key)',
-		'body.append("        self.\\(safe) = try c.decodeIfPresent(\\(baseType).self, forKey: DynamicKey(strin  (raw: key)',
+		'body.append("        try c.encodeIfPresent(self.\\(safe), forKey: DynamicKey(stringValue: \\"\\(key)\\")!)")  (raw: key)',
+		'body.append("        self.\\(safe) = try c.decode(\\(baseType).self, forKey: DynamicKey(stringValue: \\"\\(key)\\")!)")  (raw: key)',
+		'body.append("        self.\\(safe) = try c.decodeIfPresent(\\(baseType).self, forKey: DynamicKey(stringValue: \\"\\(key)\\")!)")  (raw: key)',
 	].map((site) => ({ at: 'native/swift/Sources/BlocksCodegen/SwiftCodeGenerator.swift', site, reason: SWIFT_CONTENT_LOCAL('key') })),
 	{ at: 'native/swift/Sources/BlocksCodegen/SwiftCodeGenerator.swift', site: '"guard \\(valueVar).range(of: \\"\\(escaped)\\","  (raw: escaped)', reason: SWIFT_CONTENT_LOCAL('escaped') },
-	{ at: 'native/swift/Sources/BlocksCodegen/SwiftCodeGenerator+EntryPoint.swift', site: 'lines.append("    public static let \\(propertyName) = \\(runtimePrefix)BlocksServer(name: \\"\\(name)\\"  (raw: name, url)', reason: SWIFT_CONTENT_LOCAL('name and url') },
+	{ at: 'native/swift/Sources/BlocksCodegen/SwiftCodeGenerator+EntryPoint.swift', site: 'lines.append("    public static let \\(propertyName) = \\(runtimePrefix)BlocksServer(name: \\"\\(name)\\", url: \\"\\(url)\\")")  (raw: name, url)', reason: SWIFT_CONTENT_LOCAL('name and url') },
 ];
 
 describe('codegen sink detector', () => {
