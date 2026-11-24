@@ -102,6 +102,7 @@ import { s3WebsiteDoor } from './s3_website_door.js';
 import type { AccessLogFormat, AccessLogPartitioning } from './access_logging.js';
 import { ComputeConstruct } from './compute_construct.js';
 import { DnsConstruct } from './dns_construct.js';
+import { CdnInvalidationConstruct } from './cdn_invalidation.js';
 import { MonitoringConstruct } from './monitoring_construct.js';
 import { UsEast1MonitoringStack } from './us_east_1_monitoring_stack.js';
 import { DEFAULT_NODE_RUNTIME } from './node_runtime.js';
@@ -1742,6 +1743,25 @@ export class HostingConstruct extends Construct {
       this._distribution = cdn.distribution;
       this.distributionUrl = cdn.distributionUrl;
 
+      // ---- 9d. On-demand revalidation → CloudFront invalidation ----
+      // ISR pages reach the edge with `s-maxage=<remaining revalidate>`, so a
+      // `revalidateTag` / `revalidatePath` is only visible there once the
+      // server invalidates the distribution. The adapter sets
+      // `cache.cdnInvalidation` when the server bundle carries the handler.
+      if (manifest.cache?.cdnInvalidation && manifest.cache.driver !== 'nitro-s3') {
+        const server =
+          this.computeFunctions.get(manifest.cache.computeResource) ??
+          this.computeWebFunctions.get(manifest.cache.computeResource);
+        // A Lambda@Edge server has no environment to carry the parameter name.
+        if (server instanceof LambdaFunction || server instanceof WebFunctionConstruct) {
+          new CdnInvalidationConstruct(this, 'CdnInvalidation', {
+            distribution: cdn.distribution,
+            server,
+            basePath: manifest.basePath,
+          });
+        }
+      }
+
       // Output the CloudFront distribution domain when custom domain is configured.
       // BYO domain users need this to set up their external DNS CNAME.
       if (resolvedDomainNames.length > 0) {
@@ -2376,8 +2396,19 @@ export class HostingConstruct extends Construct {
     // Cache-Control split (3 tiers):
     //
     //   1. Hashed assets (`immutablePaths`): `max-age=31536000, immutable`
-    //   2. HTML files: `no-cache, no-store, must-revalidate` — browsers
-    //      must always revalidate so new deploys propagate immediately.
+    //   2. HTML files: `max-age=0, must-revalidate` — browsers and
+    //      CloudFront must revalidate on every request, so a new deploy's
+    //      HTML is served on the first request after it. No `no-store`: with
+    //      the SSR cache policy's minimum TTL of 0, CloudFront honors
+    //      `no-store`/`no-cache` by never keeping the object, so it could not
+    //      answer a viewer's `If-None-Match` with 304 and every repeat visit
+    //      downloaded the full page. `max-age=0` lets the edge keep a copy and
+    //      revalidate it against S3 each time. This cannot serve a previous
+    //      build's HTML: the router rewrites every HTML request to the CURRENT
+    //      build's `builds/<id>/` key before the cache lookup (HTML ignores the
+    //      skew cookie), so a deploy changes the cache key, and these objects
+    //      are prerendered, public files (never per-user responses).
+    //      `noCachePaths` keep `no-cache, no-store, must-revalidate`.
     //   3. Other mutable assets (images, JSON, etc.):
     //      `s-maxage=31536000, max-age=0, must-revalidate` — CloudFront
     //      edge caches for 1y. Each deploy writes them under a fresh
@@ -2404,7 +2435,8 @@ export class HostingConstruct extends Construct {
       const noCachePaths = manifest.staticAssets.noCachePaths;
       const mutableCacheControl =
         manifest.staticAssets.cacheControl ?? 'public, s-maxage=31536000, max-age=0, must-revalidate';
-      const htmlCacheControl = 'no-cache, no-store, must-revalidate';
+      const htmlCacheControl = 'max-age=0, must-revalidate';
+      const noStoreCacheControl = 'no-cache, no-store, must-revalidate';
       const htmlGlobs = ['*.html', '**/*.html'];
       const staticSource = Source.asset(manifest.staticAssets.directory);
       // Track the asset deployments so the per-extension font Content-
@@ -2425,22 +2457,6 @@ export class HostingConstruct extends Construct {
         memoryLimit: props.storage?.deployment?.memoryLimit ?? 1024,
         ephemeralStorageSize: Size.mebibytes(props.storage?.deployment?.ephemeralStorageMiB ?? 1024),
       };
-
-      // Deploy no-cache paths (e.g. config.json) — always revalidate.
-      if (noCachePaths && noCachePaths.length > 0) {
-        assetDeployments.push(
-          new BucketDeployment(this, 'AssetDeploymentNoCache', {
-            sources: [staticSource],
-            destinationBucket: this.bucket,
-            destinationKeyPrefix: `builds/${buildId}/`,
-            exclude: ['*'],
-            include: noCachePaths,
-            cacheControl: [CacheControl.fromString(htmlCacheControl)],
-            prune: false,
-            ...deploymentSizing,
-          }),
-        );
-      }
 
       if (immutablePaths && immutablePaths.length > 0) {
         assetDeployments.push(
@@ -2503,6 +2519,27 @@ export class HostingConstruct extends Construct {
           }),
         );
       }
+      // Deploy no-cache paths (e.g. config.json) — never stored, always revalidate.
+      // The HTML pass includes every `*.html`, so a `noCachePaths` entry that is
+      // itself HTML would get the HTML tier if that pass ran after this one. This
+      // pass is created last and depends on the others so its `no-store` wins.
+      // (Created last so it does not own the shared CLI layer, which the
+      // earlier deployments use; depending on it would form a cycle.)
+      if (noCachePaths && noCachePaths.length > 0) {
+        const noCacheDeployment = new BucketDeployment(this, 'AssetDeploymentNoCache', {
+          sources: [staticSource],
+          destinationBucket: this.bucket,
+          destinationKeyPrefix: `builds/${buildId}/`,
+          exclude: ['*'],
+          include: noCachePaths,
+          cacheControl: [CacheControl.fromString(noStoreCacheControl)],
+          prune: false,
+          ...deploymentSizing,
+        });
+        for (const dep of assetDeployments) noCacheDeployment.node.addDependency(dep);
+        assetDeployments.push(noCacheDeployment);
+      }
+
       buildAssetDeployments.push(...assetDeployments);
 
       // ---- 12b. Font Content-Type pass ----
