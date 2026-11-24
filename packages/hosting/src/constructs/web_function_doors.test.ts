@@ -151,6 +151,16 @@ describe('HostingConstruct — middleware runs only behind the CloudFront door',
     });
   }
 
+  it('names the external middleware build and how to bundle it into the server function', () => {
+    assert.throws(
+      () => synth({ kind: 'alb' }),
+      (e: Error & { resolution?: string }) =>
+        e.name === 'MiddlewareNeedsCloudFrontDoorError' &&
+        /middleware: \{ external: true \}/.test(e.message) &&
+        /remove `middleware: \{ external: true \}`/.test(e.resolution ?? ''),
+    );
+  });
+
   it('CloudFront: builds (the middleware runs at the edge)', () => {
     assert.doesNotThrow(() => synth(undefined));
   });

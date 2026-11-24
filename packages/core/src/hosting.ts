@@ -258,6 +258,10 @@ export interface HostingProps {
    * `nuxt`, `nitropack`, `@solidjs/start`, `@analogjs/platform-server` or
    * `@tanstack/start` → `'nitro'`; `astro` → `'astro'`; `@sveltejs/kit` →
    * `'sveltekit'`; otherwise `'spa'`.
+   *
+   * A `'nitro'` app (Nuxt included) also needs `buildOutputDir: '.output'`:
+   * without it, the build output is looked for in `dist/` and synth fails with
+   * `Build output directory not found`.
    */
   framework?: FrameworkType;
 
