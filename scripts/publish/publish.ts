@@ -15,7 +15,10 @@ import { generateRegistryMetadata, parseExistingMetadata } from "./registry.ts";
 const SCOPE = "@aws-cdk-blocks/";
 // The umbrella publishes unscoped, so a scope test alone would skip it.
 const UMBRELLA_PKG = "aws-cdk-blocks";
-const isReleasedPackage = (name: string): boolean => name.startsWith(SCOPE) || name === UMBRELLA_PKG;
+// `create-blocks-app` is the unscoped name of @aws-cdk-blocks/create-blocks-app (`npm create blocks-app`).
+const CREATE_APP_PKG = "create-blocks-app";
+const isReleasedPackage = (name: string): boolean =>
+	name.startsWith(SCOPE) || name === UMBRELLA_PKG || name === CREATE_APP_PKG;
 const REGISTRY_PREFIX = "registry/";
 const ROOT = resolve(import.meta.dirname, "../..");
 const PACKAGES_DIR = join(ROOT, "packages");

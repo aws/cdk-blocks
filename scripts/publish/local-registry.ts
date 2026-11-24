@@ -15,6 +15,8 @@ const REGISTRY_PATH_PREFIX = "/registry/";
 
 const SCOPE = "@aws-cdk-blocks/";
 const UMBRELLA_PKG = "aws-cdk-blocks";
+// `create-blocks-app` is the unscoped name of @aws-cdk-blocks/create-blocks-app (`npm create blocks-app`).
+const CREATE_APP_PKG = "create-blocks-app";
 
 /** Absolute path of the local file-based registry for the repo at `root`. */
 export function localRegistryDir(root: string): string {
@@ -117,7 +119,10 @@ export function upstreamRegistryUrl(rawUrl: string): string | undefined {
 		throw err;
 	}
 
-	if (name.startsWith(SCOPE) || name === UMBRELLA_PKG || name.startsWith(`${UMBRELLA_PKG}/`)) {
+	if (
+		name.startsWith(SCOPE) ||
+		[UMBRELLA_PKG, CREATE_APP_PKG].some((local) => name === local || name.startsWith(`${local}/`))
+	) {
 		return undefined;
 	}
 

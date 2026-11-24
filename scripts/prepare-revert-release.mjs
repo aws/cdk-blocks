@@ -17,7 +17,9 @@ const ROOT = resolve(import.meta.dirname, "..");
 const SCOPE = "@aws-cdk-blocks/";
 // The umbrella publishes unscoped, so a scope test alone would leave it out of the revert.
 const UMBRELLA_PKG = "aws-cdk-blocks";
-const isReleasedPackage = (name) => name.startsWith(SCOPE) || name === UMBRELLA_PKG;
+// `create-blocks-app` is the unscoped name of @aws-cdk-blocks/create-blocks-app (`npm create blocks-app`).
+const CREATE_APP_PKG = "create-blocks-app";
+const isReleasedPackage = (name) => name.startsWith(SCOPE) || name === UMBRELLA_PKG || name === CREATE_APP_PKG;
 const KEEP = new Set(["package.json", "CHANGELOG.md"]); // reverting these would undo the version bump
 const FORCE = process.env.FORCE === "true";
 const REASON = (process.env.REASON ?? "").trim();

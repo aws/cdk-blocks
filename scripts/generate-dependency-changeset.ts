@@ -35,6 +35,8 @@ import { join, resolve } from "node:path";
 const ROOT = resolve(import.meta.dirname, "..");
 const CHANGESET_DIR = join(ROOT, ".changeset");
 const UMBRELLA = "aws-cdk-blocks";
+// `create-blocks-app` is the unscoped name of @aws-cdk-blocks/create-blocks-app (`npm create blocks-app`).
+const CREATE_APP_PKG = "create-blocks-app";
 const baseRef = process.argv[2] ?? "origin/main";
 const trigger = process.argv[3] ?? "automated";
 
@@ -43,7 +45,7 @@ const pkgName = (dir: string): string | null => {
 		const p = JSON.parse(readFileSync(join(ROOT, "packages", dir, "package.json"), "utf-8"));
 		if (p.private || typeof p.name !== "string") return null;
 		// The umbrella publishes unscoped, so a scope test alone would never see it change.
-		return p.name.startsWith("@aws-cdk-blocks/") || p.name === UMBRELLA ? p.name : null;
+		return p.name.startsWith("@aws-cdk-blocks/") || p.name === UMBRELLA || p.name === CREATE_APP_PKG ? p.name : null;
 	} catch {
 		return null; // deleted or unreadable
 	}
@@ -58,7 +60,7 @@ const coveredPackages = (): Set<string> => {
 		for (const line of frontmatter.split("\n")) {
 			// The umbrella publishes unscoped, so it has to be matched by name. Anchored at the
 			// line start so a key like `my-aws-cdk-blocks` is not read as the umbrella.
-			const pkg = line.match(/^\s*['"]?(@aws-cdk-blocks\/[^'":\s]+|aws-cdk-blocks)['"]?\s*:/)?.[1];
+			const pkg = line.match(/^\s*['"]?(@aws-cdk-blocks\/[^'":\s]+|aws-cdk-blocks|create-blocks-app)['"]?\s*:/)?.[1];
 			if (pkg) covered.add(pkg);
 		}
 	}
