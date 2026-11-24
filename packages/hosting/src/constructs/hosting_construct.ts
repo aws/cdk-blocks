@@ -76,6 +76,7 @@ import {
 import {
   assertCacheGuardIgnoredCookies,
   isDefaultTtlPositive,
+  SSR_CACHE_GUARD_ROUTER_HEADERS,
   type SsrCacheGuardConfig,
   withSsrCacheGuard,
   withSsrCacheGuardNodeOption,
@@ -101,6 +102,7 @@ import { s3WebsiteDoor } from './s3_website_door.js';
 import type { AccessLogFormat, AccessLogPartitioning } from './access_logging.js';
 import { ComputeConstruct } from './compute_construct.js';
 import { DnsConstruct } from './dns_construct.js';
+import { CdnInvalidationConstruct } from './cdn_invalidation.js';
 import { MonitoringConstruct } from './monitoring_construct.js';
 import { UsEast1MonitoringStack } from './us_east_1_monitoring_stack.js';
 import { DEFAULT_NODE_RUNTIME } from './node_runtime.js';
@@ -928,13 +930,33 @@ export class HostingConstruct extends Construct {
     // names the selected door's server-route cache policy keys on, and
     // whether a response with no Cache-Control is edge-cached. The
     // CloudFront-over-ALB door's server-route policy keys on every cookie.
+    // CloudFront ignores `Vary`, so the guard also needs the request headers
+    // that policy keys on: the CloudFront door's SSR policy keys on the
+    // Next.js router headers and `cacheKeyHeaders`; the CloudFront-over-ALB
+    // door's keys on no header but on the whole query string, which holds
+    // Next.js's `_rsc` (derived from the router headers, `Next-Url` included).
+    // `Vary: Cookie` is left to the cookie rule on both. The other doors put
+    // no CloudFront cache in front of the server.
     assertCacheGuardIgnoredCookies(f.cacheKeyCookies, f.cacheGuardIgnoredCookies);
+    const varyKeyedHeaders = stackedRouter
+      ? [...SSR_CACHE_GUARD_ROUTER_HEADERS, 'next-url']
+      : resolved.kind === 'cloudfront'
+        ? [...SSR_CACHE_GUARD_ROUTER_HEADERS, ...(f.cacheKeyHeaders ?? [])]
+        : undefined;
     const ssrCacheGuardConfig: SsrCacheGuardConfig = {
       cacheKeyCookies: f.cacheKeyCookies,
       ignoredCookies: f.cacheGuardIgnoredCookies,
       cacheKeyHeaders: f.cacheKeyHeaders,
       defaultTtlPositive: isDefaultTtlPositive(f.ssrDefaultTtl),
       allCookiesKeyed: stackedRouter,
+      varyKeyedHeaders,
+      ...(resolved.kind === 'cloudfront' && !stackedRouter
+        ? {
+            varyHint:
+              'To cache one copy per value, add the header to frontDoor.features.cacheKeyHeaders; ' +
+              'otherwise send `Cache-Control: private` for that response.',
+          }
+        : {}),
     };
     // The computes the manifest routes requests to, other than the image
     // function: they render server responses (e.g. a Next.js split function
@@ -1721,6 +1743,25 @@ export class HostingConstruct extends Construct {
       this._distribution = cdn.distribution;
       this.distributionUrl = cdn.distributionUrl;
 
+      // ---- 9d. On-demand revalidation → CloudFront invalidation ----
+      // ISR pages reach the edge with `s-maxage=<remaining revalidate>`, so a
+      // `revalidateTag` / `revalidatePath` is only visible there once the
+      // server invalidates the distribution. The adapter sets
+      // `cache.cdnInvalidation` when the server bundle carries the handler.
+      if (manifest.cache?.cdnInvalidation && manifest.cache.driver !== 'nitro-s3') {
+        const server =
+          this.computeFunctions.get(manifest.cache.computeResource) ??
+          this.computeWebFunctions.get(manifest.cache.computeResource);
+        // A Lambda@Edge server has no environment to carry the parameter name.
+        if (server instanceof LambdaFunction || server instanceof WebFunctionConstruct) {
+          new CdnInvalidationConstruct(this, 'CdnInvalidation', {
+            distribution: cdn.distribution,
+            server,
+            basePath: manifest.basePath,
+          });
+        }
+      }
+
       // Output the CloudFront distribution domain when custom domain is configured.
       // BYO domain users need this to set up their external DNS CNAME.
       if (resolvedDomainNames.length > 0) {
@@ -2355,8 +2396,19 @@ export class HostingConstruct extends Construct {
     // Cache-Control split (3 tiers):
     //
     //   1. Hashed assets (`immutablePaths`): `max-age=31536000, immutable`
-    //   2. HTML files: `no-cache, no-store, must-revalidate` — browsers
-    //      must always revalidate so new deploys propagate immediately.
+    //   2. HTML files: `max-age=0, must-revalidate` — browsers and
+    //      CloudFront must revalidate on every request, so a new deploy's
+    //      HTML is served on the first request after it. No `no-store`: with
+    //      the SSR cache policy's minimum TTL of 0, CloudFront honors
+    //      `no-store`/`no-cache` by never keeping the object, so it could not
+    //      answer a viewer's `If-None-Match` with 304 and every repeat visit
+    //      downloaded the full page. `max-age=0` lets the edge keep a copy and
+    //      revalidate it against S3 each time. This cannot serve a previous
+    //      build's HTML: the router rewrites every HTML request to the CURRENT
+    //      build's `builds/<id>/` key before the cache lookup (HTML ignores the
+    //      skew cookie), so a deploy changes the cache key, and these objects
+    //      are prerendered, public files (never per-user responses).
+    //      `noCachePaths` keep `no-cache, no-store, must-revalidate`.
     //   3. Other mutable assets (images, JSON, etc.):
     //      `s-maxage=31536000, max-age=0, must-revalidate` — CloudFront
     //      edge caches for 1y. Each deploy writes them under a fresh
@@ -2383,7 +2435,8 @@ export class HostingConstruct extends Construct {
       const noCachePaths = manifest.staticAssets.noCachePaths;
       const mutableCacheControl =
         manifest.staticAssets.cacheControl ?? 'public, s-maxage=31536000, max-age=0, must-revalidate';
-      const htmlCacheControl = 'no-cache, no-store, must-revalidate';
+      const htmlCacheControl = 'max-age=0, must-revalidate';
+      const noStoreCacheControl = 'no-cache, no-store, must-revalidate';
       const htmlGlobs = ['*.html', '**/*.html'];
       const staticSource = Source.asset(manifest.staticAssets.directory);
       // Track the asset deployments so the per-extension font Content-
@@ -2404,22 +2457,6 @@ export class HostingConstruct extends Construct {
         memoryLimit: props.storage?.deployment?.memoryLimit ?? 1024,
         ephemeralStorageSize: Size.mebibytes(props.storage?.deployment?.ephemeralStorageMiB ?? 1024),
       };
-
-      // Deploy no-cache paths (e.g. config.json) — always revalidate.
-      if (noCachePaths && noCachePaths.length > 0) {
-        assetDeployments.push(
-          new BucketDeployment(this, 'AssetDeploymentNoCache', {
-            sources: [staticSource],
-            destinationBucket: this.bucket,
-            destinationKeyPrefix: `builds/${buildId}/`,
-            exclude: ['*'],
-            include: noCachePaths,
-            cacheControl: [CacheControl.fromString(htmlCacheControl)],
-            prune: false,
-            ...deploymentSizing,
-          }),
-        );
-      }
 
       if (immutablePaths && immutablePaths.length > 0) {
         assetDeployments.push(
@@ -2482,6 +2519,27 @@ export class HostingConstruct extends Construct {
           }),
         );
       }
+      // Deploy no-cache paths (e.g. config.json) — never stored, always revalidate.
+      // The HTML pass includes every `*.html`, so a `noCachePaths` entry that is
+      // itself HTML would get the HTML tier if that pass ran after this one. This
+      // pass is created last and depends on the others so its `no-store` wins.
+      // (Created last so it does not own the shared CLI layer, which the
+      // earlier deployments use; depending on it would form a cycle.)
+      if (noCachePaths && noCachePaths.length > 0) {
+        const noCacheDeployment = new BucketDeployment(this, 'AssetDeploymentNoCache', {
+          sources: [staticSource],
+          destinationBucket: this.bucket,
+          destinationKeyPrefix: `builds/${buildId}/`,
+          exclude: ['*'],
+          include: noCachePaths,
+          cacheControl: [CacheControl.fromString(noStoreCacheControl)],
+          prune: false,
+          ...deploymentSizing,
+        });
+        for (const dep of assetDeployments) noCacheDeployment.node.addDependency(dep);
+        assetDeployments.push(noCacheDeployment);
+      }
+
       buildAssetDeployments.push(...assetDeployments);
 
       // ---- 12b. Font Content-Type pass ----
@@ -2882,6 +2940,13 @@ const resolveHostingFrontDoor = (props: HostingConstructProps): ResolvedHostingF
  *   given `Host` as `x-forwarded-host` instead (see `withDoorEventShim`), so a
  *   server that builds redirects or absolute URLs from it never uses a host
  *   the client chose.
+ * - `edgeCache`: a shared cache in front of the server stores responses the
+ *   app marks shared-cacheable (`s-maxage`, `stale-while-revalidate`). Behind
+ *   a door without one, those routes reach the server on every request; synth
+ *   warns (`@aws-cdk-blocks/hosting:NoEdgeCache`) when the app's header rules
+ *   ask for it. The warning covers only doors that run a server (ALB and API
+ *   Gateway); the S3 website door (`'none'`) has no edge cache either, but
+ *   serves static files only, so it doesn't warn.
  *
  * A bring-your-own door declares only `streaming`, through `serverResponse`
  * (default `'streaming'`); the rest are its own to wire (and `cf.recordWired`
@@ -2894,6 +2959,7 @@ export type DoorCapabilities = {
   readonly wildcardRoutes?: boolean;
   readonly appliesRules?: boolean;
   readonly forwardedHost?: boolean;
+  readonly edgeCache?: boolean;
 };
 
 /**
@@ -2902,23 +2968,43 @@ export type DoorCapabilities = {
  * @internal Framework-only.
  */
 export const doorCapabilitiesFor = (frontDoor: HostingConstructProps['frontDoor']): DoorCapabilities => {
-  if (frontDoor === 'none') return { streaming: false, wildcardRoutes: false, appliesRules: false, forwardedHost: false };
+  if (frontDoor === 'none') {
+    return { streaming: false, wildcardRoutes: false, appliesRules: false, forwardedHost: false, edgeCache: false };
+  }
   if (typeof frontDoor !== 'object' || frontDoor === null) {
-    return { streaming: true, wildcardRoutes: true, appliesRules: true, forwardedHost: true };
+    return { streaming: true, wildcardRoutes: true, appliesRules: true, forwardedHost: true, edgeCache: true };
   }
   switch (frontDoor.kind) {
     case 'alb':
-      return { streaming: albDoor.serverResponse === 'streaming', wildcardRoutes: true, appliesRules: false, forwardedHost: false };
+      return {
+        streaming: albDoor.serverResponse === 'streaming',
+        wildcardRoutes: true,
+        appliesRules: false,
+        forwardedHost: false,
+        edgeCache: false,
+      };
     case 'stackedRouter':
       // The edge in front applies the rules and sets the forwarded host; the ALB under it invokes the server.
-      return { streaming: albDoor.serverResponse === 'streaming', wildcardRoutes: true, appliesRules: true, forwardedHost: true };
+      return {
+        streaming: albDoor.serverResponse === 'streaming',
+        wildcardRoutes: true,
+        appliesRules: true,
+        forwardedHost: true,
+        edgeCache: true,
+      };
     case 'apiGateway':
-      return { streaming: (frontDoor.api ?? 'http') === 'rest', wildcardRoutes: false, appliesRules: false, forwardedHost: false };
+      return {
+        streaming: (frontDoor.api ?? 'http') === 'rest',
+        wildcardRoutes: false,
+        appliesRules: false,
+        forwardedHost: false,
+        edgeCache: false,
+      };
     case 'custom':
       // `door` is validated (with a clear error) by the time the door is built.
       return { streaming: (frontDoor.door?.serverResponse ?? 'streaming') === 'streaming' };
     default:
-      return { streaming: true, wildcardRoutes: true, appliesRules: true, forwardedHost: true };
+      return { streaming: true, wildcardRoutes: true, appliesRules: true, forwardedHost: true, edgeCache: true };
   }
 };
 
