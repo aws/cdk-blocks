@@ -401,7 +401,9 @@ export class Scope extends Construct {
 	 * path on the same backend root already resolves to the same `fullId`: ids are
 	 * joined with `-`, so `'user-service' > 'sessions'` and `'user' >
 	 * 'service-sessions'` collide and would get resources with one physical name.
-	 * A future release will make this a synth error.
+	 * A future release will make this a synth error. Synth already fails once
+	 * two resources under the colliding paths take the same name (two tables,
+	 * queues, buckets, secrets or parameters), because that deploy would fail.
 	 *
 	 * The id is also part of the physical name of each resource created under
 	 * this scope (`fullId` joins the ids and does not escape them), and each

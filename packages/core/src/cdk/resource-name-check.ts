@@ -25,6 +25,13 @@
  * appear, stay with the block that builds the name (`FileBucket` validates its
  * bucket name, `Auth` the length of its user pool name).
  *
+ * The same validation fails synth when two resources of a type in
+ * {@link UNIQUE_NAME_RULES} have one literal physical name, which happens
+ * when two scope paths join to one `fullId`. Synth warns about that collision
+ * (`blocks:scope:fullIdCollision`) as soon as the second scope is constructed;
+ * a deploy fails only once two resources take the same name, so that is when
+ * synth rejects it.
+ *
  * @module
  * @internal
  */
@@ -105,6 +112,45 @@ const NAME_RULES: Readonly<Record<string, NameRule>> = {
 	'AWS::Bedrock::DataSource': { property: 'Name', what: 'Bedrock data source', ...BEDROCK_NAME },
 };
 
+/** How one CloudFormation resource type keeps its physical names unique. */
+interface UniqueNameRule {
+	/** The CloudFormation property that holds the physical name. */
+	readonly property: string;
+	/** The resource, as the error calls it. Types that share one set of names share this. */
+	readonly what: string;
+	/** A property that splits the names into separate sets, and its value when absent (a schedule's group). */
+	readonly within?: { readonly property: string; readonly absent: string };
+}
+
+const UNIQUE_TABLE_NAME: UniqueNameRule = { property: 'TableName', what: 'DynamoDB table' };
+
+/**
+ * The resource types whose physical name must be unique in an account and
+ * Region (an S3 bucket: in its partition), so that a second resource of the
+ * type with a name already in the stack fails the deploy: CloudFormation
+ * reports that the resource already exists in the stack and rolls back.
+ *
+ * Two blocks reach this when their scope paths join to the same `fullId`
+ * (`'a-b' > 'x'` and `'a' > 'b' > 'x'`), or when one name option is given to
+ * two blocks. Types whose service accepts the same name twice, such as a
+ * Cognito user pool, are absent.
+ */
+const UNIQUE_NAME_RULES: Readonly<Record<string, UniqueNameRule>> = {
+	'AWS::DynamoDB::Table': UNIQUE_TABLE_NAME,
+	'AWS::DynamoDB::GlobalTable': UNIQUE_TABLE_NAME,
+	'AWS::SQS::Queue': { property: 'QueueName', what: 'SQS queue' },
+	'AWS::Scheduler::Schedule': {
+		property: 'Name',
+		what: 'EventBridge Scheduler schedule',
+		within: { property: 'GroupName', absent: 'default' },
+	},
+	'AWS::SecretsManager::Secret': { property: 'Name', what: 'Secrets Manager secret' },
+	'AWS::S3::Bucket': { property: 'BucketName', what: 'S3 bucket' },
+	'AWS::SSM::Parameter': { property: 'Name', what: 'Systems Manager parameter' },
+	'AWS::Logs::LogGroup': { property: 'LogGroupName', what: 'CloudWatch Logs log group' },
+	'AWS::Lambda::Function': { property: 'FunctionName', what: 'Lambda function' },
+};
+
 /**
  * A `CfnResource` as this check reads it. `_toCloudFormation()` renders the
  * resource as it reaches the template, raw overrides included; `aws-cdk-lib`
@@ -124,15 +170,18 @@ function isRenderable(resource: cdk.CfnResource): resource is RenderableResource
  * when the template holds no literal string there.
  */
 function renderedName(resource: cdk.CfnResource, property: string): string | undefined {
+	const name = field(renderedProperties(resource), property);
+	return typeof name === 'string' ? name : undefined;
+}
+
+/** The `Properties` of `resource` in the rendered template, after its raw overrides. */
+function renderedProperties(resource: cdk.CfnResource): unknown {
 	if (!isRenderable(resource)) return undefined;
 	const rendered: unknown = cdk.Stack.of(resource).resolve(resource._toCloudFormation());
 	const resources = field(rendered, 'Resources');
 	if (typeof resources !== 'object' || resources === null) return undefined;
 	// The rendering holds this resource only, under its logical id.
-	for (const entry of Object.values(resources)) {
-		const name = field(field(entry, 'Properties'), property);
-		return typeof name === 'string' ? name : undefined;
-	}
+	for (const entry of Object.values(resources)) return field(entry, 'Properties');
 	return undefined;
 }
 
@@ -244,16 +293,58 @@ function resourceNameErrors(root: Construct): string[] {
 }
 
 /**
+ * The errors for the resources under `root` that share a physical name with
+ * another resource whose service requires the name to be unique: one per name,
+ * listing the construct paths that claim it.
+ */
+function duplicateNameErrors(root: Construct): string[] {
+	const claimants = new Map<string, { rule: UniqueNameRule; name: string; paths: string[] }>();
+	for (const node of root.node.findAll()) {
+		if (!cdk.CfnResource.isCfnResource(node) || !Object.hasOwn(UNIQUE_NAME_RULES, node.cfnResourceType)) continue;
+		const rule = UNIQUE_NAME_RULES[node.cfnResourceType];
+		const properties = renderedProperties(node);
+		const name = field(properties, rule.property);
+		// A name CloudFormation generates, or that resolves at deploy, is not compared.
+		if (typeof name !== 'string') continue;
+		const within = rule.within ? (field(properties, rule.within.property) ?? rule.within.absent) : '';
+		if (typeof within !== 'string') continue;
+		// Names are unique per account and Region: two stacks of one backend in different Regions may reuse one.
+		const stack = cdk.Stack.of(node);
+		const key = JSON.stringify([rule.what, stack.account, stack.region, within, name]);
+		const entry = claimants.get(key) ?? { rule, name, paths: [] };
+		claimants.set(key, entry);
+		entry.paths.push(node.node.path);
+	}
+	const errors: string[] = [];
+	for (const { rule, name, paths } of claimants.values()) {
+		if (paths.length < 2) continue;
+		errors.push(
+			[
+				`The ${rule.what} name '${name}' is used by ${paths.length} resources, and the deploy would fail ` +
+					'when the second is created because the name already exists:',
+				...paths.map((path) => `  - ${path}`),
+				"A Building Block names its resources from its fullId, the scope ids joined with '-', so scope paths " +
+					"such as 'a-b' > 'x' and 'a' > 'b' > 'x' get the same names (the blocks:scope:fullIdCollision " +
+					'warning names them). Rename one of the scopes so their joined ids differ, or give the blocks ' +
+					'different names.',
+			].join('\n'),
+		);
+	}
+	return errors;
+}
+
+/**
  * Register, once per backend root, the validation that fails `cdk synth` when
- * a resource under a `Scope` has a physical name its service will reject.
- * Called by the CDK `Scope` constructor.
+ * a resource under a `Scope` has a physical name its service will reject, or
+ * when two resources have a physical name that their service requires to be
+ * unique. Called by the CDK `Scope` constructor.
  *
  * @param scope - The scope being constructed.
  * @internal
  */
 export function ensureResourceNameCheck(scope: Construct): void {
 	getOrCreateOnRoot(scope, RESOURCE_NAME_CHECK, (root) => {
-		root.node.addValidation({ validate: () => resourceNameErrors(root) });
+		root.node.addValidation({ validate: () => [...resourceNameErrors(root), ...duplicateNameErrors(root)] });
 		return true;
 	});
 }
