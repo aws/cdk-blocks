@@ -16,7 +16,7 @@ import type {
 } from './types.js';
 import { AsyncJobErrors } from './errors.js';
 import { JobStatusTracker, statusNotTrackedError } from './status.js';
-import { validateDelaySeconds } from './validation.js';
+import { serializePayload, validateDelaySeconds } from './validation.js';
 import { Logger } from '@aws-cdk-blocks/bb-logger';
 import type { ChildLogger } from '@aws-cdk-blocks/bb-logger';
 import { BB_NAME, BB_VERSION } from './version.js';
@@ -196,7 +196,9 @@ export class AsyncJob<T = unknown> extends Scope {
 	 * @param options - Optional. `delaySeconds` defers processing (an integer from 0 to 900 seconds).
 	 * @returns `{ jobId }` — unique identifier for tracking.
 	 * @throws {AsyncJobErrors.PayloadTooLarge} If serialized payload exceeds 256 KB.
-	 * @throws {AsyncJobErrors.ValidationFailed} If schema validation fails, or `delaySeconds` is not an integer from 0 to 900.
+	 * @throws {AsyncJobErrors.ValidationFailed} If schema validation fails, `delaySeconds` is not an integer from 0 to 900,
+	 *   or the payload cannot be encoded as JSON (`undefined`, a function, a symbol, a bigint anywhere in it, or a
+	 *   circular reference).
 	 */
 	async submit(payload: T, options?: SubmitOptions): Promise<{ jobId: string }> {
 		validateDelaySeconds(options?.delaySeconds);
@@ -248,7 +250,7 @@ export class AsyncJob<T = unknown> extends Scope {
 	 * @throws {AsyncJobErrors.BatchEmpty} If payloads array is empty.
 	 * @throws {AsyncJobErrors.BatchTooLarge} If more than {@link MAX_BATCH_PAYLOADS} payloads.
 	 * @throws {AsyncJobErrors.PayloadTooLarge} If any payload exceeds 256 KB.
-	 * @throws {AsyncJobErrors.ValidationFailed} If any payload fails schema validation, or `delaySeconds` is not an integer from 0 to 900. Nothing is enqueued.
+	 * @throws {AsyncJobErrors.ValidationFailed} If any payload fails schema validation or cannot be encoded as JSON, or `delaySeconds` is not an integer from 0 to 900. Nothing is enqueued.
 	 * @throws {AsyncJobErrors.BatchSubmitFailed} If one or more messages fail to send (AWS only). A multi-chunk submit is not atomic; the error's `failed` and `jobIds` properties carry the partial results across all chunks.
 	 */
 	async submitBatch(payloads: T[], options?: SubmitOptions): Promise<BatchSubmitResult> {
@@ -288,7 +290,9 @@ export class AsyncJob<T = unknown> extends Scope {
 		}
 
 		// Payload size validation
-		const serialized = JSON.stringify(payload);
+		// serializePayload throws ValidationFailed for a value JSON cannot encode
+		// (shared with the AWS runtime).
+		const serialized = serializePayload(payload);
 		const bytes = Buffer.byteLength(serialized, 'utf8');
 		if (bytes > MAX_PAYLOAD_BYTES) {
 			const kb = Math.ceil(bytes / 1024);

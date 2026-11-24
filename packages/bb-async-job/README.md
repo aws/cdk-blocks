@@ -72,7 +72,7 @@ try {
 | Constant | `error.name` | Thrown when |
 |----------|--------------|-------------|
 | `AsyncJobErrors.PayloadTooLarge` | `PayloadTooLargeException` | `submit()` or `submitBatch()`: a serialized payload exceeds 256 KB. |
-| `AsyncJobErrors.ValidationFailed` | `ValidationFailedException` | `submit()` or `submitBatch()`: a payload fails `schema`, or `delaySeconds` is not an integer from 0 to 900. Nothing is queued. |
+| `AsyncJobErrors.ValidationFailed` | `ValidationFailedException` | `submit()` or `submitBatch()`: a payload fails `schema` or cannot be encoded as JSON (`undefined`, a function, a symbol, a bigint anywhere in it, or a circular reference), or `delaySeconds` is not an integer from 0 to 900. Nothing is queued. |
 | `AsyncJobErrors.BatchEmpty` | `BatchEmptyException` | `submitBatch([])`. |
 | `AsyncJobErrors.BatchTooLarge` | `BatchTooLargeException` | `submitBatch()` with more than 10,000 payloads. |
 | `AsyncJobErrors.BatchSubmitFailed` | `BatchSubmitFailedException` | `submitBatch()` on AWS: one or more messages failed to enqueue. See [submitBatch()](#submitbatch). |
