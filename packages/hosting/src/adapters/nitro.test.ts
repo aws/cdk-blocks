@@ -751,27 +751,68 @@ void describe('nitroAdapter — preset + feature validation', () => {
     );
   });
 
-  void it('warns that an `isr` route rule is not applied, naming the route and `swr`', () => {
+  void it('warns that an `isr` route rule does not cache, naming the route and `swr`', () => {
     writeMinimalNitroOutput(tmpDir, {
       nitroJson: { preset: 'aws-lambda' },
-      bundledRouteRules: { '/isr': { isr: 60 }, '/swr': { swr: 30, cache: { swr: true, maxAge: 30 } } },
+      bundledRouteRules: { '/pricing': { isr: 60 }, '/swr': { swr: 30, cache: { swr: true, maxAge: 30 } } },
     });
     writePackageJson(tmpDir);
     assert.doesNotThrow(() => nitroAdapter({ projectDir: tmpDir, skipBuild: true }));
     const out = stderrChunks.join('');
-    assert.match(out, /`isr` route rule .*\/isr/, 'must name the route whose isr rule is ignored');
+    assert.match(out, /`isr` route rule does not cache on AWS.*: \/pricing\./, 'must name the route whose isr rule is ignored');
     assert.match(out, /swr/, 'must point at swr, which this preset honors');
-    assert.ok(!/`isr` route rule .*\/swr/.test(out), 'a swr route must not be named');
+    assert.ok(!/`isr` route rule does not cache on AWS.*\/swr/.test(out), 'a swr route must not be named');
   });
 
   void it('does not warn about `isr` for a route that also has a cache rule, or for isr: false', () => {
     writeMinimalNitroOutput(tmpDir, {
       nitroJson: { preset: 'aws-lambda' },
-      bundledRouteRules: { '/a': { isr: 60, swr: 60, cache: { swr: true, maxAge: 60 } }, '/b': { isr: false } },
+      bundledRouteRules: {
+        '/a': { isr: 60, swr: 60 },
+        '/b': { isr: false },
+        '/c': { isr: 60, cache: { maxAge: 60 } },
+      },
     });
     writePackageJson(tmpDir);
     nitroAdapter({ projectDir: tmpDir, skipBuild: true });
-    assert.ok(!stderrChunks.join('').includes('`isr` route rule'), 'no isr warning expected');
+    assert.ok(!stderrChunks.join('').includes('`isr` route rule does not cache'), 'no isr warning expected');
+  });
+
+  void it('does not warn about `isr` on a prerendered rule, a Nuxt payload mirror, or a route under a broader cache rule', () => {
+    writeMinimalNitroOutput(tmpDir, {
+      nitroJson: { preset: 'aws-lambda' },
+      bundledRouteRules: {
+        '/featured': { isr: 60, prerender: true },
+        '/pricing': { isr: 60 },
+        '/pricing/_payload.json': { isr: 60 },
+        '/**': { swr: 60 },
+        '/blog/**': { isr: 300 },
+        '/docs': { isr: 300 },
+      },
+    });
+    writePackageJson(tmpDir);
+    nitroAdapter({ projectDir: tmpDir, skipBuild: true });
+    const out = stderrChunks.join('');
+    assert.ok(!out.includes('`isr` route rule does not cache'), `no isr warning expected under '/**' swr, got: ${out}`);
+  });
+
+  void it('names only the isr routes no prerender, payload parent or broader cache rule covers', () => {
+    writeMinimalNitroOutput(tmpDir, {
+      nitroJson: { preset: 'aws-lambda' },
+      bundledRouteRules: {
+        '/featured': { isr: 60, prerender: true },
+        '/pricing': { isr: 60 },
+        '/pricing/_payload.json': { isr: 60 },
+        '/api/**': { swr: 60 },
+        '/api/report': { isr: 60 },
+        '/blog/**': { isr: 300 },
+      },
+    });
+    writePackageJson(tmpDir);
+    nitroAdapter({ projectDir: tmpDir, skipBuild: true });
+    const line = stderrChunks.join('').split('\n').find((l) => l.includes('`isr` route rule does not cache')) ?? '';
+    const named = line.slice(line.indexOf(': ') + 2, line.indexOf('. ')).split(', ');
+    assert.deepEqual(named, ['/pricing', '/blog/**']);
   });
 });
 
