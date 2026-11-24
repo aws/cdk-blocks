@@ -814,6 +814,30 @@ void describe('nitroAdapter — preset + feature validation', () => {
     const named = line.slice(line.indexOf(': ') + 2, line.indexOf('. ')).split(', ');
     assert.deepEqual(named, ['/pricing', '/blog/**']);
   });
+
+  void it('matches broader rules by Nitro pattern segments: `*` and `:name` are one segment, `**` any rest, `.` is literal', () => {
+    writeMinimalNitroOutput(tmpDir, {
+      nitroJson: { preset: 'aws-lambda' },
+      bundledRouteRules: {
+        '/products/*': { swr: 60 },
+        '/products/shoe': { isr: 60 },
+        '/products/shoe/red': { isr: 60 },
+        '/shop/:id': { swr: 60 },
+        '/shop/hat/': { isr: 60 },
+        '/docs/**': { swr: 60 },
+        '/docs': { isr: 60 },
+        '/docs/guide/intro': { isr: 60 },
+        '/a.b': { swr: 60 },
+        '/a.b/': { isr: 60 },
+        '/aXb': { isr: 60 },
+      },
+    });
+    writePackageJson(tmpDir);
+    nitroAdapter({ projectDir: tmpDir, skipBuild: true });
+    const line = stderrChunks.join('').split('\n').find((l) => l.includes('`isr` route rule does not cache')) ?? '';
+    const named = line.slice(line.indexOf(': ') + 2, line.indexOf('. ')).split(', ');
+    assert.deepEqual(named, ['/products/shoe/red', '/aXb']);
+  });
 });
 
 void describe('nitroAdapter — output dir resolution from nitro.json', () => {

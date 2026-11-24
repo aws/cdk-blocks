@@ -251,17 +251,25 @@ const warnNitroUnsupportedFeatures = (info: NitroBuildInfo): void => {
  * enough to tell that `/**` covers `/blog/**`.
  */
 const rulePatternCovers = (broader: string, route: string): boolean => {
-  const segments = broader.split('/');
-  const catchAllTail = segments.at(-1) === '**';
-  if (catchAllTail) segments.pop();
-  const source = segments
-    .map((segment) => {
-      if (segment === '**') return '.*';
-      if (segment === '*' || segment.startsWith(':')) return '[^/]+';
-      return segment.replace(/[.+?^${}()|[\]\\*]/g, '\\$&');
-    })
-    .join('/');
-  return new RegExp(`^${source}${catchAllTail ? '(?:/.*)?' : ''}/?$`).test(route);
+  // Compared segment by segment rather than compiled to a RegExp, so no
+  // character of a rule key is ever read as a regex metacharacter.
+  const toSegments = (path: string): string[] => (path.length > 1 ? path.replace(/\/+$/, '') : path).split('/');
+  const pattern = toSegments(broader);
+  const target = toSegments(route);
+  const matchFrom = (p: number, t: number): boolean => {
+    if (p === pattern.length) return t === target.length;
+    const segment = pattern[p];
+    if (segment === '**') {
+      for (let next = t; next <= target.length; next++) {
+        if (matchFrom(p + 1, next)) return true;
+      }
+      return false;
+    }
+    if (t === target.length) return false;
+    if (segment === '*' || segment.startsWith(':')) return target[t] !== '' && matchFrom(p + 1, t + 1);
+    return segment === target[t] && matchFrom(p + 1, t + 1);
+  };
+  return matchFrom(0, 0);
 };
 
 /**
