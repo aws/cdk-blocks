@@ -8,6 +8,7 @@ import 'builder.dart';
 import 'dart_source.dart';
 import 'diagnostics.dart';
 import 'identifiers.dart';
+import 'language_version.dart';
 import 'model.dart';
 
 /// The oldest `blocks_runtime` that has every API generated code calls
@@ -50,7 +51,17 @@ class DartCodeGenerator {
   /// Output is deterministic for a given [model], so it is safe to check in
   /// and diff. It is formatted as `dart format` formats it at
   /// [languageVersion], so running `dart format` on it changes nothing.
+  ///
+  /// Throws an [ArgumentError] when [languageVersion] is older than
+  /// [minimumLanguageVersion], since the client could not compile there.
   String generate(CodegenModel model) {
+    final version = languageVersion;
+    if (version != null) {
+      final problem = unsupportedLanguageVersion(version);
+      if (problem != null) {
+        throw ArgumentError.value(version, 'languageVersion', problem);
+      }
+    }
     _checkNoTransferableParams(model);
     final buf = StringBuffer();
     buf.writeln('// GENERATED CODE — DO NOT MODIFY BY HAND');

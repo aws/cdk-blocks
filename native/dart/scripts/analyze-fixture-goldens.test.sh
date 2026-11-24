@@ -128,6 +128,6 @@ if out="$(bash "$ANALYZE" "$UNFORMATTED" 2>&1)"; then
   fail "Case 11: an unformatted golden should fail the run: $out"
 fi
 case "$out" in *"Changed lib/02-unformatted.dart"*) ;; *) fail "Case 11: the unformatted golden should be named: $out" ;; esac
-case "$out" in *"FAIL: dart format would change"*) ;; *) fail "Case 11: unexpected summary: $out" ;; esac
+case "$out" in *"FAIL: dart_style would change"*) ;; *) fail "Case 11: unexpected summary: $out" ;; esac
 
 echo "PASS: analyze-fixture-goldens.sh"

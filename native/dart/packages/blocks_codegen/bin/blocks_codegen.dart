@@ -7,6 +7,7 @@ import 'package:args/args.dart';
 import 'package:blocks_codegen/src/parser.dart';
 import 'package:blocks_codegen/src/builder.dart';
 import 'package:blocks_codegen/src/generator.dart';
+import 'package:blocks_codegen/src/language_version.dart';
 import 'package:package_config/package_config.dart';
 import 'package:pub_semver/pub_semver.dart';
 
@@ -40,7 +41,8 @@ Future<void> main(List<String> args) async {
           'Dart language version (for example 3.11) to format the output '
           'for. Defaults to the language version of the package the output '
           'is written into (the current directory when writing to stdout), '
-          'or $defaultLanguageVersion when that package cannot be found.',
+          'or ${majorMinor(defaultLanguageVersion)} when that package cannot '
+          'be found.',
     )
     ..addFlag('help', abbr: 'h', negatable: false, help: 'Show usage');
 
@@ -98,7 +100,7 @@ Future<void> main(List<String> args) async {
   final Version? languageVersion;
   final languageVersionArg = results['language-version'] as String?;
   if (languageVersionArg != null) {
-    languageVersion = _parseLanguageVersion(languageVersionArg);
+    languageVersion = parseLanguageVersion(languageVersionArg);
     if (languageVersion == null) {
       stderr.writeln(
         'Error: --language-version must be <major>.<minor>, '
@@ -110,6 +112,15 @@ Future<void> main(List<String> args) async {
     languageVersion = await _packageLanguageVersion(
       File(outputPath ?? 'stdout.dart').absolute,
     );
+  }
+  // A pre-3.0 package can't compile the client, and the formatter can't
+  // parse it there: say so instead of reporting a generator bug.
+  final tooOld = languageVersion == null
+      ? null
+      : unsupportedLanguageVersion(languageVersion);
+  if (tooOld != null) {
+    stderr.writeln('Error: $tooOld');
+    exit(1);
   }
 
   final String output;
@@ -131,6 +142,10 @@ Future<void> main(List<String> args) async {
   } on NamingConflictException catch (e) {
     stderr.writeln('Error: ${e.message}');
     exit(1);
+  } on StateError catch (e) {
+    // A generator bug, such as output that doesn't parse.
+    stderr.writeln('Error: ${e.message}');
+    exit(1);
   }
 
   if (outputPath != null) {
@@ -141,13 +156,6 @@ Future<void> main(List<String> args) async {
   } else {
     stdout.write(output);
   }
-}
-
-/// Parses a `<major>.<minor>` language version, or returns null.
-Version? _parseLanguageVersion(String value) {
-  final match = RegExp(r'^(\d+)\.(\d+)$').firstMatch(value.trim());
-  if (match == null) return null;
-  return Version(int.parse(match[1]!), int.parse(match[2]!), 0);
 }
 
 /// The language version of the package containing [file], read from the
@@ -161,9 +169,9 @@ Future<Version?> _packageLanguageVersion(File file) async {
   }
   try {
     final config = await findPackageConfig(dir);
-    final version = config?.packageOf(file.uri)?.languageVersion;
-    if (version == null) return null;
-    return Version(version.major, version.minor, 0);
+    return formatterLanguageVersion(
+      config?.packageOf(file.uri)?.languageVersion,
+    );
   } on Exception {
     // An unreadable package config only loses the detected version; the
     // output is still formatted, at the default language version.

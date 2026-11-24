@@ -175,13 +175,45 @@ void main() {
       expect(result.stdout, isEmpty);
     });
 
+    test('a --language-version before 3.0 exits 1 naming it', () {
+      final result = _run([
+        '--spec',
+        writeSpec(_spec()),
+        '--language-version',
+        '2.19',
+      ]);
+
+      expect(result.exitCode, 1);
+      expect(
+        result.stderr,
+        contains('Error: language version 2.19 is older than 3.0'),
+      );
+      expect(result.stderr, isNot(contains('Unhandled exception')));
+      expect(result.stdout, isEmpty);
+    });
+
+    test('--language-version takes the default as --help prints it', () {
+      final help = _run(['--help']).stdout as String;
+      final shown = RegExp(
+        r'or (\d+\.\d+(?:\.\d+)?) when',
+      ).firstMatch(help.replaceAll(RegExp(r'\s+'), ' '))![1]!;
+      final result = _run([
+        '--spec',
+        writeSpec(_spec()),
+        '--language-version',
+        shown,
+      ]);
+
+      expect(result.exitCode, 0, reason: result.stderr.toString());
+    });
+
     group('formats for the language version of the package written into', () {
       // 3.6 is the last version `dart format` formats in the short style, so
       // its layout differs throughout from the tall style of 3.7 and later.
       const languageVersion = '3.6';
 
-      /// A package whose resolved language version is [languageVersion].
-      Directory package() {
+      /// A package whose resolved language version is [version].
+      Directory package({String version = languageVersion}) {
         final dir = Directory.systemTemp.createTempSync('blocks_codegen_pkg_');
         addTearDown(() => dir.deleteSync(recursive: true));
         File('${dir.path}/.dart_tool/package_config.json')
@@ -194,7 +226,7 @@ void main() {
                   'name': 'app',
                   'rootUri': '../',
                   'packageUri': 'lib/',
-                  'languageVersion': languageVersion,
+                  'languageVersion': version,
                 },
               ],
             }),
@@ -220,6 +252,15 @@ void main() {
         expect(result.exitCode, 0, reason: result.stderr.toString());
         expect(formatted(out, languageVersion), isTrue);
         expect(formatted(out, '3.11'), isFalse);
+      });
+
+      test('refused when it is older than 3.0', () {
+        final out = File('${package(version: '2.19').path}/lib/client.dart');
+        final result = _run(['--spec', writeSpec(_spec()), '-o', out.path]);
+
+        expect(result.exitCode, 1);
+        expect(result.stderr, contains('language version 2.19 is older'));
+        expect(out.existsSync(), isFalse);
       });
 
       test('overridden by --language-version', () {
