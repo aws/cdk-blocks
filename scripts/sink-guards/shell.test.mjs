@@ -63,7 +63,7 @@ const ALLOWLIST = [
 	{ at: 'scripts/ci/windows-template-e2e.mjs', in: 'startUntilReady', site: "spawn(cmd, args, { shell: isWin, detached: !isWin, stdio: 'inherit', ...opts })", reason: CI_WINDOWS },
 	{ at: 'scripts/ci/windows-template-e2e.mjs', in: 'startUntilReady', site: "spawn(cmd, args, { shell: isWin, detached: !isWin, stdio: 'inherit', ...opts })", reason: CI_WINDOWS },
 	{
-		at: 'scripts/agent-bench/steps/4-judge.ts', in: 'assertNoSpecLeak', site: "execSync( `find ${shellQuote(dir)} \\\\( -name bench-tests -o -regextype posix-extended -regex '.*\\\\.spec\\\\.[cm]?[jt]sx?$' \\\\) -print`, { encoding: 'utf-8' }, )",
+		at: 'scripts/agent-bench/steps/lib/spec-leak.mjs', in: 'findSpecLeaks', site: "execSync( `find ${shellQuote(dir)} \\\\( -name bench-tests -o -regextype posix-extended -regex '.*\\\\.spec\\\\.[cm]?[jt]sx?$' \\\\) -print`, { encoding: 'utf-8' }, )",
 		reason: 'The only value is the judge copy directory, passed through shellQuote() (single-quoted, embedded quotes escaped).',
 	},
 	{

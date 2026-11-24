@@ -27,10 +27,11 @@ import {
 	nextBackoffMs,
 	sleep,
 } from './lib/bedrock-retry.ts';
-import { BENCH_AGENT_USER, enterAgentPhase, reapAgentProcesses, shellQuote } from './lib/isolation.mjs';
+import { BENCH_AGENT_USER, enterAgentPhase, reapAgentProcesses } from './lib/isolation.mjs';
 import { WorkspaceSandbox, describeError, required } from './lib/run-shell.ts';
 import { hardCapPlan } from './lib/scoring.mjs';
 import { stringifyRedacted } from './lib/secrets.mjs';
+import { EXCLUDED_FILE_RE, findSpecLeaks } from './lib/spec-leak.mjs';
 
 // Physical spec-blinding: the judge grades a SOURCE-ONLY COPY (JUDGE_SRC) with these excluded, so the
 // objective test can't anchor the score — blinding by ABSENCE.
@@ -38,13 +39,11 @@ import { stringifyRedacted } from './lib/secrets.mjs';
 //     `.cdk-blocks-sandbox` (a build-time artifact), and `.cdk-blocks/local/data` (the PGlite/BB mock datadir — runtime
 //     state, not source; copying it across the judge's UID boundary throws EACCES on internal files
 //     like pg_logical/replorigin_checkpoint). Also the grep exclude-dirs in collectBlocksImports.
-//   - EXCLUDED_FILE_RE: the objective *.spec.{js,ts,jsx,tsx,cjs,mjs} test CODE files — deliberately
-//     NOT framework *.spec.json manifests (e.g. blocks.spec.json), which are legit app source.
+//   - EXCLUDED_FILE_RE (lib/spec-leak.mjs): the objective test CODE files.
 const STAGE_EXCLUDE_DIRS = new Set(['node_modules', '.git', 'dist', 'bench-tests', '.cdk-blocks-sandbox']);
 // Matched as consecutive path SEGMENTS: the mock data directory is three of them, and a
 // multi-segment string can never equal a single entry of the set above.
 const STAGE_EXCLUDE_PATHS = [['.cdk-blocks', 'local', 'data']];
-const EXCLUDED_FILE_RE = /\.spec\.[cm]?[jt]sx?$/;
 
 const WORKSPACE = required('WORKSPACE', '[judge]');
 const TASK_PROMPT_PATH = required('TASK_PROMPT', '[judge]');
@@ -130,13 +129,7 @@ process.stderr.write(
 );
 
 function assertNoSpecLeak(dir: string): void {
-	// INDEPENDENT re-check (a find, not the JS filter). The -regex MUST mirror EXCLUDED_FILE_RE:
-	// only objective test-spec CODE files count, NOT framework *.spec.json (killed the judge on run
-	// 28639226838). posix-extended -regex matches the whole path.
-	const leaks = execSync(
-		`find ${shellQuote(dir)} \\( -name bench-tests -o -regextype posix-extended -regex '.*\\.spec\\.[cm]?[jt]sx?$' \\) -print`,
-		{ encoding: 'utf-8' },
-	).trim();
+	const leaks = findSpecLeaks(dir);
 	if (leaks) {
 		process.stderr.write(`[judge] FATAL: objective spec / bench-tests leaked into the judge source copy:\n${leaks}\n`);
 		process.exit(1);
