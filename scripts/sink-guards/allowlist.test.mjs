@@ -43,6 +43,26 @@ describe('compareWithAllowlist', () => {
 		assert.deepEqual(result.stale.map((e) => e.in), ['view']);
 	});
 
+	it('tells an object literal method from a function of the same name', () => {
+		// The reviewed call in `view` drops its shell; an identical call appears
+		// in `handlers.view`.
+		const src = `${VIEW.replace('shell: isWin', 'shell: false')}export const handlers = { view(name: string) { return execFileSync('npm', ['view', name], { shell: isWin }); } };\n`;
+		const result = compare(src, [entry(VIEW_SITE)]);
+		assert.deepEqual(result.unexpected.map((f) => f.in), ['handlers.view']);
+		assert.deepEqual(result.stale.map((e) => e.in), ['view']);
+	});
+
+	it('names object literal members by the path they are assigned to', () => {
+		const src = [
+			"const api = { routes: { list: () => execFileSync('npm', [x], { shell: true }) } };",
+			"function make() { return { run() { execFileSync('npm', [x], { shell: true }); } }; }",
+		].join('\n');
+		assert.deepEqual(
+			sites(src).map((f) => f.in),
+			['api.routes.list', 'make.{}.run'],
+		);
+	});
+
 	it('reports a change to the argv of an allowlisted shell: option call', () => {
 		const result = compare(VIEW.replace("['view', name]", "['exec', name]"), [entry(VIEW_SITE)]);
 		assert.equal(result.unexpected.length, 1);

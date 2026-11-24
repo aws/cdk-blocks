@@ -69,17 +69,40 @@ function fullText(sf, node) {
 	return node.getText(sf).replace(/\s+/g, ' ');
 }
 
+/**
+ * The name an object literal is assigned to (`handlers`, `api.routes`), or
+ * `{}` when it has none (returned, or passed as an argument).
+ */
+function objectName(obj) {
+	let p = obj.parent;
+	while (p && (ts.isParenthesizedExpression(p) || ts.isAsExpression(p) || ts.isSatisfiesExpression(p))) p = p.parent;
+	if (p && ts.isPropertyAssignment(p) && ts.isObjectLiteralExpression(p.parent)) {
+		return `${objectName(p.parent)}.${declaredName(p.name) ?? '[computed]'}`;
+	}
+	if (p && (ts.isVariableDeclaration(p) || ts.isPropertyDeclaration(p))) return declaredName(p.name) ?? '{}';
+	return '{}';
+}
+
+/**
+ * `name` qualified by the object literal it is a member of, so a method of
+ * `const handlers = { verify() {} }` (`handlers.verify`) isn't taken for a
+ * function `verify`.
+ */
+function memberName(container, name) {
+	return name && ts.isObjectLiteralExpression(container) ? `${objectName(container)}.${name}` : name;
+}
+
 /** The name a function-like node is declared under, if any. */
 function functionName(node) {
 	if ((ts.isFunctionDeclaration(node) || ts.isMethodDeclaration(node) || ts.isGetAccessor(node) || ts.isSetAccessor(node)) && node.name) {
-		return declaredName(node.name);
+		return memberName(node.parent, declaredName(node.name));
 	}
 	if (ts.isConstructorDeclaration(node)) return 'constructor';
 	if (ts.isArrowFunction(node) || ts.isFunctionExpression(node)) {
 		let p = node.parent;
 		while (p && (ts.isParenthesizedExpression(p) || ts.isAsExpression(p) || ts.isSatisfiesExpression(p))) p = p.parent;
 		if (p && (ts.isVariableDeclaration(p) || ts.isPropertyAssignment(p) || ts.isPropertyDeclaration(p)) && p.initializer) {
-			return declaredName(p.name);
+			return memberName(p.parent, declaredName(p.name));
 		}
 	}
 	return undefined;
@@ -87,10 +110,13 @@ function functionName(node) {
 
 /**
  * The named functions and classes enclosing `node`, outermost first
- * (`Hosting.build`), or `(top level)`. An anonymous callback is skipped, so
+ * (`Hosting.build`), or `(top level)`. A method or function-valued property
+ * of an object literal is qualified by the object's name (`handlers.verify`,
+ * or `{}.verify` for an unnamed one). An anonymous callback is skipped, so
  * the name is that of the function it was written in. Allowlist entries are
- * scoped by it, so a reviewed site can't be swapped for a copy elsewhere in
- * the file without an allowlist change.
+ * scoped by it, so a reviewed site can't be swapped for a copy in a
+ * differently named function without an allowlist change; a copy in the same
+ * function, including in a callback inside it, keeps the name.
  */
 function scopeOf(node) {
 	const names = [];
