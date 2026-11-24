@@ -32,6 +32,25 @@ describe('migration file order', () => {
 		assert.deepStrictEqual(sortMigrationNames(names), [...names].sort());
 	});
 
+	test('text before a number decides the order before the number does', () => {
+		// `a_` sorts before `b_`, whatever the numbers after them are. Comparing only the numbers would also make the
+		// order a cycle: `1` < `_` < `0_` < `1`. Here it is `0_` < `1` < `_`.
+		assert.ok(compareMigrationNames('a_2.sql', 'b_1.sql') < 0);
+		assert.ok(compareMigrationNames('b_1.sql', 'a_2.sql') > 0);
+		assert.deepStrictEqual(sortMigrationNames(['_', '1', '0_']), ['0_', '1', '_']);
+		assert.ok(compareMigrationNames('_', '0_') > 0);
+	});
+
+	test('a name whose runs are a prefix of another name sorts first', () => {
+		// `1` and `01` are equal by value, so the name with fewer runs sorts first. A plain code-unit comparison
+		// here would put `01a` before `1`, while `1` < `1_` < `01a`: a cycle, so the order would depend on the engine.
+		assert.ok(compareMigrationNames('1', '01_') < 0);
+		assert.ok(compareMigrationNames('01_', '1') > 0);
+		assert.ok(compareMigrationNames('1', '1_') < 0);
+		assert.ok(compareMigrationNames('1_', '01a') < 0);
+		assert.ok(compareMigrationNames('1', '01a') < 0);
+	});
+
 	test('a number in the middle of a name compares by value too', () => {
 		assert.deepStrictEqual(sortMigrationNames(['1_step10.sql', '1_step9.sql']), ['1_step9.sql', '1_step10.sql']);
 	});
