@@ -232,7 +232,7 @@ jobs:
           node-version-file: '.nvmrc'
           cache: npm
 
-      # Pin a fixed Blocks CLI telemetry installation ID for CI e2e runs so this
+      # Pin a fixed CDK Blocks CLI telemetry installation ID for CI e2e runs so this
       # traffic is consistent and identifiable (and can be excluded from product
       # usage metrics).
       - uses: ./.github/actions/seed-telemetry-id
@@ -340,7 +340,7 @@ jobs:
       # No value is interpolated unescaped into a RegExp, a shell command, a
       # workflow run: script, generated Kotlin/Swift/Dart source or HTML.
       - name: Check injection sink guards
-        run: node --test scripts/sink-guards/regex.test.mjs scripts/sink-guards/shell.test.mjs scripts/sink-guards/workflows.test.mjs scripts/sink-guards/codegen.test.mjs scripts/sink-guards/html.test.mjs
+        run: node --test scripts/sink-guards/allowlist.test.mjs scripts/sink-guards/regex.test.mjs scripts/sink-guards/shell.test.mjs scripts/sink-guards/workflows.test.mjs scripts/sink-guards/codegen.test.mjs scripts/sink-guards/html.test.mjs
 
       # Deletes the stacks a cancelled or crashed E2E job leaves behind.
       - name: Test the E2E teardown
@@ -448,7 +448,7 @@ jobs:
           node-version-file: '.nvmrc'
           cache: npm
 
-      # Pin a fixed Blocks CLI telemetry installation ID for CI e2e runs so this
+      # Pin a fixed CDK Blocks CLI telemetry installation ID for CI e2e runs so this
       # traffic is consistent and identifiable (and can be excluded from product
       # usage metrics).
       - uses: ./.github/actions/seed-telemetry-id
@@ -526,7 +526,7 @@ jobs:
           node-version-file: '.nvmrc'
           cache: npm
 
-      # Pin a fixed Blocks CLI telemetry installation ID for CI e2e runs so this
+      # Pin a fixed CDK Blocks CLI telemetry installation ID for CI e2e runs so this
       # traffic is consistent and identifiable (and can be excluded from product
       # usage metrics).
       - uses: ./.github/actions/seed-telemetry-id
@@ -597,7 +597,7 @@ jobs:
           node-version-file: '.nvmrc'
           cache: npm
 
-      # Pin a fixed Blocks CLI telemetry installation ID for CI e2e runs so this
+      # Pin a fixed CDK Blocks CLI telemetry installation ID for CI e2e runs so this
       # traffic is consistent and identifiable (and can be excluded from product
       # usage metrics).
       - uses: ./.github/actions/seed-telemetry-id
@@ -641,7 +641,7 @@ jobs:
           node-version-file: '.nvmrc'
           cache: npm
 
-      # Pin a fixed Blocks CLI telemetry installation ID for CI e2e runs so this
+      # Pin a fixed CDK Blocks CLI telemetry installation ID for CI e2e runs so this
       # traffic is consistent and identifiable (and can be excluded from product
       # usage metrics).
       - uses: ./.github/actions/seed-telemetry-id
@@ -717,7 +717,7 @@ jobs:
           node-version-file: '.nvmrc'
           cache: npm
 
-      # Pin a fixed Blocks CLI telemetry installation ID for CI e2e runs so this
+      # Pin a fixed CDK Blocks CLI telemetry installation ID for CI e2e runs so this
       # traffic is consistent and identifiable (and can be excluded from product
       # usage metrics).
       - uses: ./.github/actions/seed-telemetry-id
@@ -818,7 +818,7 @@ jobs:
           node-version-file: '.nvmrc'
           cache: npm
 
-      # Pin a fixed Blocks CLI telemetry installation ID for CI e2e runs so this
+      # Pin a fixed CDK Blocks CLI telemetry installation ID for CI e2e runs so this
       # traffic is consistent and identifiable (and can be excluded from product
       # usage metrics).
       - uses: ./.github/actions/seed-telemetry-id
@@ -923,7 +923,7 @@ jobs:
           node-version-file: '.nvmrc'
           cache: npm
 
-      # Pin a fixed Blocks CLI telemetry installation ID for CI e2e runs so this
+      # Pin a fixed CDK Blocks CLI telemetry installation ID for CI e2e runs so this
       # traffic is consistent and identifiable (and can be excluded from product
       # usage metrics).
       - uses: ./.github/actions/seed-telemetry-id
@@ -1085,7 +1085,7 @@ jobs:
           node-version-file: '.nvmrc'
           cache: npm
 
-      # Pin a fixed Blocks CLI telemetry installation ID for CI e2e runs so this
+      # Pin a fixed CDK Blocks CLI telemetry installation ID for CI e2e runs so this
       # traffic is consistent and identifiable (and can be excluded from product
       # usage metrics).
       - uses: ./.github/actions/seed-telemetry-id
@@ -1173,7 +1173,7 @@ jobs:
           node-version-file: '.nvmrc'
           cache: npm
 
-      # Pin a fixed Blocks CLI telemetry installation ID for CI e2e runs so this
+      # Pin a fixed CDK Blocks CLI telemetry installation ID for CI e2e runs so this
       # traffic is consistent and identifiable (and can be excluded from product
       # usage metrics).
       - uses: ./.github/actions/seed-telemetry-id
@@ -1345,7 +1345,7 @@ jobs:
           node-version-file: '.nvmrc'
           cache: npm
 
-      # Pin a fixed Blocks CLI telemetry installation ID for CI e2e runs so this
+      # Pin a fixed CDK Blocks CLI telemetry installation ID for CI e2e runs so this
       # traffic is consistent and identifiable (and can be excluded from product
       # usage metrics).
       - uses: ./.github/actions/seed-telemetry-id

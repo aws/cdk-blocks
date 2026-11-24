@@ -710,7 +710,7 @@ With `allowBearerAuth: true`, the guards also accept `Authorization: Bearer <acc
 - With `allowBearerAuth: { clientIds }` (default store only): also access tokens from other app clients of the same pool, for a frontend that signs in with an Amplify client library ([below](#planning-to-use-amplify-client-libraries)).
 - The session cookie wins when a request carries both.
 - A bearer token stays valid after `signOut()` until it expires.
-- The AWS CDK Blocks native SDKs use the session cookie, not a bearer token.
+- The CDK Blocks native SDKs use the session cookie, not a bearer token.
 
 Details: [DESIGN.md](./DESIGN.md#bearer-tokens-allowbearerauth--bearerts).
 
@@ -771,6 +771,7 @@ The recipe [Tell the user what a password needs](#tell-the-user-what-a-password-
   - the `setAuthState` actions that call them (`signUp`, `confirmSignIn`, `confirmResetPassword`).
 - **A generated temporary password, locally:** `auth.admin.createUser` without `temporaryPassword` gets a generated 16-character password, and the local user pool checks it against the policy too. With `minLength` above 16, that call throws `InvalidPasswordException` locally, while Cognito generates a password that fits. Pass a `temporaryPassword` that fits the policy.
 - **What the client receives:** a password that breaks the policy is rejected with `InvalidPasswordException` (`AuthErrors.InvalidPassword`) and status 400. The message describes the whole policy rather than the rule the password broke, and it is the same locally and on AWS. For the recipe's policy it is `Password must be at least 12 characters and include an uppercase letter, a lowercase letter and a number.`
+- **Whitespace and line breaks:** in `signUp`, `confirmResetPassword`, `updatePassword` (the old and the new password), `auth.admin.setUserPassword` and the `temporaryPassword` of `auth.admin.createUser`, Cognito refuses a password whose first or last character is an ASCII space, `\t`, `\n`, `\v`, `\f` or `\r`, or that contains `\n` or `\r` anywhere, before it checks the policy. Other whitespace inside a password is allowed. The client receives `InvalidParameterException` (`AuthErrors.InvalidParameter`) and status 400, locally and on AWS. The block does not trim the password.
 - **How to branch on it:** on the server, match a thrown error with `isAuthError(e, AuthErrors.InvalidPassword)`; in browser app code, use `isBlocksError(e, 'InvalidPasswordException')`. Through `setAuthState` the error is retriable. The returned state carries `retriable: true`, `errorName: 'InvalidPasswordException'` and the message as `error`, so the form stays on the current step. Branch on that state with `hasAuthError`, as the recipe does.
 - **An imported pool:** with `userPool: Auth.fromExisting(…)`, the block doesn't create the pool, so the pool's own policy applies on AWS. The local user pool still checks `emailPassword.passwordPolicy` (or the defaults), so a password can pass under `npm run dev` and fail on AWS, or the reverse. Set `passwordPolicy` to the policy of the imported pool to make them agree. The message is the fixed `Password does not meet the password policy`, locally and on AWS.
 
@@ -779,8 +780,7 @@ The recipe [Tell the user what a password needs](#tell-the-user-what-a-password-
 `validateUser` is called before any user is created and before any session is issued, whatever the mechanism. Throw to reject; a thrown `ApiError` reaches the client by its `name` and message.
 
 ```typescript
-import { ApiError } from '@aws-cdk-blocks/core';
-import { Auth, AuthErrors } from '@aws-cdk-blocks/bb-auth';
+import { ApiError, Auth, AuthErrors } from 'aws-cdk-blocks';
 
 const auth = new Auth(scope, 'auth', {
   validateUser: async ({ email }) => {
@@ -803,7 +803,7 @@ const auth = new Auth(scope, 'auth', {
 
 `Auth` throws `ApiError`s. Each `name` is a value of `AuthErrors`, and `setAuthState` returns the same name as `errorName` on a failed `AuthState`. The names are listed in the [`auth-common` README](../auth-common/README.md#auth-error-names-autherrors).
 
-- In browser app code, match a thrown error with `isBlocksError(e, 'NotAuthenticatedException')` from `aws-cdk-blocks/client`. The auth-specific guard `isAuthError(e, AuthErrors.NotAuthenticated)` matches the same name. Both `isAuthError` and `AuthErrors` are available from `aws-cdk-blocks` on the server or directly from `@aws-cdk-blocks/auth-common` in either environment.
+- In browser app code, match a thrown error with `isBlocksError(e, 'NotAuthenticatedException')` from `aws-cdk-blocks/client`. The auth-specific guard `isAuthError(e, AuthErrors.NotAuthenticated)` matches the same name. Both `isAuthError` and `AuthErrors` are available from `aws-cdk-blocks` in either environment, or directly from `@aws-cdk-blocks/auth-common`.
 - Match a returned state with `hasAuthError(state, 'InvalidPasswordException')` from `aws-cdk-blocks/client`.
 - An error `Auth` does not recognise becomes `InternalErrorException`. An `ApiError` your own `validateUser` or `onSignIn` hook throws keeps its name and status.
 
@@ -1125,7 +1125,7 @@ final user = await oidc.signInRelay(OidcAuthApiApiGetClientProvider.okta, launch
 
   A `clientIds` entry can be a literal id or a CDK token: the block forwards the list through its deployed config, so a token resolves at deploy time.
 
-  **A pool Amplify Gen 2 created** (or any pool created elsewhere in the same CDK app): wrap it with `Auth.fromExisting` and pass the ids as tokens. The backend module is loaded while the CDK app synthesizes, so hand them over before creating the Blocks backend:
+  **A pool Amplify Gen 2 created** (or any pool created elsewhere in the same CDK app): wrap it with `Auth.fromExisting` and pass the ids as tokens. The backend module is loaded while the CDK app synthesizes, so hand them over before creating the CDK Blocks backend:
 
   ```typescript
   // amplify/blocks.ts
