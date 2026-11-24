@@ -66,7 +66,9 @@ createServer(async (request, response) => {
 		return;
 	}
 	try {
-		const upstream = await fetch(`${UPSTREAM}/${rawPath}`);
+		// The host is written out (it equals UPSTREAM) so the fetched URL's host is a literal and
+		// never taken from the request; the origin check above is the backstop for the path.
+		const upstream = await fetch(`https://registry.npmjs.org/${rawPath}`);
 		// Read the body before writeHead: a mid-body disconnect rejects here, and calling
 		// writeHead(502) after the head is already sent throws ERR_HTTP_HEADERS_SENT inside
 		// the catch. Unhandled, that takes the registry down and the rest of the trial's

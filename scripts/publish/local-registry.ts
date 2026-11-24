@@ -146,6 +146,8 @@ export function upstreamRegistryUrl(rawUrl: string): string | undefined {
 		return undefined;
 	}
 
-	// Forwarded exactly as npm spelled it, so a scoped name keeps its %2f.
-	return `${UPSTREAM_REGISTRY}/${raw}`;
+	// Forwarded exactly as npm spelled it, so a scoped name keeps its %2f. The
+	// host is written out (it equals UPSTREAM_REGISTRY, which a unit test
+	// checks) so the forwarded URL's host is a literal, not taken from a value.
+	return `https://registry.npmjs.org/${raw}`;
 }
