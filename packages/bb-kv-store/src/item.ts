@@ -16,6 +16,7 @@
  *   value.
  */
 import type { ChildLogger } from '@aws-cdk-blocks/bb-logger';
+import { marshall } from '@aws-sdk/util-dynamodb';
 import type { StandardSchemaV1 } from '@standard-schema/spec';
 import {
 	applyReadValidation,
@@ -209,7 +210,9 @@ function describe(value: unknown): string {
  * @throws {KVStoreErrors.InvalidQuery} If the value does not have the type of the field (this
  *   includes `NaN` and an infinite number).
  * @throws {KVStoreErrors.ValidationFailed} If the value is an empty string, or a string over
- *   `maxBytes` UTF-8 bytes (the partition key limit unless the field is a sort key).
+ *   `maxBytes` UTF-8 bytes (the partition key limit unless the field is a sort key), or a number
+ *   outside `Number.MIN_SAFE_INTEGER` to `Number.MAX_SAFE_INTEGER`, which the DocumentClient
+ *   cannot send.
  */
 function checkKeyValue(
 	field: string,
@@ -225,7 +228,14 @@ function checkKeyValue(
 		}
 		return value;
 	}
-	if (type === 'N' && typeof value === 'number' && Number.isFinite(value)) return value;
+	if (type === 'N' && typeof value === 'number' && Number.isFinite(value)) {
+		// The DocumentClient refuses a number beyond the safe integer range with a plain
+		// Error, so reject it here with a named error (as for a string over its byte limit).
+		if (value > Number.MAX_SAFE_INTEGER || value < Number.MIN_SAFE_INTEGER) {
+			throw blocksError(KVStoreErrors.ValidationFailed, KVStoreMessages.keyNumberUnsafe(field, value));
+		}
+		return value;
+	}
 	throw blocksError(KVStoreErrors.InvalidQuery, KVStoreMessages.keyFieldType(field, type, describe(value)));
 }
 
@@ -321,6 +331,89 @@ function nestsTooDeep(value: unknown, depth: number): boolean {
 	return depth > MAX_NESTING_DEPTH || children.some((child) => nestsTooDeep(child, depth + 1));
 }
 
+/** The path of a field below `path`, as an error message shows it. */
+function fieldPath(path: string, field: string): string {
+	return path === '' ? field : `${path}.${field}`;
+}
+
+/**
+ * Find the first part of a value that the DocumentClient's marshaller refuses, for
+ * the error message of {@link assertStorable}. It mirrors the rules of `marshall`
+ * in `@aws-sdk/util-dynamodb`. It only describes: `marshall` itself decides.
+ */
+function unstorablePart(value: unknown, path: string): { path: string; part: string } | undefined {
+	if (typeof value === 'number') {
+		if (!Number.isFinite(value)) return { path, part: String(value) };
+		if (value > Number.MAX_SAFE_INTEGER || value < Number.MIN_SAFE_INTEGER) {
+			return { path, part: `the number ${value}, outside Number.MIN_SAFE_INTEGER to Number.MAX_SAFE_INTEGER` };
+		}
+		return undefined;
+	}
+	if (typeof value === 'symbol') return { path, part: 'a symbol' };
+	if (value === null || typeof value !== 'object') return undefined;
+	// A NumberValue (from `@aws-sdk/lib-dynamodb`) and binary data are stored as they are.
+	if (value.constructor?.name === 'NumberValue' || value instanceof ArrayBuffer || ArrayBuffer.isView(value)) {
+		return undefined;
+	}
+	if (typeof Blob !== 'undefined' && value instanceof Blob) return undefined;
+	if (Array.isArray(value)) {
+		for (const [i, item] of value.entries()) {
+			const found = unstorablePart(item, `${path}[${i}]`);
+			if (found) return found;
+		}
+		return undefined;
+	}
+	if (value instanceof Set) {
+		if (value.size === 0) return { path, part: 'an empty Set' };
+		for (const item of value) {
+			const found = unstorablePart(item, path);
+			if (found) return found;
+		}
+		return undefined;
+	}
+	if (value instanceof Map) {
+		for (const [field, item] of value) {
+			const found = unstorablePart(item, fieldPath(path, String(field)));
+			if (found) return found;
+		}
+		return undefined;
+	}
+	if (isPlainObject(value)) {
+		for (const [field, item] of Object.entries(value)) {
+			const found = unstorablePart(item, fieldPath(path, field));
+			if (found) return found;
+		}
+		return undefined;
+	}
+	if (value instanceof Date) return { path, part: 'a Date' };
+	return { path, part: `an instance of ${value.constructor?.name || 'a class'}` };
+}
+
+/**
+ * Check that the DocumentClient can marshal a value, with the options the AWS
+ * runtime passes to it ({@link MARSHALL_OPTIONS}). The marshaller is the rule, so
+ * the check matches what the AWS runtime would send. It refuses `NaN`, an
+ * infinite number, a number outside the safe integer range, a `Date`, a symbol, a
+ * class instance, and an empty Set, at any depth. Without this check
+ * the AWS runtime would throw the marshaller's plain `Error` or `TypeError`,
+ * which a client sees as a 500 with no error name.
+ *
+ * `subject` names the value in the message: `value`, `ifValueEquals` or `ifFieldEquals`.
+ *
+ * @throws {KVStoreErrors.ValidationFailed} If the marshaller refuses the value.
+ */
+export function assertStorable(value: unknown, subject: string): void {
+	try {
+		marshall({ value }, MARSHALL_OPTIONS);
+	} catch {
+		const found = unstorablePart(value, '') ?? { path: '', part: 'a value' };
+		throw blocksError(
+			KVStoreErrors.ValidationFailed,
+			KVStoreMessages.unstorableValue(subject, found.path, found.part),
+		);
+	}
+}
+
 /**
  * Build the stored item for a write: the key attributes, the value laid out
  * flat (an object) or in `_bkv_value` (anything else), and the expiry.
@@ -409,7 +502,8 @@ function fullValue(
  * @throws {KVStoreErrors.ValidationFailed} If the value fails the schema,
  *   disagrees with its key, has a reserved field, has a field name that DynamoDB
  *   cannot store, or has an empty string in a key field or an indexed field.
- *   Also if the expiry is not usable.
+ *   Also if the value holds data that the DocumentClient cannot marshal
+ *   ({@link assertStorable}), or if the expiry is not usable.
  */
 export async function prepareItem(
 	model: KeyModel,
@@ -421,7 +515,9 @@ export async function prepareItem(
 	const expiresAt = resolveTtlEpochSeconds(expiry);
 	const full = fullValue(model, keyAttrs, value, expiresAt);
 	await validateSchema(model.schema, full);
-	return { keyAttrs, item: itemOfFullValue(model, keyAttrs, full, expiresAt) };
+	const item = itemOfFullValue(model, keyAttrs, full, expiresAt);
+	assertStorable(full, 'value');
+	return { keyAttrs, item };
 }
 
 /**
@@ -608,8 +704,11 @@ type ValueCheckPlan =
  * - `ifValueEquals` must not be a plain object: the block spreads an object
  *   value over attributes, so DynamoDB cannot compare it in one expression.
  * - Both together are rejected.
+ * - Each compared value must be one the DocumentClient can marshal
+ *   ({@link assertStorable}): the AWS runtime sends it in the condition.
  *
- * @throws {KVStoreErrors.InvalidQuery} For each rule above.
+ * @throws {KVStoreErrors.InvalidQuery} For each shape rule above.
+ * @throws {KVStoreErrors.ValidationFailed} If a compared value cannot be marshalled.
  */
 function planValueCheck(options: Conditions | undefined): ValueCheckPlan {
 	const fields = options?.ifFieldEquals;
@@ -622,10 +721,12 @@ function planValueCheck(options: Conditions | undefined): ValueCheckPlan {
 			throw blocksError(KVStoreErrors.InvalidQuery, KVStoreMessages.ifFieldEqualsNotObject);
 		const entries = Object.entries(fields).filter(([, v]) => v !== undefined);
 		if (entries.length === 0) throw blocksError(KVStoreErrors.InvalidQuery, KVStoreMessages.emptyIfFieldEquals);
+		assertStorable(Object.fromEntries(entries), 'ifFieldEquals');
 		return { kind: 'fields', entries };
 	}
 	if (value !== undefined) {
 		if (isPlainObject(value)) throw blocksError(KVStoreErrors.InvalidQuery, KVStoreMessages.ifValueEqualsObject);
+		assertStorable(value, 'ifValueEquals');
 		return { kind: 'value', expected: value };
 	}
 	return undefined;
