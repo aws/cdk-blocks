@@ -5,9 +5,9 @@
  * Keyword guard used in CI.
  *
  *   verify-discovery-tag  Exit non-zero if any publishable `@aws-cdk-blocks/*`
- *                   package omits the `aws-blocks` keyword from its
+ *                   package omits the `cdk-blocks` keyword from its
  *                   package.json. That keyword is the documented discovery
- *                   path — `npm search keywords:aws-blocks`
+ *                   path — `npm search keywords:cdk-blocks`
  *                   (docs/guides/extending-with-existing-aws-resources.md) —
  *                   and it is invisible at review time: a new Building Block
  *                   builds, tests and publishes perfectly well without it,

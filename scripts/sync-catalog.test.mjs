@@ -107,15 +107,15 @@ describe('formatKeywords', () => {
   });
 
   it('leaves out the discovery tag every package carries', () => {
-    assert.equal(formatKeywords(['aws-blocks', 'queue', 'aws-blocks-queue']), 'queue, aws-blocks-queue');
+    assert.equal(formatKeywords(['cdk-blocks', 'queue', 'cdk-blocks-queue']), 'queue, cdk-blocks-queue');
   });
 
   it('returns an empty string when only the discovery tag is declared', () => {
-    assert.equal(formatKeywords(['aws-blocks']), '');
+    assert.equal(formatKeywords(['cdk-blocks']), '');
   });
 
   it('drops blank entries, so the discovery tag plus blanks is an empty cell', () => {
-    assert.equal(formatKeywords(['aws-blocks', '', ' ']), '');
+    assert.equal(formatKeywords(['cdk-blocks', '', ' ']), '');
     assert.equal(formatKeywords([' queue ', '', 'sqs']), 'queue, sqs');
   });
 
@@ -152,14 +152,14 @@ describe('--check', () => {
   }
 
   it('passes for a synced catalog whose block declares its own keywords', (t) => {
-    const dir = workspace(t, ['aws-blocks', 'queue', 'sqs']);
+    const dir = workspace(t, ['cdk-blocks', 'queue', 'sqs']);
     assert.equal(run(dir, '--write').status, 0);
 
     assert.equal(run(dir, '--check').status, 0);
   });
 
   it('fails for a synced catalog whose block declares only the discovery tag', (t) => {
-    const dir = workspace(t, ['aws-blocks']);
+    const dir = workspace(t, ['cdk-blocks']);
     assert.equal(run(dir, '--write').status, 0);
 
     const check = run(dir, '--check');
@@ -168,11 +168,11 @@ describe('--check', () => {
   });
 
   it('fails when the committed catalog no longer matches package.json keywords', (t) => {
-    const dir = workspace(t, ['aws-blocks', 'queue']);
+    const dir = workspace(t, ['cdk-blocks', 'queue']);
     assert.equal(run(dir, '--write').status, 0);
     writeFileSync(
       join(dir, 'packages', 'bb-queue', 'package.json'),
-      JSON.stringify({ name: 'bb-queue', keywords: ['aws-blocks', 'queue', 'sqs'] }),
+      JSON.stringify({ name: 'bb-queue', keywords: ['cdk-blocks', 'queue', 'sqs'] }),
     );
 
     const check = run(dir, '--check');

@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "description": "TODO: one-line description of the __BB_CLASS__ Building Block.",
   "keywords": [
-    "aws-blocks"
+    "cdk-blocks"
   ],
   "author": "Amazon Web Services",
   "license": "Apache-2.0",

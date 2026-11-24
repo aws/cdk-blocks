@@ -315,7 +315,7 @@ writeFileSync(
  * neither works from the registry. Point `prebuild` at a standalone
  * `scripts/generate-version.mjs`, re-pin `@aws-cdk-blocks/*` deps to published
  * versions, drop the core-coupled CDK synth test, and swap the tsconfig for a
- * standalone one. The `aws-blocks` discovery keyword needs no fixup: the template's
+ * standalone one. The `cdk-blocks` discovery keyword needs no fixup: the template's
  * `package.json` already declares it.
  */
 async function fixupForExternal(targetDir: string, className: string, dryRun: boolean): Promise<void> {
@@ -728,7 +728,7 @@ Modes (auto-detected):
                 npm-installs so your app can import it (no publish). App code
                 is not modified.
   external      run anywhere else → generates a standalone @<scope>/bb-<name>
-                package (keywords: ["aws-blocks"]), no workspace wiring.
+                package (keywords: ["cdk-blocks"]), no workspace wiring.
 
 What it generates:
   A Building Block — a Scope subclass with one strongly-typed API, backed by four
@@ -952,7 +952,7 @@ function printNextSteps(mode: Mode, names: DerivedNames, targetRel: string): voi
 		console.log(`     (it's linked into your workspace — no publish needed).`);
 	} else {
 		console.log(`  1. cd ${shellQuotePath(targetRel)} && npm run build && npm test`);
-		console.log(`  2. Implement ${names.className}'s API in src/, then publish (keywords: ["aws-blocks"]).`);
+		console.log(`  2. Implement ${names.className}'s API in src/, then publish (keywords: ["cdk-blocks"]).`);
 	}
 }
 
