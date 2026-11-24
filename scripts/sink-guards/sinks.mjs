@@ -879,22 +879,39 @@ export function findWeakEscapeHelpers(file, text) {
 // ─── Allowlist ───────────────────────────────────────────────────────────────
 
 /**
- * Compares detected sites with an allowlist of `{ at: 'file:line', reason }`.
+ * Compares detected sites with an allowlist of `{ at: 'file', site, reason }`.
+ *
+ * An entry names a site by its file and its code (`site`, the `text` the
+ * detector reports for it, as `report()` prints it), not by its line: code
+ * added or removed elsewhere in the file leaves the entry matching, while a
+ * change to the site's own code makes it a new, unreviewed site. Identical
+ * sites in one file each need their own entry, so a copy of an allowlisted
+ * site is still reported.
+ *
  * Returns the sites not allowlisted and the allowlist entries that match no
- * detected site (stale: the site moved or got fixed, so the entry must go).
+ * detected site (stale: the site changed or got fixed, so the entry must go).
  */
 export function compareWithAllowlist(sites, allowlist) {
 	for (const entry of allowlist) {
-		if (!/^[^:]+:\d+$/.test(entry.at)) throw new Error(`allowlist entry must be file:line, got ${JSON.stringify(entry.at)}`);
+		if (typeof entry.at !== 'string' || !entry.at || /:\d+$/.test(entry.at)) {
+			throw new Error(
+				`allowlist entry \`at\` must be a file path (the site is named by \`site\`, not a line), got ${JSON.stringify(entry.at)}`,
+			);
+		}
+		if (typeof entry.site !== 'string' || entry.site.trim() === '') {
+			throw new Error(`allowlist entry for ${entry.at} needs the site's code as \`site\``);
+		}
 		if (typeof entry.reason !== 'string' || entry.reason.trim().length < 20) {
-			throw new Error(`allowlist entry ${entry.at} needs a written reason`);
+			throw new Error(`allowlist entry ${entry.at}: ${entry.site} needs a written reason`);
 		}
 	}
-	const allowed = new Set(allowlist.map((e) => e.at));
-	const at = (f) => `${f.file}:${f.line}`;
-	const unexpected = sites.filter((f) => !allowed.has(at(f)));
-	const hit = new Set(sites.map(at));
-	const stale = allowlist.filter((e) => !hit.has(e.at));
+	// Match as multisets keyed by file and code: with N identical sites in a
+	// file, N entries allow them; a surplus on either side is reported.
+	const key = (file, site) => `${file}\0${site}`;
+	const entriesByKey = Map.groupBy(allowlist, (e) => key(e.at, e.site));
+	const sitesByKey = Map.groupBy(sites, (f) => key(f.file, f.text));
+	const unexpected = [...sitesByKey].flatMap(([k, found]) => found.slice(entriesByKey.get(k)?.length ?? 0));
+	const stale = [...entriesByKey].flatMap(([k, entries]) => entries.slice(sitesByKey.get(k)?.length ?? 0));
 	return { unexpected, stale };
 }
 
@@ -903,11 +920,15 @@ export function report(title, { unexpected, stale }) {
 	const lines = [];
 	if (unexpected.length) {
 		lines.push(`${title}: ${unexpected.length} unguarded site(s):`);
-		for (const f of unexpected) lines.push(`  ${f.file}:${f.line}  [${f.kind}]  ${f.text}`);
+		for (const f of unexpected) {
+			lines.push(`  ${f.file}:${f.line}  [${f.kind}]  ${f.text}`);
+			// The entry that would allow it, once the site is reviewed.
+			lines.push(`    allow with: { at: ${JSON.stringify(f.file)}, site: ${JSON.stringify(f.text)}, reason: '…' }`);
+		}
 	}
 	if (stale.length) {
 		lines.push(`${title}: ${stale.length} allowlist entr${stale.length === 1 ? 'y matches' : 'ies match'} no site (remove or update):`);
-		for (const e of stale) lines.push(`  ${e.at}  (${e.reason})`);
+		for (const e of stale) lines.push(`  ${e.at}  ${e.site}  (${e.reason})`);
 	}
 	return lines.join('\n');
 }
