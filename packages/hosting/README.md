@@ -39,10 +39,21 @@ new HostingConstruct(stack, 'Hosting', { manifest });
 | `nextjsAdapter` | `{ projectDir, configPath?, skipBuild? }` | A Next.js app, built with OpenNext. `configPath` is a custom `open-next.config.ts`, relative to `projectDir`. |
 | `nuxtAdapter`, `nitroAdapter` | `{ projectDir, preset?, buildCommand?, skipBuild? }` | A Nuxt app, or another Nitro app. `preset` overrides the Nitro preset. |
 | `astroAdapter` | `{ projectDir, buildCommand?, skipBuild?, bodySizeLimit? }` | An Astro app. `bodySizeLimit` is the largest request body in bytes (default 20 MB). |
-| `sveltekitAdapter` | `{ projectDir, buildCommand?, skipBuild?, bodySizeLimit? }` | A SvelteKit app. `bodySizeLimit` as for Astro. |
+| `sveltekitAdapter` | `{ projectDir, buildCommand?, skipBuild?, bodySizeLimit? }` | A SvelteKit 2 app (see [SvelteKit: the supported version](#sveltekit-the-supported-version)). `bodySizeLimit` as for Astro. |
 | `spaAdapter` | `projectDir, { buildOutputDir?, spaFallback? }` | An already built single-page app in `dist/`, `build/` or `out/`. `spaFallback: false` declares a multi-page static site. |
 
 `skipBuild: true` reuses an existing build output.
+
+`astroAdapter` applies the `redirects:` table of `astro.config` at the front
+door. A source that ends in a rest parameter becomes a wildcard redirect, with
+the matched tail spliced into the destination: `'/blog/[...slug]':
+'/posts/[...slug]'` sends `/blog/a/b` to `/posts/a/b` and `/blog` to `/posts`.
+Every other redirect with a route parameter (a single `[id]`, a parameter
+before the last segment or inside one, several parameters) is left to Astro's
+router: the server answers it in `output: 'server'`, and Astro's generated
+redirect pages in `output: 'static'`. A rest-parameter redirect whose prefix
+also has pages or `public/` files of its own (`src/pages/blog/index.astro`) is
+left to Astro as well, since Astro serves those pages before the redirect.
 
 ### Entry points
 
@@ -82,8 +93,8 @@ prop (on `HostingConstruct`, or on `Hosting` from `@aws-cdk-blocks/core`):
 | `frontDoor` | What serves the app |
 |---|---|
 | omitted / `'cloudfront'` / `{ features }` | The global CloudFront CDN (default): edge cache, WAF, custom domain, streaming, skew protection. |
-| `{ kind: 'alb' }` | A regional Application Load Balancer (no CDN): asset-proxy Lambda, SSR/image Lambda targets, same-origin API forwarder; regional WAF, access logs and alarms; HTTPS at your domain with `certificate` + `features.domain`. SSR responses are buffered. |
-| `{ kind: 'apiGateway', api?: 'http' \| 'rest' }` | Amazon API Gateway (no CDN, no VPC, scale-to-zero). `'http'` (default) buffers SSR responses. `'rest'` streams them, but needs a custom `domain`: its own URL carries the `/prod` stage, which the app's root-relative links miss, so synth fails without one (`RestFrontDoorNeedsDomainError`). |
+| `{ kind: 'alb' }` | A regional Application Load Balancer (no CDN): asset-proxy Lambda, SSR/image Lambda targets, same-origin API forwarder; regional WAF, access logs and alarms; HTTPS at your domain with `certificate` + `features.domain`. SSR responses are buffered. No edge cache: `s-maxage` and `stale-while-revalidate` store nothing (see [Caching](#the-alb-and-api-gateway-doors-rules-and-limits)). |
+| `{ kind: 'apiGateway', api?: 'http' \| 'rest' }` | Amazon API Gateway (no CDN, no VPC, scale-to-zero). `'http'` (default) buffers SSR responses. `'rest'` streams them, but needs a custom `domain`: its own URL carries the `/prod` stage, which the app's root-relative links miss, so synth fails without one (`RestFrontDoorNeedsDomainError`). No edge cache: `s-maxage` and `stale-while-revalidate` store nothing (see [Caching](#the-alb-and-api-gateway-doors-rules-and-limits)). |
 | `{ kind: 'stacked', edge: 'cloudfront', router: 'alb' }` | A CloudFront edge in front of a full ALB router (`Hosting` from `@aws-cdk-blocks/core` only): static routes come straight from S3 at the edge, the API and dynamic routes go through the ALB, which admits only the edge. |
 | `'none'` | No front door: a public S3 website bucket (HTTP only, static sites only; the client calls the API cross-origin). |
 | `{ kind: 'custom', door }` | Your own door (see [Bring your own front door](#bring-your-own-front-door)). |
@@ -310,9 +321,22 @@ survive.
 
 ### The ALB and API Gateway doors: rules and limits
 
-**Static files.** The asset proxy answers like the CloudFront door: a missing
-file 404s (the SPA fallback is for extensionless paths only), and each file
-keeps the `Cache-Control` it was uploaded with. It also:
+**Static files.** As on the CloudFront door, a missing file 404s (the SPA
+fallback is for extensionless paths only), and each file keeps the
+`Cache-Control` it was uploaded with. The body differs: the asset proxy
+answers a miss with the app's 404 page (see error pages below), or a plain
+`Not Found` (`text/plain`) when there is none. The CloudFront door serves
+files straight from S3, so where it has no 404 page to map the miss to (an app
+with a server and no `errorPages.notFound`, or an SPA whose build ships no 404
+page), the miss gets S3's own `NoSuchKey` error: a `404` with an
+`application/xml` body that names the requested key under the build's prefix
+(`builds/<buildId>/…`) and carries S3's request ids. That is a known
+limitation, not a leak: the bucket stays private behind origin access control,
+the build id already appears in asset URLs, and the request ids grant no
+access. A server app's own not-found page (the one its framework renders)
+covers page routes only: a missing file under the framework's asset paths
+(`/_next/static/…`, `/assets/…`) goes to S3 and never reaches the server. The
+asset proxy also:
 
 - percent-decodes the path (`/My%20Resume.pdf`), and answers 400 for a dot
   segment, an encoded slash or backslash, or a malformed escape;
@@ -343,9 +367,15 @@ semantics, using the same matching code:
   A spliced target's leading slashes or backslashes collapse to one slash,
   so `/old//evil.example` never becomes `Location: //evil.example`. Each
   redirect source routes to the asset proxy through an ALB listener rule,
-  an HTTP API route or a REST resource;
-- header rules: every matching rule is added to a successful response (not to
-  a redirect or an error, as at the CloudFront edge);
+  an HTTP API route or a REST resource. A Nuxt / Nitro `redirect` route
+  rule sends what Nitro sends: `'/blog/**': { redirect: '/posts/**' }`
+  redirects `/blog/a/b` to `/posts/a/b`, a destination without `/**` is
+  sent as written, and the status defaults to 307. A rule the door can't
+  reproduce (a destination ending in a single `*`) is left to the Nitro
+  server;
+- header rules: every matching rule is added to a successful response, a
+  `304 Not Modified` included (not to a redirect or an error, as at the
+  CloudFront edge);
 - error pages: a missing static file answers with the 404 page (status 404),
   an S3 failure with the 500 page (status 500). The 404 page is the app's
   `errorPages.notFound`, else the framework build's, else, for a multi-page
@@ -353,11 +383,68 @@ semantics, using the same matching code:
   AWS CDK Blocks' default "404 — Page Not Found" page, as on the CloudFront door.
   An SPA keeps its `index.html` fallback.
 
+**Compression.** Only static files are compressed on these doors (by the
+asset proxy, above), with one exception: a Next.js server on Lambda
+(`compute.type: 'lambda'`) behind `apiGateway` with `api: 'rest'` gzips its
+own streamed responses for clients that accept gzip, and adds
+`Vary: Accept-Encoding`. A response without a body (a `HEAD` request, or a
+`1xx`, `204`, `205` or `304` status) is sent uncompressed, with its headers
+as the app set them. Nothing else compresses server-rendered (SSR) responses
+or the backend API: these doors have no CDN in front of the server, so
+responses reach the browser as the server wrote them. A Lambda Web Adapter
+server (Astro, SvelteKit, Nitro's `node-server` preset) can compress in the
+server: gzip (or Brotli) the body when the request's `Accept-Encoding` allows
+it, and set `Content-Encoding` and `Vary: Accept-Encoding` on the response
+(for example in a response middleware or hook of your framework). Don't
+compress in the server for the event-handler builds:
+
+- Next.js on Lambda: OpenNext's streaming wrapper sets `Content-Encoding`
+  itself and replaces the one your app sets, so a body the app compresses
+  would be compressed twice.
+- Nitro's `aws-lambda` preset (a Nuxt app on Lambda compute built without
+  the `node-server` preset): its Lambda handler returns a
+  body whose `Content-Type` is text, JSON, JavaScript or XML as a UTF-8
+  string and ignores `Content-Encoding`, so a compressed body arrives
+  corrupted and the browser can't decode it. To compress a Nuxt app's
+  responses there, build it with the `node-server` preset (a Lambda Web
+  Adapter server) and compress in the server.
+
+On the CloudFront door, CloudFront
+compresses server responses that carry a `Content-Length`, and a Next.js
+server on Lambda (`compute.type: 'lambda'`, with OpenNext's default
+`aws-lambda-streaming` wrapper) gzips its own streamed responses for viewers
+that accept gzip. A Next.js Web Function streams without a `Content-Length`,
+so its server responses are not compressed yet.
+
 Responses the door sends straight to a function or the backend don't pass
 through those proxies: server-rendered (SSR) and image-optimization responses,
 and on API Gateway the API (proxied natively). Synth names exactly what is not
 applied (`@aws-cdk-blocks/hosting:DoorRulesNotApplied`). The CloudFront door and
 the stacked door's edge apply the rules to every response.
+
+**Caching.** These doors have no edge cache: nothing between the browser and
+the server stores a response. A route that sets `s-maxage` or
+`stale-while-revalidate` (from app code, a header rule, or Nitro
+`routeRules`) has no shared copy across visitors: each visitor's requests
+reach the server (the browser's own cache still applies to `max-age`), and
+its `Cache-Control` reaches the browser unchanged, where `s-maxage` means
+nothing. Only a server-side cache spares the render. There is no
+stale copy to serve on an error either (`stale-if-error`), and the SSR cache
+guard has no shared cache to protect. Per framework:
+
+| Framework | Behind the ALB and API Gateway doors |
+|---|---|
+| Nuxt / Nitro | `routeRules` `swr` and `cache` still cache server-side in Hosting's S3 cache, so a cached route is served from the server function without re-rendering; `defineCachedEventHandler` uses that cache too when a route rule turns it on, otherwise it caches in memory per instance. No edge copy. |
+| Next.js | ISR (`revalidate`) still regenerates through OpenNext's incremental cache (unless `incrementalRegeneration: false`), but every request reaches the server function. No edge copy. |
+| Astro, SvelteKit | No server cache: every request renders. |
+
+Synth warns once per app when its header rules ask a shared cache to store a
+route (`s-maxage` above zero, or `stale-while-revalidate` / `stale-if-error`
+on a `public` or `s-maxage` response, and neither `private` nor `no-store`;
+the Nitro adapter emits these for `swr` and `cache.maxAge` route rules), naming the
+routes (`@aws-cdk-blocks/hosting:NoEdgeCache`). It can't see a `Cache-Control`
+the server sets at run time. For edge caching, use the CloudFront door or the
+stacked door.
 
 **Size and time limits.** The asset proxy returns each file base64-encoded (a
 third larger; gzipped first when compressible) in its Lambda response, so a
@@ -445,8 +532,13 @@ when its host is in the manifest's image allowlist
 
 `'none'` publishes the build to its own public S3 website bucket, at the root.
 Each deploy prunes what the build no longer ships (a removed `*.map` stops being
-downloadable), and uploads with the same cache tiers as the other doors (hashed
-assets immutable, HTML and the rest revalidated). Pruning includes the previous
+downloadable), and uploads in three tiers: files under
+`staticAssets.immutablePaths` get `public, max-age=31536000, immutable`
+(fonts included: this door doesn't upload fonts again), HTML gets
+`no-cache, no-store, must-revalidate`, and everything else gets
+`staticAssets.cacheControl`, else `public, max-age=0, must-revalidate`.
+`staticAssets.noCachePaths` doesn't apply on this door. (The other doors'
+tiers are in [Cache-Control on uploaded files](#cache-control-on-uploaded-files).) Pruning includes the previous
 build's hashed assets: a tab opened before a deploy that then lazy-loads one of
 its chunks gets a 404 (the website's error document) and needs a reload. The page is plain HTTP and the
 API is cross-site, so an auth Building Block needs `crossDomain: true`; its
@@ -473,6 +565,15 @@ Annotations.of(stack).acknowledgeWarning('@aws-cdk-blocks/hosting:PlainHttpFront
 - **Static routes come from S3.** The edge serves the app's static routes
   from the private assets bucket (origin access control); only the API and
   the dynamic routes (server rendering, image optimization) go to the ALB.
+  The static routes include the files the framework copies from its public
+  folder (`robots.txt`, favicons, downloads), so they are cached at the edge
+  and skip the ALB's 1 MB response limit (within the edge's behavior budget;
+  over it, single files give way first, so hashed bundles such as
+  `/_astro/*` keep their S3 behavior). An Astro `public/` folder stays with
+  the server when a page could render under it: a same-named page or folder
+  in `src/pages`, a route an integration injects under it, or any top-level
+  dynamic page such as `[...slug].astro`. Its files are then subject to the
+  limit.
   The app's redirects, header rules and error pages apply at the edge to
   every response. A new build never hits the previous build's cached files,
   and the cutover waits for the build's uploads, the resolved runtime config
@@ -537,10 +638,21 @@ it is not an in-place update.
 - **The address changes.** The new door has a new URL (`HostingUrl`,
   `BLOCKS_PUBLIC_ORIGIN`, the CORS origin), so existing sessions (cookies are
   scoped to the old host) and bookmarks to the old address stop working.
+- **CloudFront → ALB or API Gateway loses the edge cache.** Routes the
+  CloudFront door served from its cache (`s-maxage`, `stale-while-revalidate`,
+  Next.js ISR pages, Nuxt `swr` routes) reach the server on every request
+  (see [Caching](#the-alb-and-api-gateway-doors-rules-and-limits)), so plan
+  for the extra server load. `HostingPresets.preview` uses the API Gateway
+  door, so a preview stack doesn't show how the CloudFront door caches.
 - **CloudFront → ALB or stacked** deletes the default distribution and its
   alarms; the ALB door's (and the router's) own alarms are on unless
   `monitoring: { enabled: false }`, and its access logs are off unless you set
   them.
+- **CloudFront → ALB or API Gateway** stops compressing server-rendered
+  responses, including the framework's own API routes (static files are
+  still gzipped by the asset proxy, and a Next.js server on Lambda behind
+  `api: 'rest'` still gzips its own); see
+  "Compression" in [the ALB and API Gateway doors](#the-alb-and-api-gateway-doors-rules-and-limits).
 - **A custom domain moving between doors** (for example the CloudFront door's
   `domain` to an API Gateway or ALB door) creates Route 53 records of the same
   name under new logical IDs, which collides with the old ones while both
@@ -620,10 +732,26 @@ const blocksStack = await BlocksStack.create(app, stackName, {
 - Outside `us-east-1`, an Edge route adds a separate `us-east-1` support stack
   for the Lambda@Edge function, so bootstrap `us-east-1` too
   (`npx cdk bootstrap aws://<account>/us-east-1`).
+- The support stack's name comes from CDK: `edge-lambda-stack-<hash>`, where
+  the hash is derived from the app stack's construct path, so the name says
+  nothing about the app it belongs to. To give it one, set `edgeStackId` on
+  `HostingConstruct`. `Hosting` from `@aws-cdk-blocks/core` names it
+  `<id>-edge` when the backend has `defaults.appIdentity` (see the core
+  README's "Running many apps in one AWS account").
+- To find the support stack, list the app's stacks from the app directory
+  (`NODE_OPTIONS="--conditions=cdk" npx cdk ls`): it's the `us-east-1` stack
+  whose id starts with `edge-lambda-stack-` (or your `edgeStackId`). The app
+  stack depends on it, so it is deployed first and deleted last.
 - `npm run sandbox:destroy` deletes every stack the sandbox deploys, the
   `us-east-1` support stack included.
 - `npm run destroy` passes no stack selection, so the CDK CLI refuses to
-  destroy an app with more than one top-level stack.
+  destroy an app with more than one top-level stack. Delete the app stack
+  first, then the support stack, by name, with
+  `NODE_OPTIONS="--conditions=cdk" npx cdk destroy <stack>` or in the
+  CloudFormation console (`us-east-1`). Lambda@Edge keeps replicas of
+  the function for a while after the distribution is deleted, and the
+  function can't be deleted until CloudFront removes them (this can take a
+  few hours), so if the support stack fails to delete, retry later.
 - A deploy that changes a Lambda@Edge function (middleware or an Edge route)
   publishes a new function version and keeps the previous one. CloudFront
   removes the old version's replicas only hours after the distribution stops
@@ -690,6 +818,23 @@ const blocksStack = await BlocksStack.create(app, stackName, {
   until then Lambda rejects the delete, so wait a few hours after the deploy
   that replaced it and try again. That rejection also protects a version that
   another distribution still uses.
+
+## SvelteKit: the supported version
+
+The SvelteKit adapter supports **SvelteKit 2 only**: `@sveltejs/kit`
+`>=2.0.0 <3.0.0`, built with `@sveltejs/adapter-node` 5, with the SvelteKit
+config in `svelte.config.js`.
+
+- SvelteKit 3, which `npx sv create` scaffolds today, is not supported yet.
+  Synth refuses it with `UnsupportedSvelteKitVersionError` before it runs the
+  app's build. Support is tracked in
+  [#984](https://github.com/aws/cdk-blocks/issues/984).
+- To deploy a project scaffolded with SvelteKit 3, pin the SvelteKit 2
+  toolchain and move the SvelteKit config back to `svelte.config.js`:
+
+  ```bash
+  npm install -D @sveltejs/kit@^2 @sveltejs/adapter-node@^5 @sveltejs/vite-plugin-svelte@^5 vite@^6
+  ```
 
 ## SvelteKit: the server's dependencies
 
@@ -925,6 +1070,48 @@ without it. While it is set:
   rate limit. The next deploy attaches it;
 - synth warns (`@aws-cdk-blocks/hosting:AcceptLegacyVerifyHeader`).
 
+### Header hygiene
+
+Hosting removes response headers that name internal resources, and keeps the
+request ids that the services in front of the server add. A request id names
+one request, so AWS Support can trace it; it grants no access.
+
+| Header | Added by | Door | Hosting |
+|---|---|---|---|
+| `lambda-web-logstream` (the log stream and revision) | Lambda Web Functions | CloudFront | Removed by the response headers policy Hosting creates (see [SSR compute](#ssr-compute-lambda-or-lambda-web-functions)) |
+| `lambda-web-request-id` | Lambda Web Functions | CloudFront | Kept |
+| `x-amzn-requestid`, `x-amz-apigw-id` | API Gateway REST API: the server origin (`compute.type: 'lambda'`), or the `apiGateway` door with `api: 'rest'` | CloudFront, `apiGateway` | Kept |
+| `apigw-requestid` | API Gateway HTTP API | `apiGateway` (`api: 'http'`) | Kept |
+
+An app that doesn't want the request ids in its responses can remove them on
+the CloudFront door with a response headers policy of its own, passed as
+`frontDoor.features.responseHeadersPolicy`. Your policy replaces the one
+Hosting picks, so give it the security headers you want, and with Web
+Functions keep `lambda-web-logstream` in `removeHeaders`:
+
+```ts
+import { Duration } from 'aws-cdk-lib';
+import { HeadersFrameOption, HeadersReferrerPolicy, ResponseHeadersPolicy } from 'aws-cdk-lib/aws-cloudfront';
+
+const headers = new ResponseHeadersPolicy(stack, 'Headers', {
+	securityHeadersBehavior: {
+		strictTransportSecurity: { accessControlMaxAge: Duration.days(365), override: false },
+		contentTypeOptions: { override: true },
+		frameOptions: { frameOption: HeadersFrameOption.SAMEORIGIN, override: false },
+		xssProtection: { protection: true, modeBlock: true, override: false },
+		referrerPolicy: { referrerPolicy: HeadersReferrerPolicy.STRICT_ORIGIN_WHEN_CROSS_ORIGIN, override: false },
+	},
+	removeHeaders: ['x-amz-apigw-id', 'lambda-web-request-id', 'lambda-web-logstream'],
+});
+// frontDoor: { features: { responseHeadersPolicy: headers } }
+```
+
+- CloudFront can't remove `x-amzn-requestid`: it is on CloudFront's list of
+  headers a response headers policy can't remove, and a policy that lists it
+  fails to deploy.
+- The `apiGateway` door has no response headers policy, so its request ids
+  stay.
+
 ## Build retention & rollback
 
 Each deploy uploads its assets under an immutable `builds/<buildId>/` prefix.
@@ -952,6 +1139,42 @@ new HostingConstruct(stack, 'Hosting', {
   },
 });
 ```
+
+### Cache-Control on uploaded files
+
+On the CloudFront, ALB and API Gateway doors, each file uploaded from the
+static directory to the private bucket gets one of these `Cache-Control`
+values (the `'none'` door uses its own tiers, see
+[The `'none'` door](#the-none-door)):
+
+| Files | `Cache-Control` |
+|---|---|
+| Hashed assets (`staticAssets.immutablePaths`) | `public, max-age=31536000, immutable` |
+| HTML (`*.html`, prerendered pages included) | `max-age=0, must-revalidate` |
+| `staticAssets.noCachePaths` | `no-cache, no-store, must-revalidate` |
+| Fonts (`.woff2`, `.woff`, `.ttf`, `.otf`, `.eot`), hashed ones included | `staticAssets.cacheControl`, else `public, s-maxage=31536000, max-age=0, must-revalidate` |
+| Everything else | `staticAssets.cacheControl`, else `public, s-maxage=31536000, max-age=0, must-revalidate` |
+
+Fonts are uploaded again with an explicit `Content-Type`, after the other
+files, so a hashed font under `immutablePaths` (for example Next.js
+`_next/static/media/*.woff2`) gets the mutable value, not `immutable`:
+CloudFront still caches it, for up to a year on a static-only site and up to
+one day on an app with a server, and the browser revalidates it. The error
+pages the construct uploads itself (`errorPages.notFound`,
+`errorPages.serverError` and the default 404 page) carry no `Cache-Control`.
+
+HTML is revalidated on every request, and because it carries no `no-store`,
+the CloudFront door keeps a copy at the edge and answers a repeat visit's
+`If-None-Match` with `304 Not Modified`. The first request after a deploy
+still gets the new build's HTML: every HTML request resolves to the current
+build's `builds/<buildId>/` key before the cache lookup, so a deploy changes
+the cache key. These files are the build's prerendered, public pages; a
+signed-in or per-user page comes from the server, whose own `Cache-Control`
+applies. On the ALB and API Gateway doors, the asset proxy answers a repeat
+visit's `If-None-Match` for HTML with `304 Not Modified` too, and that 304
+carries the same header rules as the 200, so a browser's stored copy keeps the
+app's headers. The `'none'` door has no CDN in front of its S3 website and keeps
+`no-cache, no-store, must-revalidate` on HTML.
 
 ## Access logging
 
@@ -1044,13 +1267,46 @@ are cached as its `Cache-Control` says. The guard sends
   and the response is shared-cacheable: `s-maxage`, `public`, `max-age` without
   `private`, a future `Expires`, no caching headers while `ssrDefaultTtl > 0`,
   or an error status CloudFront caches without caching headers (404, 414 and
-  500 to 504).
+  500 to 504); or
+- behind the CloudFront door or the stacked door, the response is
+  shared-cacheable and its `Vary` names a request header that the server-route
+  cache key does not hold, or is `Vary: *`. CloudFront ignores `Vary`, so it
+  would store one copy and serve it for every value of that header (for
+  example a page rendered from `Accept-Language`, served in the first
+  visitor's language to everyone). `Accept-Encoding` is always in the key.
+  The Next.js router headers (`RSC`, `Next-Router-State-Tree`,
+  `Next-Router-Prefetch`, `Next-Router-Segment-Prefetch`, `Next-Action`) count
+  as keyed too: the CloudFront door's key holds them as request headers, and
+  the stacked door's holds the query string, whose `_rsc` parameter Next.js
+  derives from them and `Next-Url`. On the CloudFront door `cacheKeyHeaders`
+  are keyed as well, and `Next-Url` is not: Next.js adds `Vary: Next-Url` to
+  App Router pages whose path an intercepting route can match (for example
+  `app/@modal/(.)photos/[id]/page.tsx`), so on that door those pages are not
+  edge-cached unless `next-url` is in `cacheKeyHeaders`. `Vary: Cookie` alone never leads to a rewrite: cookies
+  follow the cookie rule above (and are all in the key behind the stacked
+  door). The response keeps its `Vary`
+  header for the browser, and the server logs once per header name why the
+  guard rewrote it. The ALB, API Gateway and custom doors put no CloudFront
+  cache the guard knows in front of the server, so `Vary` is not read there.
 
 Responses that are already `private`/`no-store`, or `no-cache` without
 `s-maxage`, are left as they are. To keep a credentialed route cacheable, list
 its credential in `cacheKeyCookies`/`cacheKeyHeaders` so the cache is keyed per
 credential. Any route that otherwise varies per user should still emit
 `Cache-Control: private`.
+
+To edge-cache a route that varies on a request header, add the header to the
+cache key on the CloudFront door, so one copy is cached per value:
+
+```ts
+frontDoor: { features: { cacheKeyHeaders: ['accept-language'] } }
+```
+
+Behind the stacked door the server-route cache key holds no request headers
+(only the query string, the Next.js `_rsc` parameter included, and every
+cookie), so a route that varies on a header other than `Accept-Encoding`,
+`Cookie` or the Next.js router headers is sent as `private, no-store`; put the
+value in the path or the query string to cache it.
 
 Client-side analytics and consent cookies (`_ga`, `_gid`, `_fbp`, a consent
 manager's cookie) are not in the cache key, so by default a visitor carrying one
@@ -1065,8 +1321,8 @@ frontDoor: { features: { cacheKeyCookies: ['session'], cacheGuardIgnoredCookies:
 ```
 
 Behind the stacked door the server-route cache key holds every
-cookie, so cookies never lead to a rewrite there; `Authorization` and
-`Set-Cookie` still do.
+cookie, so cookies (and `Vary: Cookie`) never lead to a rewrite there;
+`Authorization`, `Set-Cookie` and a `Vary` header outside the key still do.
 
 CloudFront caches the 500, 501, 502, 503 and 504 responses of an origin for the
 error caching minimum TTL and, except for 501, does so whatever their
@@ -1075,8 +1331,9 @@ stacked door) therefore sets that TTL to 0 for those statuses,
 keeping any error page configured for them.
 
 The guard models CloudFront's own caching inputs only: `CDN-Cache-Control` and
-`Surrogate-Control` are not CloudFront TTL inputs, and CloudFront ignores `Vary`
-for the cache key, so the guard does not read them.
+`Surrogate-Control` are not CloudFront TTL inputs, so the guard does not read
+them. It reads `Vary` only to find responses CloudFront would share across
+values of a header outside the key (above); it never adds a header to the key.
 
 CloudFront uses `max-age` as its edge TTL when `s-maxage` is absent, so a bare
 `max-age` is cached at the edge and counts as shared-cacheable. A credentialed
@@ -1110,6 +1367,59 @@ an image optimizer that name is reserved and synth rejects it in
 of the cache-key header slots; when `cacheKeyHeaders` already uses all five, it
 stays out of the key and synth warns with
 `@aws-cdk-blocks/hosting:ImageAcceptNotInCacheKey`.
+
+### On-demand revalidation (Next.js)
+
+OpenNext serves an ISR page with `s-maxage` set to the time left in its
+`revalidate` window, and CloudFront keeps it for that long. So that
+`revalidateTag()`, `revalidatePath()` and `res.revalidate()` show up at the
+edge straight away, the Next.js server behind the CloudFront door invalidates
+the distribution after each on-demand revalidation:
+
+- `revalidateTag('posts')` invalidates every cached page that used data tagged
+  `posts` (through `fetch` or `unstable_cache`), as listed in the tag cache.
+- `revalidatePath('/blog/hello')` invalidates `/blog/hello`. A layout or
+  dynamic-segment form (`revalidatePath('/blog/[slug]', 'page')`) invalidates
+  the cached pages under it.
+- Each page gets one wildcard path, `/blog/hello*`, which covers its HTML and
+  RSC payload, its query-string variants (`/blog/hello?ref=x`, cached apart
+  because the SSR cache policy keys on the query string) and its
+  `trailingSlash: true` form (`/blog/hello/`). The wildcard also takes URLs
+  that start with the same characters (`/blog/hello-world`, `/blog/hello/2`);
+  those pages cost one extra origin request. The root page gets the exact `/`
+  instead (a `/*` would purge the whole distribution), so its query-string
+  variants keep their cached copy until their `s-maxage` runs out.
+- A Pages Router page also gets its data route
+  (`/_next/data/<build id>/blog/hello.json*`).
+- With a `basePath` the paths are prefixed with it.
+- CloudFront allows 15 wildcard paths in progress per account at once. A
+  revalidation that needs more than 15 (16 App Router pages, or 8 Pages Router
+  pages with their data routes) issues a single `/*` (`<basePath>*` with a
+  `basePath`) instead. If CloudFront rejects a request because other
+  invalidations are still in progress, the server retries once with that
+  single `/*`.
+
+Each revalidation issues one CloudFront invalidation request. CloudFront allows
+1,000 invalidation paths a month at no charge and bills each path after that
+(a `/*` counts as one). The construct gives the server
+`cloudfront:CreateInvalidation` on its own distribution only, and the
+distribution id through an SSM parameter (`ssm:GetParameter` on that parameter
+only). An invalidation usually completes within seconds and can take a few
+minutes. A revalidation still succeeds if the invalidation fails: the
+error is logged in the server function's log group, and the edge keeps the old
+page until its `s-maxage` runs out.
+
+This is set up when the adapter generates `open-next.config.ts` (the default)
+and the build uses `@opennextjs/aws` 4.1.14 or later (the adapter's default;
+earlier releases don't pass `revalidateTag` to the handler). It is not set up
+for an older `@opennextjs/aws`, a project with its own `open-next.config.ts`, a
+build with `runtime: 'edge'` routes (OpenNext also compiles the config for the edge
+runtime, where the handler can't run), a preview deploy without the tag cache,
+or front doors other than CloudFront (they don't cache SSR responses). There,
+an on-demand revalidation reaches the edge once the page's `s-maxage` runs out
+(at most 1 day). To make it visible sooner, lower the page's `revalidate` (a
+shorter `s-maxage`), or invalidate the paths yourself after revalidating them
+(`aws cloudfront create-invalidation`).
 
 ## Custom domains (CloudFront door)
 
@@ -1193,8 +1503,18 @@ alarm and its own encrypted SNS topic. There is no opt-out.
   `us-east-1`.
 - With the region resolved and the account unresolved, only the CloudFront
   alarm is skipped, with a synth warning. All other alarms are kept.
-- A stack with an unresolved region creates the alarm locally and warns that
-  it never fires if the app deploys outside `us-east-1`.
+- A stack with no `env` is environment-agnostic: its region is unresolved at
+  synth. The alarm is then created in the hosting stack, where it works only
+  if the stack is deployed to `us-east-1`. The CDK CLI deploys such a stack to
+  the region it exports as `CDK_DEFAULT_REGION`, so synth reports
+  `@aws-cdk-blocks/hosting:CloudFrontAlarmRegionUnresolved` as:
+  - an info when that region is `us-east-1`. The alarm works there. It never
+    fires if the same synthesized app is deployed to another region later.
+  - a warning when it is any other region. The alarm never fires.
+  - a warning when the variable is unset (a synth outside the CDK CLI). The
+    region is unknown.
+
+  In all three cases the fix is `env: { account, region }` on the stack.
 - In `us-east-1` the alarm stays in the hosting stack.
 
 Subscribe with endpoint subscriptions (`EmailSubscription` /
@@ -1217,6 +1537,33 @@ new HostingConstruct(this, 'Hosting', {
 
 Lambda and SQS subscriptions are not supported. For a custom action, use the
 alarms in `hosting.monitoring.alarms`.
+
+Until an endpoint is subscribed, the alarms notify no one: an alarm changes
+state in CloudWatch and nothing is sent. While an alarm topic has alarms and
+no subscriber, synth prints an info,
+`@aws-cdk-blocks/hosting:MonitoringAlarmTopicHasNoSubscribers`. It is an info
+and not a warning because monitoring is on by default and a new app has no
+endpoint to subscribe yet. To clear it, do one of these:
+
+- Pass `monitoring.subscriptions`, as above.
+- Subscribe an endpoint to the topic outside the app. Its ARN is the
+  `MonitoringTopicArn` stack output (CDK prefixes the output key with the
+  construct path and appends a hash). Synth can't see a subscription made
+  outside the app, so acknowledge the info too.
+- Add your own action to every alarm in `hosting.monitoring.alarms`.
+- Acknowledge it, to leave the topics unsubscribed on purpose. Each topic
+  reports on its own stack, and outside `us-east-1` the companion stack has
+  the second one:
+
+  ```ts
+  import { Annotations, Stack } from 'aws-cdk-lib';
+
+  for (const topic of hosting.monitoring?.alarmTopics ?? []) {
+    Annotations.of(Stack.of(topic)).acknowledgeInfo(
+      '@aws-cdk-blocks/hosting:MonitoringAlarmTopicHasNoSubscribers',
+    );
+  }
+  ```
 
 ## Secrets & config
 
@@ -1462,6 +1809,7 @@ synth. `error.name` and `error.code` hold the name in the table, and
 | `UnsupportedComputeFrontDoorError` | `compute.type: 'web-function'` behind a door other than CloudFront. |
 | `UnsupportedFrontDoorError` | `frontDoor` is not a front door, `'none'` is set for an app with a server, or a custom door fails the wiring check. |
 | `UnsupportedFrontDoorSettingError` | The door kind doesn't implement a setting. |
+| `UnsupportedSvelteKitVersionError` | The installed `@sveltejs/kit` is not SvelteKit 2 (`>=2.0.0 <3.0.0`). Thrown before the app's build runs. |
 | `UnsupportedRoutePatternError` | ALB: one pattern has more than six wildcards. API Gateway: a backend route has a wildcard other than one trailing `/*`. |
 | `WafRegionError` | A CloudFront-scoped WAF is enabled in a known region outside us-east-1 and region validation isn't skipped. |
 | `WebFunctionPolicyAlreadySetError` | `allowCloudFrontInvoke()` was called twice on the same Web Function. |

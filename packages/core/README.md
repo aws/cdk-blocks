@@ -33,11 +33,22 @@ see the `@aws-cdk-blocks/bb-compute` README for what follows it.
 A block's resource names (its table, bucket or queue, and its local `.cdk-blocks/local/data`
 directory) come from its `fullId`: the scope ids from the root down, joined with
 `-`. Two different scope paths that join to the same string, such as
-`'user-service' > 'sessions'` and `'user' > 'service-sessions'`, share those
-resources and overwrite each other's data. Constructing the second one logs a
-warning naming both paths (a `blocks:scope:fullIdCollision` warning at `cdk
-synth`); rename one of the scopes. Constructing the same path again is
-accepted.
+`'user-service' > 'sessions'` and `'user' > 'service-sessions'`, get the same
+resource names. Constructing the second one logs a warning naming both paths (a
+`blocks:scope:fullIdCollision` warning at `cdk synth`); rename one of the
+scopes. Constructing the same path again is accepted. What happens next
+depends on where the app runs:
+
+- Locally the two blocks share their `.cdk-blocks/local/data` directory and
+  read and overwrite each other's data.
+- On AWS the two cannot both deploy, because CloudFormation rejects a second
+  table, queue, schedule, bucket, secret, parameter, log group or Lambda
+  function with a name that already exists in the stack. `cdk synth` fails
+  instead, listing the name and the construct paths of the resources that use
+  it. Colliding scopes that create no resource with a name still synth, with
+  the warning. Only names that are literal strings at synth are compared, and
+  a resource behind a CloudFormation `Condition` is skipped, because it may be
+  the only one of its name that deploys.
 
 Use lowercase letters, digits and hyphens in scope and block ids. An id is part
 of the name of each resource created under it, unescaped, and every service
@@ -313,7 +324,7 @@ Start `defaults` from `BlocksPresets.sandbox` or `BlocksPresets.production` and 
 | `pointInTimeRecovery` | `boolean \| { retentionDays: number }` | `false` | `true` | Continuous backups on stateful resources that support them (DynamoDB point-in-time recovery: 1–35 days). |
 | `logRetention` | `RetentionDays` | `RetentionDays.ONE_WEEK` | `RetentionDays.ONE_YEAR` | Retention of the CloudWatch log groups CDK Blocks manages. |
 | `throttling` | `BlocksThrottling` (`{ rateLimit: number; burstLimit: number }`) | `{ rateLimit: 200, burstLimit: 400 }` | `{ rateLimit: 1000, burstLimit: 2000 }` | Requests per second and burst on the shared REST API stage; messages per second on the `Realtime` WebSocket stage. |
-| `accessLogging` | `boolean` | `false` | `false` | JSON access logs on the shared REST API and Realtime WebSocket stages. Hosting's CloudFront SSR origin uses `frontDoor.features.serverOrigin.accessLogging` instead. This is also the fallback for `storageAccessLogging`. The API Gateway CloudWatch Logs role is account- and region-wide; enable it in one CDK Blocks stack per account and region. While it is off and `removalPolicy` is not `DESTROY`, synth warns `blocks:apigateway:access-logging-disabled`. |
+| `accessLogging` | `boolean` | `false` | `false` | JSON access logs on the shared REST API and Realtime WebSocket stages. Hosting's CloudFront SSR origin uses `frontDoor.features.serverOrigin.accessLogging` instead. This is also the fallback for `storageAccessLogging`. The API Gateway CloudWatch Logs role is account- and region-wide; enable it in one CDK Blocks stack per account and region. While it is off and `removalPolicy` is not `DESTROY`, synth prints the info `blocks:apigateway:access-logging-disabled` (an info, not a warning: it does not fail `cdk synth --strict`). To hide it, call `Annotations.of(stack).acknowledgeInfo('blocks:apigateway:access-logging-disabled')` on the stack or backend that `create()` returns. |
 | `storageAccessLogging` | `boolean` | unset | unset | S3 server access logs for CDK Blocks-provisioned FileBucket buckets. Unset falls back to `accessLogging`. Configure logging on imported buckets separately. |
 | `secretsStore` | `BlocksSecretsStore` (`'ssm' \| 'secrets-manager'`) | `'ssm'` | `'secrets-manager'` | Where CDK Blocks stores the secrets it generates (the `Auth` session secret, the `Realtime` connection token key). Changing it on a deployed stack creates new keys, which signs every `Auth` user out once. |
 | `vpc` | `BlocksVpcOptions` | unset | unset | A VPC for the app's compute and VPC-resident resources. |
@@ -546,7 +557,7 @@ new RawRoute(scope, 'user', {
 // GET /users/42?q=hello → {"id":"42","q":"hello"}
 ```
 
-Path syntax: exact (`/health`), named parameter capturing one segment (`/users/{id}`), or a trailing wildcard capturing the rest (`/files/*`, available as `params['*']`). One wildcard per route, last segment only. Named parameters are URL-decoded; wildcard captures are not, so validate them before touching a filesystem or an S3 key.
+Path syntax: exact (`/health`), named parameter capturing one segment (`/users/{id}`), or a trailing wildcard capturing the rest (`/files/*`, available as `params['*']`). One wildcard per route, last segment only. A route can't be registered at the root, and the root path (`/`) matches no route, not even `/*`: it answers `404`. Named parameters are URL-decoded; wildcard captures are not, so validate them before touching a filesystem or an S3 key.
 
 To sub-route under a wildcard, match on `params['*']` (or `url.pathname`, which is the same path in every environment) rather than on a full URL.
 
@@ -600,12 +611,14 @@ new Hosting(stack, 'Web', {
 
 The `framework` option selects the frontend type: `'spa' | 'static' | 'nextjs'`. When omitted, it is detected from your app's own `package.json` (not `node_modules`): a `next` dependency → `nextjs`; otherwise `spa`; and `static` when there is no `package.json`. Set `framework: 'spa'` to override the detection, for example when a stray `next` dependency would trigger a Next.js/OpenNext build.
 
-`buildCommand` runs during synth, with `BLOCKS_API_URL` set to the backend the frontend talks to, and then the framework adapter runs its own build (OpenNext, Nitro, Astro, SvelteKit). Two synths skip both:
+`buildCommand` runs during synth, with `BLOCKS_API_URL` set to the backend the frontend talks to, and then the framework adapter runs its own build (OpenNext, Nitro, Astro, SvelteKit). Before `buildCommand` runs, `Hosting` refuses a framework version its adapter doesn't support, so a deploy doesn't wait for a build that is then rejected: SvelteKit 3 fails with `UnsupportedSvelteKitVersionError` (Hosting supports SvelteKit 2; see the `@aws-cdk-blocks/hosting` README). Two synths skip both:
 
 - **Destroy.** `npm run destroy` and `npm run sandbox:destroy` reuse the build output already on disk and build only when there is none, for example on a fresh clone. Each framework adapter checks the output it deploys: a Next.js destroy reuses the `.open-next/` output of an earlier deploy, and with only `.next/` (after a plain `next build`) OpenNext still builds. An exported `BLOCKS_SKIP_FRONTEND_BUILD=1` doesn't apply to a destroy.
 - **A deploy with `BLOCKS_SKIP_FRONTEND_BUILD=1`**, for example `BLOCKS_SKIP_FRONTEND_BUILD=1 npm run deploy`, deploys what is already in the build output directory. A missing build output (the output directory, or the output the framework adapter deploys, such as Next.js's `.open-next/`) fails the synth with a message naming the variable. The build bakes in `BLOCKS_API_URL`, so only reuse a build made for the same backend; a deploy never reuses one on its own.
 
 `buildRetentionDays` (default 30) is how many days superseded builds are kept for rollback. It maps to the hosting construct's `storage.buildRetentionDays` and must be ≥ `skewProtection.maxAge` in days. The [`@aws-cdk-blocks/hosting` README](../hosting/README.md) has the retention and cleanup rules.
+
+**The Lambda@Edge stack.** An app with Lambda@Edge functions (a Next.js `runtime: 'edge'` route, or middleware built as Lambda@Edge) in a stack outside `us-east-1` gets a second stack in `us-east-1` that holds them. CDK names it `edge-lambda-stack-<hash>`, a name that doesn't say which app it belongs to; with `defaults.appIdentity` set, `Hosting` names it `<id>-edge` (see [Running many apps in one AWS account](#running-many-apps-in-one-aws-account-a-shared-platform)). `NODE_OPTIONS="--conditions=cdk" npx cdk ls` lists it with the app's stacks, and `npm run sandbox:destroy` deletes it with the sandbox. `npm run destroy` doesn't select stacks, so delete a production app's stacks by name, the app stack first; the `@aws-cdk-blocks/hosting` README's "Edge routes" section has the steps.
 
 ### Front door and its settings
 
@@ -639,7 +652,7 @@ A `config()` domain works in `frontDoor.features.domain` too, through the async 
 The [`@aws-cdk-blocks/hosting` README](../hosting/README.md) documents each door: the settings each kind takes, the stacked door's settings per layer, and writing your own. The rules that fail a synth or a deploy:
 
 - **Plain HTTP.** A door without a certificate serves plain HTTP: the `{ kind: 'alb' }` door without a `certificate` and `features.domain`, and the stacked door's edge → router hop without a router `certificate` and `features.router.domain`. Outside a sandbox deploy, synth fails for the `alb` door with an API (`PlainHttpFrontDoorError`) and for a stacked door whose router is not `internal: true` (`OriginSecretOverPlainHttpError`); a sandbox deploy warns. If the network path is trusted (a private network, or TLS ended upstream), `allowPlainHttp: true` on the `alb`, `custom` or `stacked` door lets a production deploy synthesize.
-- **Switching `frontDoor` on a deployed app** replaces the front door: the URL changes (sessions scoped to the old host end), and a custom domain moving from one door to another collides in Route 53 while both exist. Remove it from the old door first.
+- **Switching `frontDoor` on a deployed app** replaces the front door: the URL changes (sessions scoped to the old host end), and a custom domain moving from one door to another collides in Route 53 while both exist. Remove it from the old door first. The ALB and API Gateway doors have no edge cache, so moving to one from the CloudFront door (or the stacked door) sends every request to the server: `s-maxage` and `stale-while-revalidate` store nothing there, Next.js ISR and Nuxt `swr` cache only server-side, and synth warns (`@aws-cdk-blocks/hosting:NoEdgeCache`) when the app's header rules ask for edge caching. See the `@aws-cdk-blocks/hosting` README.
 - **Top-level props.** The top-level `domain`, `waf`, `logging`, `monitoring`, `skewProtection`, `contentSecurityPolicy`, `priceClass`, `geoRestriction`, `quotas`, `ssrDefaultTtl`, `cacheKeyCookies` and `cacheKeyHeaders` props are deprecated aliases of the same names in `frontDoor.features`. Setting one both ways fails synth (`FrontDoorSettingConflictError`), and so does a top-level prop the chosen kind doesn't implement (`UnsupportedFrontDoorSettingError`; the stacked door takes its settings per layer only).
 
 ### Preview mode and `HostingPresets`
@@ -663,7 +676,7 @@ new Hosting(stack, 'Web', { ...HostingPresets.preview, imageOptimization: true, 
 
 | Prop | Value | Effect |
 |---|---|---|
-| `frontDoor` | `{ kind: 'apiGateway' }` | The API Gateway HTTP API door: no CloudFront; buffered server responses, about 6 MB each |
+| `frontDoor` | `{ kind: 'apiGateway' }` | The API Gateway HTTP API door: no CloudFront; buffered server responses, about 6 MB each; no edge cache, so `s-maxage` and `stale-while-revalidate` routes reach the server on every request (a preview doesn't show how the CloudFront door caches) |
 | `imageOptimization` | `false` | No image function; the image endpoints serve the source image (a remote one is redirected only when its host is in the app's image allowlist, else 404) |
 | `incrementalRegeneration` | `false` | Next.js builds without the tag cache and revalidation queue; prerendered pages come from the build's snapshot |
 | `edgeRoutes` | `'regional'` | Next.js `runtime: 'edge'` routes run as regional Lambda functions, not Lambda@Edge |
