@@ -444,7 +444,9 @@ const inbox = new FileBucket(scope, 'inbox', {
 
 export const api = new ApiNamespace(scope, 'api', (context) => ({
   async getUploadUrl(name: string) {
-    return inbox.putUrl(`incoming/${encodeURIComponent(name)}`); // the handler still runs
+    const user = await auth.requireAuth(context);
+    // The handler still runs for this direct upload.
+    return inbox.putUrl(`incoming/${encodeURIComponent(user.userId)}/${encodeURIComponent(name)}`);
   },
 }));
 ```
