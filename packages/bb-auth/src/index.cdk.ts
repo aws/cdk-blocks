@@ -596,6 +596,9 @@ export class Auth<const O extends AuthOptions = AuthOptions> extends BuildingBlo
 	getSignInUrl(..._args: unknown[]): never {
 		return synthGuard('Auth', 'getSignInUrl');
 	}
+	signInVerified(..._args: unknown[]): never {
+		return synthGuard('Auth', 'signInVerified');
+	}
 	signUp(..._args: unknown[]): never {
 		return synthGuard('Auth', 'signUp');
 	}

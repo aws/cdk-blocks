@@ -277,6 +277,7 @@ export class AuthBase<const O extends AuthOptions = AuthOptions> extends Scope i
         sharedSecret: string;
     }>;
     signIn(username: string, password: string, context: BlocksContext, ...ERROR_emailPassword_is_disabled_on_this_Auth_instance: PasswordGate<O, [options?: SignInOptions]>): Promise<SignInResult<O>>;
+    signInVerified(provider: VerifiedProviderIdOf<O>, identity: VerifiedIdentity, context: BlocksContext, ...ERROR_no_verified_provider_is_configured: VerifiedGate<O>): Promise<AuthenticatedUser<O>>;
     signOut(context: BlocksContext, options?: SignOutOptions): Promise<void>;
     protected signOutRedirect(context: BlocksContext): string | undefined;
     signUp(username: string, password: string, ...ERROR_emailPassword_is_disabled_on_this_Auth_instance: PasswordGate<O, [
@@ -350,7 +351,7 @@ export interface AuthenticatedUser<O extends AuthOptions = AuthOptions> extends 
     groups: GroupOf<O>[];
     signInProvider: O extends {
         store: 'builtin';
-    } ? ProviderIdOf<O> : 'password' | ProviderIdOf<O>;
+    } ? ProviderIdOf<O> | VerifiedProviderIdOf<O> : 'password' | ProviderIdOf<O>;
     userSub: string;
 }
 
@@ -415,6 +416,7 @@ export interface AuthShape<O extends AuthOptions = AuthOptions> extends BlocksAu
         sharedSecret: string;
     }>;
     signIn(username: string, password: string, context: BlocksContext, ...ERROR_emailPassword_is_disabled_on_this_Auth_instance: PasswordGate<O, [options?: SignInOptions]>): Promise<SignInResult<O>>;
+    signInVerified(provider: VerifiedProviderIdOf<O>, identity: VerifiedIdentity, context: BlocksContext, ...ERROR_no_verified_provider_is_configured: VerifiedGate<O>): Promise<AuthenticatedUser<O>>;
     signOut(context: BlocksContext, options?: SignOutOptions): Promise<void>;
     signUp(username: string, password: string, ...ERROR_emailPassword_is_disabled_on_this_Auth_instance: PasswordGate<O, [
     options?: SignUpOptions<O>,
@@ -437,7 +439,7 @@ export interface AuthStateUser<O extends AuthOptions = AuthOptions> extends Omit
     groups: GroupOf<O>[];
     signInProvider: O extends {
         store: 'builtin';
-    } ? ProviderIdOf<O> : 'password' | ProviderIdOf<O>;
+    } ? ProviderIdOf<O> | VerifiedProviderIdOf<O> : 'password' | ProviderIdOf<O>;
     userSub: string;
 }
 
@@ -494,7 +496,7 @@ export interface BuiltinAuthOptions extends AuthCommonOptions {
 }
 
 // @public
-export type BuiltinProvider = DirectOidcProvider | OAuth2Provider | StubProvider;
+export type BuiltinProvider = DirectOidcProvider | OAuth2Provider | StubProvider | VerifiedProvider;
 
 // @public
 export type BuiltinUserOptions = Pick<UserPoolOptions, 'groups'> & {
@@ -757,6 +759,9 @@ export type GroupOf<O extends AuthOptions> = O extends {
 
 // @public
 export type HasFederatedProvider<O extends AuthOptions> = [ProviderIdOf<O>] extends [never] ? false : AuthOptions extends O ? false : true;
+
+// @public
+export type HasVerifiedProvider<O extends AuthOptions> = [VerifiedProviderIdOf<O>] extends [never] ? false : AuthOptions extends O ? false : true;
 
 // @public
 export interface HostedUiOptions {
@@ -1024,7 +1029,9 @@ export interface ProviderCommon {
 // @public
 export type ProviderIdOf<O extends AuthOptions> = O extends {
     providers?: infer P;
-} ? [P] extends [undefined] ? never : keyof NonNullable<P> & string : never;
+} ? [P] extends [undefined] ? never : {
+    [K in keyof NonNullable<P> & string]: [NonNullable<NonNullable<P>[K]>] extends [never] ? K : [Exclude<NonNullable<NonNullable<P>[K]>, VerifiedProvider>] extends [never] ? never : K;
+}[keyof NonNullable<P> & string] : never;
 
 // @public
 export type ProviderSecretRef = AppSettingRef | SecretRef;
@@ -1279,6 +1286,30 @@ export interface UserPoolOptions {
     preferredChallenge?: PreferredChallenge;
     signInWith?: readonly ('username' | 'email' | 'phone')[];
 }
+
+// @public
+export type VerifiedGate<O extends AuthOptions, T extends unknown[] = []> = [HasVerifiedProvider<O>] extends [true] ? T : [ERROR_no_verified_provider_is_configured: never];
+
+// @public
+export interface VerifiedIdentity {
+    claims?: Record<string, unknown>;
+    groups?: readonly string[];
+    subject: string;
+}
+
+// @public
+export interface VerifiedProvider {
+    type: 'verified';
+}
+
+// @public
+export type VerifiedProviderIdOf<O extends AuthOptions> = O extends {
+    providers?: infer P;
+} ? [P] extends [undefined] ? never : {
+    [K in keyof NonNullable<P> & string]: [
+    Extract<NonNullable<NonNullable<P>[K]>, VerifiedProvider>
+    ] extends [never] ? never : K;
+}[keyof NonNullable<P> & string] : never;
 
 // (No @packageDocumentation comment for this package)
 

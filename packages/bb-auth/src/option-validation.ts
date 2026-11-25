@@ -85,6 +85,7 @@ import type {
 	StubUser,
 	UserAttribute,
 	UserPoolOptions,
+	VerifiedProvider,
 } from './types.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -296,6 +297,10 @@ const STUB_PROVIDER = {
 	stubIdp: { object: STUB_IDP },
 } as const satisfies ShapeOf<StubProvider>;
 
+const VERIFIED_PROVIDER = {
+	type: 'value',
+} as const satisfies ShapeOf<VerifiedProvider>;
+
 const SAML_PROVIDER = {
 	...PROVIDER_COMMON,
 	type: 'value',
@@ -322,6 +327,7 @@ const PROVIDER_VARIANTS = {
 		oidc: DIRECT_OIDC,
 		oauth2: OAUTH2_PROVIDER,
 		stub: STUB_PROVIDER,
+		verified: VERIFIED_PROVIDER,
 	} satisfies { readonly [T in BuiltinProvider['type']]: Shape },
 } satisfies { readonly [S in AuthStore]: ShapesByType };
 

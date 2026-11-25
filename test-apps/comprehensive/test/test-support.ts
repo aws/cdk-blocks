@@ -52,6 +52,7 @@ export const isDeployedE2e = ENV === 'sandbox' || ENV === 'production';
  * e2e synth registers exactly these and a normal synth none of them.
  */
 export const TEST_SUPPORT_METHODS = [
+  'verifiedSignIn',
   'provisionUser',
   'authPurgeDeliveredCodes',
   'authCAdminCreateUser',

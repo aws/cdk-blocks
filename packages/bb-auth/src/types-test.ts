@@ -64,6 +64,7 @@ import type {
 	SignInUrlOptions,
 	UserCandidate,
 	UserPoolOptions,
+	VerifiedProviderIdOf,
 } from './index.mock.js';
 import { Auth, customOauth2, github, stubIdp } from './index.mock.js';
 import type { AUTH_OPTIONS_SHAPE } from './option-validation.js';
@@ -1148,7 +1149,64 @@ type _builtinBearer = Expect<
 	>
 >;
 
+async function verifiedProviders() {
+	const auth = new Auth(scope, 'verified', {
+		store: 'builtin',
+		providers: {
+			appleNative: { type: 'verified' },
+			okta: { type: 'oidc', issuer: 'https://dev-12345.okta.com', clientId: '0oa-okta' },
+		},
+	});
+	type O = OptionsOf<typeof auth>;
+	type _verifiedIds = Expect<Equal<VerifiedProviderIdOf<O>, 'appleNative'>>;
+	type _redirectIds = Expect<Equal<ProviderIdOf<O>, 'okta'>>;
+	type _actionNames = Expect<Equal<FederatedActionNameOf<O>, 'signIn:okta'>>;
+
+	const user = await auth.signInVerified('appleNative', { subject: 'u-1' }, context);
+	type _signInProvider = Expect<Equal<typeof user.signInProvider, 'appleNative' | 'okta'>>;
+	// @ts-expect-error — 'okta' is a redirect provider, not a verified one.
+	await auth.signInVerified('okta', { subject: 'u-1' }, context);
+	// @ts-expect-error — `subject` is required.
+	await auth.signInVerified('appleNative', {}, context);
+	await auth.getSignInUrl(context, 'okta');
+	// @ts-expect-error — a verified provider has no redirect flow.
+	await auth.getSignInUrl(context, 'appleNative');
+
+	const onlyVerified = new Auth(scope, 'verified-only', {
+		store: 'builtin',
+		providers: { appleNative: { type: 'verified' } },
+	});
+	await onlyVerified.signInVerified('appleNative', { subject: 'u-1' }, context);
+	// @ts-expect-error — no redirect provider is configured.
+	await onlyVerified.getSignInUrl(context, 'appleNative');
+
+	const redirectOnly = new Auth(scope, 'verified-none', { store: 'builtin', providers: { okta } });
+	// @ts-expect-error — no `type: 'verified'` provider is configured.
+	await redirectOnly.signInVerified('okta', { subject: 'u-1' }, context);
+
+	const zeroConfig = new Auth(scope, 'verified-zero');
+	// @ts-expect-error — no `type: 'verified'` provider is configured.
+	await zeroConfig.signInVerified('appleNative', { subject: 'u-1' }, context);
+
+	new Auth(scope, 'verified-cognito', {
+		// @ts-expect-error — `type: 'verified'` needs `store: 'builtin'`.
+		providers: { appleNative: { type: 'verified' } },
+	});
+
+	const withUndefinedEntry = new Auth(scope, 'verified-undefined-entry', {
+		store: 'builtin',
+		providers: { okta, local: undefined },
+	});
+	type _undefinedEntryStays = Expect<Equal<ProviderIdOf<OptionsOf<typeof withUndefinedEntry>>, 'okta' | 'local'>>;
+	type _undefinedEntryNotVerified = Expect<Equal<VerifiedProviderIdOf<OptionsOf<typeof withUndefinedEntry>>, never>>;
+	await withUndefinedEntry.getSignInUrl(context, 'local');
+
+	const wide: Auth = auth;
+	void wide;
+}
+
 void [
+	verifiedProviders,
 	ternaryProviderMaps,
 	perStoreProviders,
 	wrongStoreOptions,
