@@ -12,27 +12,28 @@ import { DatabaseCore } from './index.js';
 
 const url = process.env.BLOCKS_TEST_POSTGRES_URL;
 
-function connectionOf(serverUrl: string, database: string): ConnectionFields {
-	const { hostname, port, username, password } = new URL(serverUrl);
+function connectionOf(databaseUrl: string): ConnectionFields {
+	const { hostname, port, username, password, pathname } = new URL(databaseUrl);
 	return {
 		host: hostname,
 		port: Number(port || 5432),
 		user: decodeURIComponent(username),
 		password: decodeURIComponent(password),
-		database,
+		database: decodeURIComponent(pathname.slice(1)),
 	};
 }
 
 if (!url) {
 	test('the PostgreSQL tests have a server to run on', (t) => {
-		const fix = 'Set BLOCKS_TEST_POSTGRES_URL to the URL of a PostgreSQL server whose user may create a database.';
+		const fix = 'Set BLOCKS_TEST_POSTGRES_URL to the URL of a PostgreSQL database whose user may create a schema.';
 		if (process.env.BLOCKS_REQUIRE_POSTGRES_TESTS === '1') assert.fail(fix);
 		t.skip(fix);
 	});
 } else {
 	describe('transaction() on PostgreSQL, with more than one pooled connection', () => {
-		const database = `blocks_tx_${randomBytes(6).toString('hex')}`;
-		const admin = new pg.Pool({ connectionString: url, max: 1 });
+		const schema = `blocks_tx_${randomBytes(6).toString('hex')}`;
+		const connection = connectionOf(url);
+		const admin = new pg.Pool({ ...connection, max: 1 });
 		let engine: PgEngine;
 		let core: DatabaseCore;
 
@@ -40,16 +41,16 @@ if (!url) {
 			(await core.query<{ id: number }>(sql`SELECT id FROM entries ORDER BY id`)).map((row) => row.id);
 
 		before(async () => {
-			await admin.query(`CREATE DATABASE ${database}`);
-			const connection = connectionOf(url, database);
-			engine = new PgEngine({ kind: 'external', connection, pool: new pg.Pool({ ...connection, max: 4 }) });
+			await admin.query(`CREATE SCHEMA ${schema}`);
+			const pool = new pg.Pool({ ...connection, max: 4, options: `-c search_path=${schema}` });
+			engine = new PgEngine({ kind: 'external', connection, pool });
 			core = new DatabaseCore({ engine: async () => engine });
 			await core.execute(sql`CREATE TABLE entries (id integer PRIMARY KEY)`);
 		});
 
 		after(async () => {
 			await engine.destroy();
-			await admin.query(`DROP DATABASE ${database} WITH (FORCE)`);
+			await admin.query(`DROP SCHEMA ${schema} CASCADE`);
 			await admin.end();
 		});
 
