@@ -7,15 +7,15 @@
  *
  * Under the default test conditions index.aws.ts resolves its KVStore
  * and AppSetting dependencies to their local mocks, so the connections table and
- * token secret live in `.bb-data/`. Only the API Gateway Management API client
+ * token secret live in `.cdk-blocks/local/data/`. Only the API Gateway Management API client
  * is stubbed, to capture what the handler posts to each connection.
  */
 import { describe, it, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert';
-import { ApiGatewayManagementApiClient } from '@aws-sdk/client-apigatewaymanagementapi';
+import { ApiGatewayManagementApiClient, GoneException } from '@aws-sdk/client-apigatewaymanagementapi';
 import type { StandardSchemaV1 } from '@standard-schema/spec';
-import { Scope, isBlocksError } from '@aws-blocks/core';
-import { KVStore } from '@aws-blocks/bb-kv-store';
+import { Scope, isBlocksError } from '@aws-cdk-blocks/core';
+import { KVStore } from '@aws-cdk-blocks/bb-kv-store';
 import { connectionsSchema, connectionsTableOptions } from './connections.js';
 import { Realtime, RealtimeErrors } from './index.aws.js';
 import type { GetChannelOptions } from './index.aws.js';
@@ -41,7 +41,7 @@ const rt = new Realtime(scope, 'rt', { namespaces: { chat: Realtime.namespace(an
 
 /**
  * A fresh view of the handler's connections table: same fullId, so the same
- * `.bb-data/` file. The mock loads the file when constructed, so build one per read.
+ * `.cdk-blocks/local/data/` file. The mock loads the file when constructed, so build one per read.
  */
 const connectionsOnDisk = () =>
 	new KVStore(rt, 'connections', connectionsTableOptions);
@@ -565,5 +565,74 @@ describe('WebSocket handler: a subscription skipped by publish is ended by the n
 			{ type: 'error', channel: descriptor.channel, code: 'access_revoked', message: 'Unauthorized: access revoked' },
 		]);
 		assert.deepStrictEqual(await channelRecords(connectionId), ['__connection__']);
+	});
+});
+
+// A client can disconnect while its subscribe is in flight; API Gateway then
+// answers the reply with GoneException (410). The handler must not fail the invocation.
+describe('WebSocket handler: a reply to a connection that is gone', () => {
+	/** Make every post to `connectionId` fail as API Gateway does once the client has left. */
+	async function withConnectionGone(connectionId: string, fn: () => Promise<void>): Promise<void> {
+		const stubbedSend = ApiGatewayManagementApiClient.prototype.send;
+		ApiGatewayManagementApiClient.prototype.send = (async (command: { input: Posted }) => {
+			if (command.input.ConnectionId === connectionId) {
+				throw new GoneException({ message: 'Gone', $metadata: { httpStatusCode: 410 } });
+			}
+			posted.push(command.input);
+			return {};
+		}) as typeof originalSend;
+		try {
+			await fn();
+		} finally {
+			ApiGatewayManagementApiClient.prototype.send = stubbedSend;
+		}
+	}
+
+	it('ignores it for a subscribe_success reply', async () => {
+		const { connectionId, descriptor } = await connected('gone-success');
+		await withConnectionGone(connectionId, async () => {
+			const res = await wsHandler()(messageEvent(connectionId, { action: 'subscribe', channel: descriptor.channel, token: descriptor.token }));
+			assert.strictEqual(res.statusCode, 200);
+		});
+	});
+
+	it('ignores it for an Invalid channel reply', async () => {
+		const { connectionId, descriptor } = await connected('gone-invalid');
+		await withConnectionGone(connectionId, async () => {
+			const res = await wsHandler()(messageEvent(connectionId, { action: 'subscribe', channel: '', token: descriptor.token }));
+			assert.strictEqual(res.statusCode, 200);
+		});
+	});
+
+	it('ignores it for a missing-token reply', async () => {
+		const { connectionId, descriptor } = await connected('gone-missing');
+		await withConnectionGone(connectionId, async () => {
+			const res = await wsHandler()(messageEvent(connectionId, { action: 'subscribe', channel: descriptor.channel }));
+			assert.strictEqual(res.statusCode, 200);
+		});
+	});
+
+	it('ignores it for an invalid-token reply', async () => {
+		const { connectionId, descriptor } = await connected('gone-invalid-token');
+		await withConnectionGone(connectionId, async () => {
+			const res = await wsHandler()(messageEvent(connectionId, { action: 'subscribe', channel: descriptor.channel, token: descriptor.connectToken }));
+			assert.strictEqual(res.statusCode, 200);
+		});
+	});
+
+	it('still fails the invocation for any other error', async () => {
+		const { connectionId, descriptor } = await connected('gone-other');
+		const stubbedSend = ApiGatewayManagementApiClient.prototype.send;
+		ApiGatewayManagementApiClient.prototype.send = (async () => {
+			throw new Error('throttled');
+		}) as typeof originalSend;
+		try {
+			await assert.rejects(
+				wsHandler()(messageEvent(connectionId, { action: 'subscribe', channel: descriptor.channel, token: descriptor.token })),
+				/throttled/,
+			);
+		} finally {
+			ApiGatewayManagementApiClient.prototype.send = stubbedSend;
+		}
 	});
 });

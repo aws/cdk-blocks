@@ -2,17 +2,17 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * CDK entry for `@aws-blocks/bb-secret/internal`.
+ * CDK entry for `@aws-cdk-blocks/bb-secret/internal`.
  *
- * This subpath is for AWS Blocks' own Building Blocks only. It is not part of
+ * This subpath is for CDK Blocks' own Building Blocks only. It is not part of
  * the public API and can change in any release.
  *
  * @internal
  */
 
-import { AppSetting } from '@aws-blocks/bb-app-setting';
-import type { ScopeParent } from '@aws-blocks/core';
-import { type BlocksDefaults, BlocksPresets, isSandboxContext, synthGuard } from '@aws-blocks/core/cdk';
+import { AppSetting } from '@aws-cdk-blocks/bb-app-setting';
+import type { ScopeParent } from '@aws-cdk-blocks/core';
+import { type BlocksDefaults, BlocksPresets, isSandboxContext, synthGuard } from '@aws-cdk-blocks/core/cdk';
 import { Annotations, RemovalPolicy } from 'aws-cdk-lib';
 import type { IConstruct } from 'constructs';
 import { FRAMEWORK_KEY, type FrameworkKeySecretOptions } from './framework-key-options.js';
@@ -22,7 +22,7 @@ import { type FrameworkKey, SSM_SECRETS_STORE_WARNING_ID } from './internal-shar
 export { type FrameworkKey, SSM_SECRETS_STORE_WARNING_ID } from './internal-shared.js';
 
 /**
- * Create a key that AWS Blocks generates for one of its own Building Blocks,
+ * Create a key that CDK Blocks generates for one of its own Building Blocks,
  * in the store chosen by `defaults.secretsStore`.
  *
  * - `'secrets-manager'`: a bb-secret `Secret` with a CloudFormation-generated
@@ -86,7 +86,7 @@ function resolveDefaults(scope: ScopeParent, id: string): BlocksDefaults {
 		?.defaults;
 	if (ambient) return ambient;
 	console.warn(
-		`[Blocks] frameworkKey '${id}' resolved infrastructure defaults with no owning BlocksStack/BlocksBackend; ` +
+		`[AWS CDK Blocks] frameworkKey '${id}' resolved infrastructure defaults with no owning BlocksStack/BlocksBackend; ` +
 			'using BlocksPresets.production.',
 	);
 	return BlocksPresets.production;
@@ -105,7 +105,7 @@ function warnIfProductionLike(construct: IConstruct, defaults: BlocksDefaults): 
 	Annotations.of(construct).addWarningV2(
 		SSM_SECRETS_STORE_WARNING_ID,
 		`defaults.secretsStore is 'ssm', but this stack looks like production (${reasons.join(', ')}). ` +
-			`The AWS Blocks key '${construct.node.id}' is stored as an SSM SecureString. ` +
+			`The AWS CDK Blocks key '${construct.node.id}' is stored as an SSM SecureString. ` +
 			`Use secretsStore: 'secrets-manager' for production, or acknowledge this warning if SSM is deliberate.`,
 	);
 }

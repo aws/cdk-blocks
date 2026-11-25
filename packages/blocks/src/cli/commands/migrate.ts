@@ -2,9 +2,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * `cdk-blocks migrate`: move an app that create-blocks-app scaffolded with
- * `aws-blocks/scripts/*.ts` lifecycle wrappers to the `cdk-blocks` CLI.
+ * `npm run migrate`: move an app that create-blocks-app scaffolded with
+ * `aws-blocks/scripts/*.ts` lifecycle wrappers, the prerelease `blocks` command, or the 1.0.0
+ * `node --input-type=module -e "import 'aws-cdk-blocks/run'" -- <task>` scripts to package tasks.
  *
+ * - Every task script migrate writes runs the `cdk-blocks` bin of the installed `aws-cdk-blocks`
+ *   (`"dev": "cdk-blocks dev"`). A 1.0.0 or `blocks` task script becomes that form only when it
+ *   is exactly a task a template generated. A 1.0.0 script with other arguments stays as it is, and still runs.
  * - A wrapper is "generated" when its text, with whitespace normalised, matches
  *   a version that a create-blocks-app template shipped (the hashes below come
  *   from the git history of `packages/create-blocks-app/templates/<name>/aws-blocks/scripts/`).
@@ -101,7 +105,7 @@ export const GENERATED_WRAPPERS: Readonly<Record<WrapperFile, readonly string[]>
 
 /**
  * The `package.json#blocks.dev` settings that migrate moves out of a generated `server.ts`.
- * `generateClient` is read by the dev server in `@aws-blocks/core`, not by the CLI.
+ * `generateClient` is read by the dev server in `@aws-cdk-blocks/core`, not by the CLI.
  */
 export type MigratedDevConfig = Pick<DevPackageConfig, 'port' | 'frontendCommand' | 'frontendPort' | 'frontend'> & {
 	generateClient?: false;
@@ -166,7 +170,26 @@ function isAmplifyOverlay(root: string): boolean {
 	return text !== undefined && AMPLIFY_CLIENT_GENERATORS.includes(sourceHash(text));
 }
 
-/** The generated npm-script commands, and the `cdk-blocks` alias that replaces each one. */
+/**
+ * The task entry a person types into a shell (the hints below): it loads the app's installed
+ * `aws-cdk-blocks`, and the `cdk-blocks` bin is on PATH only inside package scripts. The 1.0.0
+ * templates also wrote it as the prefix of every task script, which migrate shortens to {@link SCRIPT}.
+ */
+const RUN = `node --input-type=module -e "import 'aws-cdk-blocks/run'" --`;
+/** The prefix of every task script that migrate writes: the `cdk-blocks` bin of the installed `aws-cdk-blocks`. */
+const SCRIPT = 'cdk-blocks';
+const USER_TASKS: Readonly<Record<string, string>> = {
+	'docs': 'docs',
+	'docs:search': 'docs --search',
+	'docs:api': 'docs --api',
+	'db': 'db',
+	'whoami': 'whoami',
+	'migrate': 'migrate',
+	'help': '--help',
+};
+
+/** The generated npm-script commands, and the `cdk-blocks` alias that replaces each one.
+ *  The keys are the pre-rename strings a scaffolded app holds, so they stay `aws-blocks`. */
 export const SCRIPT_REWRITES: Readonly<Record<string, { alias: string; wrapper: WrapperFile }>> = {
 	'tsx watch aws-blocks/scripts/server.ts': { alias: 'cdk-blocks dev', wrapper: 'server.ts' },
 	'tsx aws-blocks/scripts/stop.ts': { alias: 'cdk-blocks dev stop', wrapper: 'stop.ts' },
@@ -189,14 +212,32 @@ export const SCRIPT_REWRITES: Readonly<Record<string, { alias: string; wrapper: 
  * The `cdk-blocks` scripts that a prerelease build scaffolded under the
  * command's earlier name, `blocks` (`"dev": "blocks dev"`). That command no
  * longer exists, so migrate renames them.
+ *
+ * The same scripts in the 1.0.0 form, {@link RUN} and the task, still run; migrate shortens them
+ * to the `cdk-blocks` form ({@link renamedTask}). A script that is already in this set stays as it is.
  */
 const RENAMED_ALIASES: ReadonlySet<string> = new Set([
 	...Object.values(SCRIPT_REWRITES).map(({ alias }) => alias),
+	...Object.values(USER_TASKS).map((command) => `cdk-blocks ${command}`),
 	'cdk-blocks generate client',
 	'cdk-blocks generate spec',
 	'cdk-blocks config',
 	'cdk-blocks vendorize',
 ]);
+
+/**
+ * The `cdk-blocks` script for `value` when it is exactly a generated task under an earlier prefix:
+ * the prerelease `blocks` command (`blocks dev`) or the 1.0.0 entry ({@link RUN}` dev`).
+ * `undefined` for any other script, such as a task with arguments that no template generated.
+ */
+function renamedTask(value: string): string | undefined {
+	for (const prefix of ['blocks', RUN]) {
+		if (!value.startsWith(`${prefix} `)) continue;
+		const to = `${SCRIPT} ${value.slice(prefix.length + 1)}`;
+		if (RENAMED_ALIASES.has(to)) return to;
+	}
+	return undefined;
+}
 
 /**
  * Wrappers a wrapper runs at runtime, beyond what its import statements show.
@@ -223,7 +264,7 @@ export const VERSION_DEPENDENCIES: Readonly<Record<string, readonly WrapperFile[
 };
 
 /**
- * Wrappers whose alias needs `.blocks/config.json#stackId`: `cdk-blocks deploy` and
+ * Wrappers whose alias needs `.cdk-blocks/config.json#stackId`: `cdk-blocks deploy` and
  * `cdk-blocks destroy` name the production stack `<stackId>-prod`, while the
  * wrappers call core's deploy and destroy, which do not. Apps scaffolded before
  * create-blocks-app wrote that file keep these wrappers until it exists.
@@ -231,35 +272,52 @@ export const VERSION_DEPENDENCIES: Readonly<Record<string, readonly WrapperFile[
 const STACK_ID_WRAPPERS: readonly WrapperFile[] = ['deploy.ts', 'destroy.ts'];
 
 const STACK_ID_HINT =
-	'create .blocks/config.json with {"stackId": "<id>"}, where "<id>-prod" must equal the name of the production stack that your aws-blocks/index.cdk.ts defines (an app whose index.cdk.ts hard-codes "my-blocks-stack-prod" uses {"stackId": "my-blocks-stack"}), commit it, and run cdk-blocks migrate again';
+	'create .cdk-blocks/config.json with {"stackId": "<id>"}, where "<id>-prod" must equal the name of the production stack that your aws-blocks/index.cdk.ts defines (an app whose index.cdk.ts hard-codes "my-blocks-stack-prod" uses {"stackId": "my-blocks-stack"}), commit it, and rerun migration';
 
 /**
- * Why `.blocks/config.json` lacks the stackId that `cdk-blocks deploy` and
+ * Why `.cdk-blocks/config.json` lacks the stackId that `cdk-blocks deploy` and
  * `cdk-blocks destroy` need, and how to fix it; `null` when it has one. A file
  * that exists but does not parse is not a missing file: say so, as core's
  * `getStackId` and `cdk-blocks whoami` do.
  */
 function stackIdProblem(root: string): string | null {
-	const path = join(root, '.blocks', 'config.json');
+	const path = join(root, '.cdk-blocks', 'config.json');
 	let text: string | undefined;
 	try {
 		text = unlessGone(() => readFileSync(path, 'utf-8'));
 	} catch (error) {
-		return `.blocks/config.json cannot be read (${(error as Error).message}): fix ${path}, then run cdk-blocks migrate again`;
+		return `.cdk-blocks/config.json cannot be read (${(error as Error).message}): fix ${path}, then rerun migration`;
 	}
-	if (text === undefined) return `this app has no .blocks/config.json: ${STACK_ID_HINT}`;
+	if (text === undefined) {
+		// Core's `getStackId` resolves the id from the pre-rename file, so telling the
+		// user to invent a fresh one here is what creates a second production stack.
+		const legacy = join(root, '.blocks', 'config.json');
+		try {
+			const legacyText = unlessGone(() => readFileSync(legacy, 'utf-8'));
+			if (legacyText !== undefined) {
+				const legacyId = (JSON.parse(legacyText) as { stackId?: unknown } | null)?.stackId;
+				if (typeof legacyId === 'string' && legacyId) {
+					return `this app still keeps its stackId in .blocks/config.json: move it with \`mkdir -p .cdk-blocks && git mv .blocks/config.json .cdk-blocks/config.json\`, then rerun migration`;
+				}
+			}
+		} catch {
+			// Unreadable or invalid: fall through to the usual hint.
+		}
+		return `this app has no .cdk-blocks/config.json: ${STACK_ID_HINT}`;
+	}
 	let config: unknown;
 	try {
 		config = JSON.parse(text);
 	} catch (error) {
-		return `.blocks/config.json is not valid JSON (${(error as Error).message}): fix ${path}, then run cdk-blocks migrate again`;
+		return `.cdk-blocks/config.json is not valid JSON (${(error as Error).message}): fix ${path}, then rerun migration`;
 	}
 	const stackId = (config as { stackId?: unknown } | null)?.stackId;
 	return typeof stackId === 'string' && stackId !== ''
 		? null
-		: `.blocks/config.json has no string "stackId": ${STACK_ID_HINT}`;
+		: `.cdk-blocks/config.json has no string "stackId": ${STACK_ID_HINT}`;
 }
 
+/** The pre-rename layout migrate reads; never `cdk-blocks` (`LEGACY_BLOCKS_BACKEND_DIR`). */
 const SCRIPTS_DIR = join('aws-blocks', 'scripts');
 
 /** Whitespace-insensitive form of a source file: CRLF, indentation and blank lines do not matter. */
@@ -285,7 +343,7 @@ export interface MigrateResult {
 	/** Items left for the user to finish by hand. */
 	kept: KeptItem[];
 	/** Rewritten scripts, by name. */
-	scriptsRewritten: Record<string, { from: string; to: string }>;
+	scriptsRewritten: Record<string, { from: string | null; to: string }>;
 	/**
 	 * The `blocks.dev` config added (or, with --dry-run, that would be added) to
 	 * `package.json`, moved from a generated `server.ts`; `null` when none is added.
@@ -312,7 +370,7 @@ function posix(path: string): string {
 }
 
 /**
- * `read()`, or `undefined` when the file is gone: another `cdk-blocks migrate`
+ * `read()`, or `undefined` when the file is gone: another `npm run migrate`
  * run (or the user) can delete a wrapper while this one plans.
  */
 function unlessGone<T>(read: () => T): T | undefined {
@@ -344,6 +402,14 @@ function findWrappers(root: string): Wrapper[] {
 }
 
 /**
+ * The state directory's name before the `cdk-blocks` rename (D-031). An app this
+ * command is migrating predates the rename, so it still holds its state — and a CDK
+ * cloud assembly — under this name. Mirrors `LEGACY_SANDBOX_DIR` in
+ * `@aws-cdk-blocks/core`, which is internal to that package.
+ */
+const LEGACY_SANDBOX_DIR = '.blocks-sandbox';
+
+/**
  * Outside git: directories that hold no app source (dependencies, version
  * control, build output, tool state and caches), skipped at any depth.
  */
@@ -357,7 +423,8 @@ const SKIPPED_DIRS: ReadonlySet<string> = new Set([
 	'build-temp',
 	'coverage',
 	'cdk.out',
-	'.blocks-sandbox',
+	'.cdk-blocks-sandbox',
+	LEGACY_SANDBOX_DIR,
 	'.amplify',
 	'.next',
 	'.nuxt',
@@ -783,13 +850,15 @@ export function planMigration(
 	for (const [name, value] of Object.entries(scripts)) {
 		// Own keys only: a script whose value is "toString" or "constructor" is not a generated command.
 		const rewrite = Object.hasOwn(SCRIPT_REWRITES, value) ? SCRIPT_REWRITES[value] : undefined;
+		const renamed = renamedTask(value);
 		if (rewrite) {
+			const to = rewrite.alias;
 			const wrapper = byFile.get(rewrite.wrapper);
 			// A customized wrapper keeps its script: the alias would drop the customization.
 			if (wrapper && !wrapper.generated) {
 				result.kept.push({
 					file: `package.json#scripts.${name}`,
-					reason: `"${value}" runs ${wrapper.path}, an unrecognised version that migrate keeps; "${rewrite.alias}" would bypass it, so switch the script by hand once you have moved its changes`,
+					reason: `"${value}" runs ${wrapper.path}, an unrecognised version that migrate keeps; "${to}" would bypass it, so switch the script by hand once you have moved its changes`,
 				});
 				continue;
 			}
@@ -797,7 +866,7 @@ export function planMigration(
 			if (stackless.includes(rewrite.wrapper)) {
 				result.kept.push({
 					file: `package.json#scripts.${name}`,
-					reason: `"${rewrite.alias}" needs "stackId" in .blocks/config.json, but ${stackIdIssue}`,
+					reason: `"${to}" needs "stackId" in .cdk-blocks/config.json, but ${stackIdIssue}`,
 				});
 				continue;
 			}
@@ -808,7 +877,7 @@ export function planMigration(
 			if (customizedDependency) {
 				result.kept.push({
 					file: `package.json#scripts.${name}`,
-					reason: `"${value}" runs ${rewrite.wrapper}, which starts the customized ${customizedDependency.path}; "${rewrite.alias}" would bypass it, so move that change by hand`,
+					reason: `"${value}" runs ${rewrite.wrapper}, which starts the customized ${customizedDependency.path}; "${to}" would bypass it, so move that change by hand`,
 				});
 				continue;
 			}
@@ -821,21 +890,34 @@ export function planMigration(
 			if (customizedPartner) {
 				result.kept.push({
 					file: `package.json#scripts.${name}`,
-					reason: `"${value}" runs ${rewrite.wrapper}, which stops the dev server of the customized ${customizedPartner.path} on its port; "${rewrite.alias}" stops the blocks.dev port instead, which migrate only sets from a generated server.ts, so move that change by hand`,
+					reason: `"${value}" runs ${rewrite.wrapper}, which stops the dev server of the customized ${customizedPartner.path} on its port; "${to}" stops the blocks.dev port instead, which migrate only sets from a generated server.ts, so move that change by hand`,
 				});
 				continue;
 			}
-			scripts[name] = rewrite.alias;
-			result.scriptsRewritten[name] = { from: value, to: rewrite.alias };
-		} else if (RENAMED_ALIASES.has(`cdk-${value}`)) {
-			scripts[name] = `cdk-${value}`;
-			result.scriptsRewritten[name] = { from: value, to: `cdk-${value}` };
+			scripts[name] = to;
+			result.scriptsRewritten[name] = { from: value, to };
+		} else if (renamed !== undefined) {
+			scripts[name] = renamed;
+			result.scriptsRewritten[name] = { from: value, to: renamed };
 		} else if (wrappers.some((w) => refersTo(value, 'package.json', w, { bare: true }))) {
 			result.kept.push({
 				file: `package.json#scripts.${name}`,
-				reason: `"${value}" is not a generated command; replace it with a cdk-blocks command by hand`,
+				reason: `"${value}" is not a generated command; replace it with an npm task by hand`,
 			});
 		}
+	}
+
+	const generateClient = scripts['blocks:generate-client'];
+	const tasks = {
+		...Object.fromEntries(Object.entries(USER_TASKS).map(([name, command]) => [name, `${SCRIPT} ${command}`])),
+		...(generateClient === undefined && isAmplifyOverlay(root)
+			? {}
+			: { 'generate-client': generateClient ?? `${SCRIPT} generate client` }),
+	};
+	for (const [name, to] of Object.entries(tasks)) {
+		if (Object.hasOwn(scripts, name)) continue;
+		scripts[name] = to;
+		result.scriptsRewritten[name] = { from: null, to };
 	}
 
 	const server = byFile.get('server.ts');
@@ -864,7 +946,7 @@ export function planMigration(
 		if (wrapper.generated && stackless.includes(wrapper.file)) {
 			result.kept.push({
 				file: wrapper.path,
-				reason: `generated, but kept: the cdk-blocks deploy and destroy commands need "stackId" in .blocks/config.json, but ${stackIdIssue}`,
+				reason: `generated, but kept: the npm run deploy and npm run destroy tasks need "stackId" in .cdk-blocks/config.json, but ${stackIdIssue}`,
 			});
 		}
 	}
@@ -911,7 +993,7 @@ export function planMigration(
 	}
 	result.removed = wrappers.filter((w) => candidates.has(w.path)).map((w) => w.path);
 	if (Object.keys(result.scriptsRewritten).length > 0 || result.devConfig) result.changed.push('package.json');
-	if (pkg.scripts) pkg.scripts = scripts;
+	pkg.scripts = scripts;
 	return { result, pkg, pkgText };
 }
 
@@ -941,9 +1023,11 @@ function describe(result: MigrateResult, dryRun: boolean): string {
 	}
 	const acted = rewritten.length > 0 || result.removed.length > 0 || devConfig !== null;
 	if (acted)
-		lines.push(dryRun ? 'Dry run; nothing was written. cdk-blocks migrate would:' : 'Migrated to the cdk-blocks CLI:');
+		lines.push(dryRun ? 'Dry run; nothing was written. npm run migrate would:' : 'Migrated to AWS CDK Blocks npm tasks:');
 	else lines.push('Nothing could be migrated automatically.');
-	for (const [name, { from, to }] of rewritten) lines.push(`  rewrite script "${name}": ${from} -> ${to}`);
+	for (const [name, { from, to }] of rewritten) {
+		lines.push(from === null ? `  add script "${name}": ${to}` : `  rewrite script "${name}": ${from} -> ${to}`);
+	}
 	if (devConfig) lines.push(`  set package.json "blocks.dev" to ${JSON.stringify(devConfig)}`);
 	for (const file of result.removed) lines.push(`  delete ${file}`);
 	if (result.kept.length > 0) {
@@ -964,7 +1048,7 @@ const BUSY_DIR_ATTEMPTS = 5;
 /**
  * Remove `dir` when it is empty; a directory that is already gone, or that was
  * refilled meanwhile, is fine. On Windows, reading or removing a directory that
- * another process holds open or is deleting (a concurrent `cdk-blocks migrate`)
+ * another process holds open or is deleting (a concurrent `npm run migrate`)
  * fails with EPERM or EBUSY: try again briefly, then leave it to that process.
  */
 export function removeIfEmpty(
@@ -1001,25 +1085,25 @@ function checkGit(root: string, dryRun: boolean, force: boolean): GitView {
 			'this app is not in a git work tree (or git is not installed), so its changes could not be undone with git.',
 			{
 				where: [`project: ${root}`],
-				hint: '"cdk-blocks migrate --dry-run" to see the plan, then "cdk-blocks migrate --force" to migrate without git',
+				hint: `"${RUN} migrate --dry-run" to see the plan, then "${RUN} migrate --force" to migrate without git`,
 			},
 		);
 	}
 	if (git.kind === 'refused') {
 		throw new CliError(`git failed in ${root}: ${git.message}`, {
-			hint: 'fix what git reports, or "cdk-blocks migrate --force" to migrate without git',
+			hint: `fix what git reports, or "${RUN} migrate --force" to migrate without git`,
 		});
 	}
 	if (git.kind === 'unseen') {
 		throw new CliError(
 			'git does not track this app (a parent repository may ignore its directory), so its changes could not be undone with git.',
-			{ where: [`project: ${root}`], hint: '"cdk-blocks migrate --force" to migrate anyway' },
+			{ where: [`project: ${root}`], hint: `"${RUN} migrate --force" to migrate anyway` },
 		);
 	}
 	if (git.kind === 'listed' && gitStatus(root).trim() !== '') {
 		throw new CliError('the git working tree has uncommitted changes; commit or stash them first.', {
 			where: [`project: ${root}`],
-			hint: 'git stash, or "cdk-blocks migrate --force" to migrate anyway',
+			hint: `git stash, or "${RUN} migrate --force" to migrate anyway`,
 		});
 	}
 	return git;
@@ -1045,9 +1129,9 @@ export function applyMigration(root: string, plan: MigrationPlan): void {
 	const { result, pkg, pkgText } = plan;
 	if (result.changed.length === 0 && result.removed.length === 0) return;
 	if (unlessGone(() => readFileSync(join(root, 'package.json'), 'utf-8')) !== pkgText) {
-		throw new CliError('package.json changed while cdk-blocks migrate ran; nothing was written.', {
+		throw new CliError('package.json changed while npm run migrate ran; nothing was written.', {
 			where: [`project: ${root}`],
-			hint: '"cdk-blocks migrate" again, to plan from the current package.json',
+			hint: `"${RUN} migrate" again, to plan from the current package.json`,
 		});
 	}
 	if (result.changed.includes('package.json')) writePackageJson(root, pkg, pkgText, result.devConfig);
@@ -1067,29 +1151,30 @@ export function applyMigration(root: string, plan: MigrationPlan): void {
 			{
 				where: failed,
 				// The tree now holds this run's changes, which a run without --force refuses.
-				hint: 'fix the permissions, then "cdk-blocks migrate --force" to delete them',
+				hint: `fix the permissions, then "${RUN} migrate --force" to delete them`,
 			},
 		);
 	}
 }
 
 /**
- * `error`, after printing it as `{"error": {"message", "hint"}}` under
- * `--output json` when it is a refusal: a JSON consumer tells a refusal
+ * `error`, after printing it as `{"error": {"message", "hint"}}` in JSON
+ * format when it is a refusal: a JSON consumer tells a refusal
  * (nothing written; or, for wrappers that could not be deleted, `package.json`
  * rewritten, as the message says) from kept items (also exit 1) by this
  * document. `--query` prints one field of the result, which a refusal does not
  * have: the error goes to stderr only.
  */
 function refusal(ctx: Context, error: unknown): unknown {
-	if (error instanceof CliError && ctx.globals.output === 'json' && ctx.globals.query === undefined) {
+	if (error instanceof CliError && ctx.out.format === 'json' && ctx.globals.query === undefined) {
 		ctx.out.text(JSON.stringify({ error: { message: error.message, hint: error.hint ?? null } }, null, 2));
 	}
 	return error;
 }
 
 export async function migrate(ctx: Context, input: CommandInput): Promise<number> {
-	const root = ctx.requireRoot();
+	// migrate reads a pre-rename app, so it also accepts the legacy `aws-blocks/`.
+	const root = ctx.requireRoot({ allowLegacyBackendDir: true });
 	const dryRun = input.flags['dry-run'] === true;
 	let git: GitView;
 	try {

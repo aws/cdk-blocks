@@ -1,4 +1,10 @@
 // swift-tools-version: 6.2
+//
+// Copyright Amazon.com Inc. or its affiliates.
+// All Rights Reserved.
+//
+// SPDX-License-Identifier: Apache-2.0
+//
 
 import PackageDescription
 
@@ -6,7 +12,7 @@ import PackageDescription
 let generatedCodeSettings: [SwiftSetting] = [.swiftLanguageMode(.v6), .treatAllWarnings(as: .error)]
 
 let package = Package(
-    name: "aws-blocks-swift",
+    name: "cdk-blocks-swift",
     platforms: [.iOS(.v16), .macOS(.v13)],
     products: [
         .library(
@@ -39,7 +45,7 @@ let package = Package(
         .plugin(
             name: "BlocksCodegenCommandPlugin",
             capability: .command(
-                intent: .custom(verb: "generate-code-from-blocks-spec", description: "Generate Swift code from Blocks spec."),
+                intent: .custom(verb: "generate-code-from-blocks-spec", description: "Generate Swift code from AWS CDK Blocks spec."),
                 permissions: [.writeToPackageDirectory(reason: "Writes generated Models.swift and API.swift into the target source directory")]
             ),
             dependencies: ["swift-code-generator"],

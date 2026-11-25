@@ -6,10 +6,10 @@ import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { Scope } from '@aws-blocks/core';
+import { Scope } from '@aws-cdk-blocks/core';
 import { Logger, LoggingErrors } from './index.mock.js';
 import { Logger as AwsLogger } from './index.aws.js';
-import type { LogEntry, ChildLogger } from './types.js';
+import type { LogEntry, ChildLogger, LoggingOptions } from './types.js';
 import { shouldLog, buildEntry, processValue, safeStringify } from './serializer.js';
 import { BB_NAME, BB_VERSION } from './version.js';
 
@@ -156,6 +156,123 @@ describe('level filtering', () => {
 		assert.strictEqual(stdoutLines.length, 3);
 		assert.strictEqual(stderrLines.length, 1);
 	});
+
+	// A level read from an env var or JSON config bypasses the LogLevel type.
+	// Simulate that with a value the type checker can't see.
+	function untypedLevel(value: string): LoggingOptions['level'] {
+		return JSON.parse(JSON.stringify(value));
+	}
+
+	test('upper-case level is accepted', () => {
+		const log = new Logger(fakeScope, 'app', { level: untypedLevel('WARN') });
+		log.info('no');
+		log.warn('yes');
+		log.error('yes');
+		assert.strictEqual(stdoutLines.length, 1);
+		assert.strictEqual(getStdoutEntry().message, 'yes');
+		assert.strictEqual(stderrLines.length, 1);
+	});
+
+	test('unknown level falls back to info and warns once', () => {
+		const log = new Logger(fakeScope, 'app', { level: untypedLevel('verbose') });
+		assert.strictEqual(stdoutLines.length, 1);
+		const warning = getStdoutEntry();
+		assert.strictEqual(warning.level, 'warn');
+		assert.strictEqual(warning.logger, 'app');
+		assert.strictEqual(warning.configuredLevel, 'verbose');
+		assert.strictEqual(warning.effectiveLevel, 'info');
+
+		log.debug('no');
+		log.info('yes');
+		log.error('yes');
+		assert.strictEqual(stdoutLines.length, 2);
+		assert.strictEqual(getStdoutEntry(1).message, 'yes');
+		assert.strictEqual(stderrLines.length, 1);
+	});
+
+	test('the unknown-level warning carries defaultContext', () => {
+		new Logger(fakeScope, 'app', {
+			level: untypedLevel('verbose'),
+			// `level` here must not override the warning's real severity.
+			defaultContext: { service: 'auth', level: 'debug' },
+		});
+		assert.strictEqual(stdoutLines.length, 1);
+		const warning = getStdoutEntry();
+		assert.strictEqual(warning.level, 'warn');
+		assert.strictEqual(warning.service, 'auth');
+		assert.strictEqual(warning.configuredLevel, 'verbose');
+	});
+
+	test('the unknown-level warning keeps its level fields over defaultContext', () => {
+		new Logger(fakeScope, 'app', {
+			level: untypedLevel('verbose'),
+			defaultContext: { configuredLevel: 'x', effectiveLevel: 'y' },
+		});
+		const warning = getStdoutEntry();
+		assert.strictEqual(warning.configuredLevel, 'verbose');
+		assert.strictEqual(warning.effectiveLevel, 'info');
+	});
+
+	test("alias 'WARNING' means warn, without a warning", () => {
+		const log = new Logger(fakeScope, 'app', { level: untypedLevel('WARNING') });
+		assert.strictEqual(stdoutLines.length, 0);
+		log.info('no');
+		log.warn('yes');
+		assert.strictEqual(stdoutLines.length, 1);
+		assert.strictEqual(getStdoutEntry().message, 'yes');
+	});
+
+	test("alias 'trace' means debug, without a warning", () => {
+		const log = new Logger(fakeScope, 'app', { level: untypedLevel('trace') });
+		assert.strictEqual(stdoutLines.length, 0);
+		log.debug('yes');
+		assert.strictEqual(stdoutLines.length, 1);
+		assert.strictEqual(getStdoutEntry().level, 'debug');
+	});
+
+	test("alias 'FATAL' means error, without a warning", () => {
+		const log = new Logger(fakeScope, 'app', { level: untypedLevel(' FATAL ') });
+		log.debug('no');
+		log.info('no');
+		log.warn('no');
+		log.error('yes');
+		assert.strictEqual(stdoutLines.length, 0);
+		assert.strictEqual(stderrLines.length, 1);
+	});
+
+	test('child of a logger with an unknown level still logs', () => {
+		const log = new AwsLogger(fakeScope, 'app', { level: untypedLevel('verbose') });
+		log.child({ reqId: '1' }).error('boom');
+		assert.strictEqual(stderrLines.length, 1);
+	});
+
+	test('surrounding whitespace is ignored', () => {
+		const log = new Logger(fakeScope, 'app', { level: untypedLevel(' error ') });
+		log.warn('no');
+		log.error('yes');
+		assert.strictEqual(stdoutLines.length, 0);
+		assert.strictEqual(stderrLines.length, 1);
+	});
+
+	test('prototype keys and non-strings are unknown levels', () => {
+		for (const level of [untypedLevel('constructor'), untypedLevel('__proto__'), JSON.parse('3')]) {
+			stdoutLines = [];
+			new Logger(fakeScope, 'app', { level });
+			assert.strictEqual(stdoutLines.length, 1);
+			assert.deepStrictEqual(getStdoutEntry().configuredLevel, level);
+		}
+	});
+
+	test('null and empty string use the default without a warning', () => {
+		for (const level of [JSON.parse('null'), untypedLevel(''), untypedLevel('  ')]) {
+			stdoutLines = [];
+			const log = new Logger(fakeScope, 'app', { level });
+			assert.strictEqual(stdoutLines.length, 0);
+			log.debug('no');
+			log.info('yes');
+			assert.strictEqual(stdoutLines.length, 1);
+		}
+	});
 });
 
 // ── Context ─────────────────────────────────────────────────────────────────
@@ -300,6 +417,83 @@ describe('serialization safety', () => {
 		log.info('circular', { data: obj });
 		const entry = getStdoutEntry();
 		assert.strictEqual((entry.data as any).self, '[Circular]');
+	});
+
+	test('the same object under two keys is serialized both times', () => {
+		const log = new Logger(fakeScope, 'app');
+		const o = { x: 1 };
+		log.info('shared', { a: o, b: o });
+		const entry = getStdoutEntry();
+		assert.deepStrictEqual(entry.a, { x: 1 });
+		assert.deepStrictEqual(entry.b, { x: 1 });
+	});
+
+	test('the same object repeated in an array is serialized each time', () => {
+		const log = new Logger(fakeScope, 'app');
+		const o = { x: 1 };
+		log.info('shared', { list: [o, o, { nested: o }] });
+		const entry = getStdoutEntry();
+		assert.deepStrictEqual(entry.list, [{ x: 1 }, { x: 1 }, { nested: { x: 1 } }]);
+	});
+
+	test('a cycle through a shared object is still detected', () => {
+		const log = new Logger(fakeScope, 'app');
+		const o: any = { x: 1 };
+		o.loop = { back: o };
+		log.info('cycle', { a: o, b: o });
+		const entry = getStdoutEntry();
+		assert.deepStrictEqual(entry.a, { x: 1, loop: { back: '[Circular]' } });
+		assert.deepStrictEqual(entry.b, { x: 1, loop: { back: '[Circular]' } });
+	});
+
+	test('an array that contains itself is detected as circular', () => {
+		const log = new Logger(fakeScope, 'app');
+		const arr: unknown[] = [1];
+		arr.push(arr);
+		log.info('cycle', { arr });
+		const entry = getStdoutEntry();
+		assert.deepStrictEqual(entry.arr, [1, '[Circular]']);
+	});
+
+	test('a cycle that closes through an array element is detected', () => {
+		const log = new Logger(fakeScope, 'app');
+		const o: any = {};
+		o.k = [{ up: o }];
+		log.info('cycle', { o });
+		const entry = getStdoutEntry();
+		assert.deepStrictEqual(entry.o, { k: [{ up: '[Circular]' }] });
+	});
+
+	test('a toJSON() result that points back at an ancestor is detected', () => {
+		const log = new Logger(fakeScope, 'app');
+		const o: any = { x: 1 };
+		o.child = { toJSON: () => ({ parent: o }) };
+		log.info('cycle', { o });
+		const entry = getStdoutEntry();
+		assert.deepStrictEqual(entry.o, { x: 1, child: { parent: '[Circular]' } });
+	});
+
+	test('an object repeated more than 8 times becomes [Repeated]', () => {
+		const log = new Logger(fakeScope, 'app');
+		const o = { x: 1 };
+		log.info('shared', { list: Array.from({ length: 10 }, () => o) });
+		const entry = getStdoutEntry();
+		const list = entry.list as unknown[];
+		assert.deepStrictEqual(list.slice(0, 8), Array.from({ length: 8 }, () => ({ x: 1 })));
+		assert.deepStrictEqual(list.slice(8), ['[Repeated]', '[Repeated]']);
+	});
+
+	test('a deeply shared graph serializes quickly and stays small', () => {
+		const log = new Logger(fakeScope, 'app');
+		let leaf: Record<string, unknown> = { id: 'xxxxxxxx' };
+		for (let i = 0; i < 30; i++) leaf = { a: leaf, b: leaf };
+		const start = performance.now();
+		log.info('dag', { leaf });
+		const elapsed = performance.now() - start;
+		const line = stdoutLines[0];
+		assert.ok(line.length < 64 * 1024, `expected a small line, got ${line.length} chars`);
+		assert.ok(elapsed < 1000, `expected under 1s, took ${elapsed}ms`);
+		assert.notStrictEqual(JSON.parse(line)._serializationError, 'SerializationFailedException');
 	});
 
 	test('BigInt values are serialized as strings', () => {

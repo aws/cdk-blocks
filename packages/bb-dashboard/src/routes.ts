@@ -5,22 +5,22 @@
  * Route registration for the Dashboard BB.
  *
  * Mounts a single GET route that 302-redirects to the CloudWatch Dashboard
- * console URL. The URL is read from the `BB_DASHBOARD_URL` environment variable
- * (set by the CDK layer) in AWS, or from the provided fallback in local mode.
+ * console URL. Each dashboard mounts its own route with its own URL: the AWS
+ * runtime derives it from the region and the dashboard's name (see
+ * `naming.ts`). A `null` URL (no region known) makes the route answer 503.
+ * The mock does not use this route; it serves a local page instead.
  */
 
-import { RawRoute, type BlocksContext } from '@aws-blocks/core';
-import type { ScopeParent } from '@aws-blocks/core';
-
-/** Environment variable key used to pass the dashboard URL from CDK to runtime. */
-export const BB_DASHBOARD_URL_ENV = 'BB_DASHBOARD_URL';
+import { RawRoute, type BlocksContext } from '@aws-cdk-blocks/core';
+import type { ScopeParent } from '@aws-cdk-blocks/core';
 
 /**
  * Mount the dashboard redirect route on the given scope.
  *
  * @param scope - Parent scope to register the RawRoute on.
- * @param routePath - HTTP path for the redirect (e.g., '/aws-blocks/dashboard').
- * @param dashboardUrl - Fallback URL for local/mock mode (null means not deployed).
+ * @param routePath - HTTP path for the redirect (e.g., '/cdk-blocks/dashboard').
+ * @param dashboardUrl - This dashboard's console URL; null means no region is known,
+ *   and the route answers 503.
  */
 export function mountDashboardRoute(
 	scope: ScopeParent,
@@ -31,7 +31,9 @@ export function mountDashboardRoute(
 		method: 'GET',
 		path: routePath,
 		handler: async (ctx: BlocksContext) => {
-			const url = process.env[BB_DASHBOARD_URL_ENV] ?? dashboardUrl;
+			// The URL is fixed per dashboard at construction; an app with several
+			// dashboards has one route per dashboard, each with its own URL.
+			const url = dashboardUrl;
 			if (!url) {
 				ctx.response.status = 503;
 				ctx.response.headers.set('Content-Type', 'application/json');
@@ -41,7 +43,7 @@ export function mountDashboardRoute(
 					localObservability: {
 						logs: 'Check your terminal output - Logger BB writes structured JSON to stdout',
 						metrics: 'Metrics BB writes EMF-formatted JSON to stdout (visible in terminal)',
-						traces: 'Tracer stores mock traces to .bb-data/ and logs them to stdout',
+						traces: 'Tracer stores mock traces to .cdk-blocks/local/data/ and logs them to stdout',
 					},
 				});
 				return;

@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { SESv2Client, SendEmailCommand, SendBulkEmailCommand } from '@aws-sdk/client-sesv2';
-import { Scope, installClientUserAgent, blocksError } from '@aws-blocks/core';
-import type { ScopeParent } from '@aws-blocks/core';
+import { Scope, installClientUserAgent, blocksError } from '@aws-cdk-blocks/core';
+import type { ScopeParent } from '@aws-cdk-blocks/core';
 import { BB_NAME, BB_VERSION } from './version.js';
 
 // Re-export public types and errors
@@ -13,8 +13,8 @@ export type { EmailOptions, EmailMessage, SendResult, SendBatchResult } from './
 import type { EmailOptions, EmailMessage, SendResult, SendBatchResult } from './types.js';
 import { EmailErrors } from './errors.js';
 import { resolveMaxBatchSize, validateBatchSize, validateMessage } from './validation.js';
-import { Logger } from '@aws-blocks/bb-logger';
-import type { ChildLogger } from '@aws-blocks/bb-logger';
+import { Logger } from '@aws-cdk-blocks/bb-logger';
+import type { ChildLogger } from '@aws-cdk-blocks/bb-logger';
 
 const BATCH_CHUNK_SIZE = 50;
 
@@ -107,6 +107,7 @@ export class EmailClient extends Scope {
 	 * @returns The SES message ID for the sent email.
 	 * @throws {EmailErrors.SendFailed} General send failure.
 	 * @throws {EmailErrors.InvalidInput} If input is invalid (e.g. malformed address, too many recipients).
+	 * @throws {EmailErrors.InvalidInput} If the message has no recipients (To, CC and BCC all empty or absent). Checked before calling SES.
 	 * @throws {EmailErrors.DomainNotVerified} If the sending domain is not verified.
 	 * @throws {EmailErrors.AccountPaused} If account sending is paused.
 	 * @throws {EmailErrors.RateLimited} If rate limit is exceeded.

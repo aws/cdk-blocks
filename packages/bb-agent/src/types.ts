@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { z } from 'zod';
-import type { RealtimeChannel } from '@aws-blocks/bb-realtime';
-import type { ChildLogger } from '@aws-blocks/bb-logger';
+import type { RealtimeChannel } from '@aws-cdk-blocks/bb-realtime';
+import type { ChildLogger } from '@aws-cdk-blocks/bb-logger';
 
 /** Any JSON-serializable value. */
 export type JSONValue = string | number | boolean | null | { [key: string]: JSONValue } | JSONValue[];
@@ -52,7 +52,7 @@ export interface ModelConfig {
 	 * filters, denied topics and prompt-attack filter. The deployed agent is granted
 	 * `bedrock:ApplyGuardrail` on this guardrail.
 	 *
-	 * Create the guardrail outside AWS Blocks (console, CLI or a CDK `CfnGuardrail`) and pass
+	 * Create the guardrail outside CDK Blocks (console, CLI or a CDK `CfnGuardrail`) and pass
 	 * its id or ARN and a version.
 	 *
 	 * @example

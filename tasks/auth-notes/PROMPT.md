@@ -1,6 +1,6 @@
 # Task: Authenticated Notepad
 
-Build a personal notepad in this AWS Blocks app. A visitor signs up with their email (confirming it with an emailed one-time code) or signs in, edits a single private note, and that note is saved to their account — it survives a reload and is never visible to other users.
+Build a personal notepad in this CDK Blocks app. A visitor signs up with their email (confirming it with an emailed one-time code) or signs in, edits a single private note, and that note is saved to their account — it survives a reload and is never visible to other users.
 
 The core of this task is **using the framework**: the note is read and written through an **`api` namespace** whose methods run **on the server** and persist through the app's auth + key/value blocks. The page is a thin client over that API.
 
@@ -12,12 +12,12 @@ The workspace has already been scaffolded. Begin by reading README.md (and any A
 
 ### The `api` namespace (primary surface)
 
-Expose an **`api` namespace** (the framework's server-side RPC surface — a `POST /aws-blocks/api` JSON-RPC endpoint) with these methods. Each note operation must run **on the server** and persist through the **key/value block** under the per-user key `note:{userId}`, where `userId` is the signed-in user's stable unique identifier from the auth session. Both methods derive the current user from the **auth session** (the sign-in cookie) — the note key is **never** taken from a client-supplied argument. Store the identifier **verbatim** in the key (`note:{userId}`) — no URL-encoding, hashing, or case-folding — so the key maps exactly back to the authenticated identity.
+Expose an **`api` namespace** (the framework's server-side RPC surface — a `POST /cdk-blocks/api` JSON-RPC endpoint) with these methods. Each note operation must run **on the server** and persist through the **key/value block** under the per-user key `note:{userId}`, where `userId` is the signed-in user's stable unique identifier from the auth session. Both methods derive the current user from the **auth session** (the sign-in cookie) — the note key is **never** taken from a client-supplied argument. Store the identifier **verbatim** in the key (`note:{userId}`) — no URL-encoding, hashing, or case-folding — so the key maps exactly back to the authenticated identity.
 
 1. **`api.getNote()`** — returns the signed-in user's saved note as a **string** (the empty string `""` when they have never saved one). Structured return: exactly the string value, nothing appended.
 2. **`api.saveNote(text)`** — saves `text` as the current user's single note and returns the stored value. Saving **overwrites** (it does not append). Saving `""` is allowed and **clears** the note (the stored value becomes `""`). Notes are stored and returned **verbatim** — exactly the characters saved, with no HTML interpretation or escaping (a note containing markup such as `<b>x</b>` round-trips as that literal string). Notes up to a few thousand characters round-trip unchanged. A **missing or non-string** argument is rejected with a JSON-RPC **error** envelope and leaves the stored note **unchanged** (no degenerate empty save).
 
-**Auth gating (framework-enforced):** both methods require an authenticated session. Called with **no session** (e.g. a direct `POST /aws-blocks/api` carrying no sign-in cookie), a note method must return a JSON-RPC **error** envelope (unauthenticated) — **not** a `result`, and never another user's data. **Per-user isolation:** each user's `getNote` returns only their own note.
+**Auth gating (framework-enforced):** both methods require an authenticated session. Called with **no session** (e.g. a direct `POST /cdk-blocks/api` carrying no sign-in cookie), a note method must return a JSON-RPC **error** envelope (unauthenticated) — **not** a `result`, and never another user's data. **Per-user isolation:** each user's `getNote` returns only their own note.
 
 ### Test-harness hook: `api.getLastCode()`
 

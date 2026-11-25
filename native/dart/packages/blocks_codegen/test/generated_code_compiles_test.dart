@@ -1,3 +1,6 @@
+// Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+// SPDX-License-Identifier: Apache-2.0
+
 // Analyzes generated clients as real Dart, in a scratch package that depends
 // on the in-repo blocks_runtime, and runs a JSON round trip through one. The
 // golden tests compare text only, so they cannot tell whether an identifier
@@ -46,6 +49,45 @@ final _leadingUnderscoreSpec = jsonEncode({
           },
           'required': ['_x'],
         },
+      },
+    },
+  ],
+});
+
+/// `todoApi.run(input)` taking a union the spec names [typeName]: a reserved
+/// name becomes `Map$`, and a name can hold a `$` itself, so the deprecated
+/// alias's message has to escape it.
+String _namedUnionSpec(String typeName) => jsonEncode({
+  'openrpc': '1.3.2',
+  'info': {'title': 'test', 'version': '1.0.0'},
+  'methods': [
+    {
+      'name': 'todoApi.run',
+      'params': [
+        {
+          'name': 'input',
+          'required': true,
+          'schema': {
+            'oneOf': [
+              for (final kind in ['start', 'stop'])
+                {
+                  'type': 'object',
+                  'properties': {
+                    'kind': {
+                      'type': 'string',
+                      'enum': [kind],
+                    },
+                  },
+                  'required': ['kind'],
+                },
+            ],
+            'x-blocks-type-name': typeName,
+          },
+        },
+      ],
+      'result': {
+        'name': 'RunResult',
+        'schema': {'type': 'boolean'},
       },
     },
   ],
@@ -127,6 +169,14 @@ dependencies:
     File(
       '${scratch.path}/lib/leading_underscore.dart',
     ).writeAsStringSync(_generate(_leadingUnderscoreSpec));
+    for (final (file, typeName) in [
+      ('named_union_reserved', 'Map'),
+      ('named_union_dollar', r'$Action'),
+    ]) {
+      File(
+        '${scratch.path}/lib/$file.dart',
+      ).writeAsStringSync(_generate(_namedUnionSpec(typeName)));
+    }
     File('${scratch.path}/bin/round_trip.dart').writeAsStringSync(_roundTrip);
 
     // blocks_runtime's dependencies are already in the pub cache from this

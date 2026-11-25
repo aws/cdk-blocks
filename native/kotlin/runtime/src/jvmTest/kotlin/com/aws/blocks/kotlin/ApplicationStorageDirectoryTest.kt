@@ -1,3 +1,6 @@
+// Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+// SPDX-License-Identifier: Apache-2.0
+
 package com.aws.blocks.kotlin
 
 import io.kotest.matchers.shouldBe
@@ -9,7 +12,7 @@ import kotlin.test.Test
 
 /**
  * The directory an application's stored data lives in is derived from its id, so two applications
- * cannot land on one directory the way every Blocks application sharing `~/.blocks` used to.
+ * cannot land on one directory the way every CDK Blocks application sharing `~/.blocks` used to.
  */
 class ApplicationStorageDirectoryTest {
 

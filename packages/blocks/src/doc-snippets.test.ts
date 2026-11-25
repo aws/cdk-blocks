@@ -18,16 +18,16 @@ import { checkDocs, type DocInput, type Finding, readDoc } from './test-support/
 /** `packages/blocks`. */
 const PACKAGE_DIR = join(dirname(fileURLToPath(import.meta.url)), '..');
 const DOCS_DIR = join(PACKAGE_DIR, 'docs');
-/** Inside `dist/`, so `@aws-blocks/*` resolve through the workspace `node_modules` as an app's would. */
+/** Inside `dist/`, so `@aws-cdk-blocks/*` resolve through the workspace `node_modules` as an app's would. */
 const SCRATCH = join(PACKAGE_DIR, 'dist', '.doc-snippets-scratch');
 
-/** The umbrella's entries an app imports from, root first (`./docs/*` holds no code). */
+/** The umbrella's entries an app imports from, root first (exclude docs and the side-effect task runner). */
 function umbrellaEntries(): string[] {
 	const pkg: unknown = JSON.parse(readFileSync(join(PACKAGE_DIR, 'package.json'), 'utf8'));
 	assert.ok(pkg && typeof pkg === 'object' && 'exports' in pkg && pkg.exports && typeof pkg.exports === 'object');
 	return Object.keys(pkg.exports)
-		.filter((key) => key !== './docs/*')
-		.map((key) => `@aws-blocks/blocks${key.slice(1)}`);
+		.filter((key) => key !== './docs/*' && key !== './run')
+		.map((key) => `aws-cdk-blocks${key.slice(1)}`);
 }
 
 /** Every shipped `*.md`, reported by its path in the repo. */
@@ -58,20 +58,20 @@ const FIXTURE: DocInput = {
 		"const auth = new AuthBasic(scope, 'auth');",
 		'```',
 		'```ts', // 5: a missing export and a missing static member
-		"import { NoSuchExport, isBlocksError } from '@aws-blocks/core';",
-		"import { KVStore } from '@aws-blocks/bb-kv-store';",
+		"import { NoSuchExport, isBlocksError } from '@aws-cdk-blocks/core';",
+		"import { KVStore } from '@aws-cdk-blocks/bb-kv-store';",
 		'KVStore.noSuchStatic();',
 		'```',
 		'## Fine', // 10
 		'```ts', // 11: correct, listing one name from two entries
-		"import { KVStore } from '@aws-blocks/bb-kv-store';",
-		"import { KVStore } from '@aws-blocks/blocks';",
+		"import { KVStore } from '@aws-cdk-blocks/bb-kv-store';",
+		"import { KVStore } from 'aws-cdk-blocks';",
 		"const store = new KVStore(scope, 'cache');",
 		'```',
 		'## App', // 16
 		'```ts', // 17: a complete file with a type error
-		'// aws-blocks/index.ts',
-		"import { Scope } from '@aws-blocks/blocks';",
+		'// cdk-blocks/index.ts',
+		"import { Scope } from 'aws-cdk-blocks';",
 		"export const n: number = new Scope('app').fullId;",
 		'```',
 		'<!-- doc-snippet: skip — "before" code -->',
@@ -83,29 +83,29 @@ const FIXTURE: DocInput = {
 		'```',
 		'<!-- doc-snippet: fragment — uses the scope from above -->',
 		'```ts', // 30: light-checked only
-		'// aws-blocks/index.ts',
-		"import { Auth } from '@aws-blocks/blocks';",
+		'// cdk-blocks/index.ts',
+		"import { Auth } from 'aws-cdk-blocks';",
 		"const auth = new Auth(scope, 'auth');",
 		'Auth.noSuchStatic;',
 		'```',
 		'## Browser', // 36
-		'```ts', // 37: a browser file importing a value from the root, which has none under `browser`
+		'```ts', // 37: a browser file importing a server-only value from the root, which lacks it under `browser`
 		'// src/main.ts',
-		"import { isBlocksError, type ScopeParent } from '@aws-blocks/blocks';",
-		"import { ApiError } from '@aws-blocks/blocks/client';",
-		"import type { Auth } from '@aws-blocks/blocks';",
+		"import { isBlocksError, KVStore, type ScopeParent } from 'aws-cdk-blocks';",
+		"import { ApiError } from 'aws-cdk-blocks/client';",
+		"import type { Auth } from 'aws-cdk-blocks';",
 		'```',
 		'```ts', // 44: the same import in a backend file is fine
-		'// aws-blocks/index.ts',
-		"import { isBlocksError } from '@aws-blocks/blocks';",
+		'// cdk-blocks/index.ts',
+		"import { KVStore } from 'aws-cdk-blocks';",
 		'```',
 		'> **Tip:** a sample inside a blockquote is checked too:', // 47
 		'> ```ts', // 48
-		"> import { NoSuchQuotedExport } from '@aws-blocks/core';",
+		"> import { NoSuchQuotedExport } from '@aws-cdk-blocks/core';",
 		'> ```',
 		'```ts', // 51: an annotated file label is still a complete browser file
 		'// src/main.ts — the browser',
-		"import { isBlocksError } from '@aws-blocks/blocks';",
+		"import { KVStore } from 'aws-cdk-blocks';",
 		"export const n: number = 'x';",
 		'```',
 	].join('\n'),
@@ -184,10 +184,11 @@ describe('shipped doc code samples', () => {
 			[true],
 			shown,
 		);
-		// Under the `browser` condition only the root's value import fails; type-only imports and /client pass.
+		// Under the `browser` condition only the root's server-only value import fails; its client-safe values
+		// (isBlocksError), type-only imports and /client pass.
 		const browser = at(37).filter((m) => m.includes('`browser` condition'));
 		assert.deepStrictEqual(
-			browser.map((m) => m.includes("no exported member 'isBlocksError'")),
+			browser.map((m) => m.includes("no exported member 'KVStore'")),
 			[true],
 			shown,
 		);
@@ -198,7 +199,7 @@ describe('shipped doc code samples', () => {
 		);
 		const annotated = at(51);
 		assert.ok(
-			annotated.some((m) => m.includes('`browser` condition') && m.includes("'isBlocksError'")),
+			annotated.some((m) => m.includes('`browser` condition') && m.includes("'KVStore'")),
 			shown,
 		);
 		assert.ok(

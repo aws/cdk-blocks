@@ -142,7 +142,7 @@ describe('destroy fails fast on a deterministic error', () => {
 	});
 
 	it('wires the classification into both destroy paths', () => {
-		const sandbox = sandboxDestroyDeps('/app/aws-blocks/index.cdk.ts', {}, {
+		const sandbox = sandboxDestroyDeps('/app/cdk-blocks/index.cdk.ts', {}, {
 			cfnFor: () => {
 				throw new Error('unused');
 			},
@@ -176,12 +176,12 @@ describe('destroy fails fast on a deterministic error', () => {
 		await assert.rejects(
 			assertAwsCredentials({
 				command: 'destroy',
-				invocation: 'cdk-blocks destroy',
+				invocation: 'npm run destroy -- --profile dev',
 				projectRoot: directory,
 				requireRegion: true,
 				probe: async () => undefined,
 			}),
-			/No AWS Region is set, so `cdk-blocks destroy` can't find the stack to delete\. .*re-run `cdk-blocks destroy`\./,
+			/No AWS Region is set, so `npm run destroy -- --profile dev` can't find the stack to delete\. .*re-run `npm run destroy -- --profile dev`\./,
 		);
 	});
 
@@ -197,7 +197,7 @@ describe('destroy fails fast on a deterministic error', () => {
 		process.chdir(directory);
 		const seen: Array<{ region?: string; profile?: string; requireRegion?: boolean }> = [];
 		await assert.rejects(
-			runSandboxDestroy('aws-blocks/index.cdk.ts', {
+			runSandboxDestroy('cdk-blocks/index.cdk.ts', {
 				checkCredentials: async (options) => {
 					seen.push({
 						region: process.env.AWS_REGION,

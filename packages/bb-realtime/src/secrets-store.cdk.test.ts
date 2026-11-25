@@ -49,10 +49,10 @@ function synth(preset: 'sandbox' | 'production', withCustomerSecret = false): Pr
 		`
 import * as cdk from 'aws-cdk-lib';
 import { Annotations, Match, Template } from 'aws-cdk-lib/assertions';
-import { BlocksPresets, BlocksStack } from '@aws-blocks/core/cdk';
-import { LambdaCompute } from '@aws-blocks/bb-lambda-compute/cdk';
-import { Realtime } from '@aws-blocks/bb-realtime';
-import { AppSetting } from '@aws-blocks/bb-app-setting';
+import { BlocksPresets, BlocksStack } from '@aws-cdk-blocks/core/cdk';
+import { LambdaCompute } from '@aws-cdk-blocks/bb-lambda-compute/cdk';
+import { Realtime } from '@aws-cdk-blocks/bb-realtime';
+import { AppSetting } from '@aws-cdk-blocks/bb-app-setting';
 
 const schema = { '~standard': { version: 1, vendor: 'blocks-test', validate: (value) => ({ value }) } };
 const app = new cdk.App({ context: { sandboxMode: ${preset === 'sandbox' ? "'true'" : "'false'"} } });
@@ -129,7 +129,7 @@ test('sandbox preset: token-secret is the SSM SecureString written by the secret
 	);
 });
 
-/** The functions that load the Blocks config (the computes), with their environment. */
+/** The functions that load the CDK Blocks config (the computes), with their environment. */
 function computeEnvironments(resources: Record<string, CfnResource>): Record<string, unknown>[] {
 	return ofType(resources, 'AWS::Lambda::Function')
 		.map((f) => (f.Properties?.Environment as { Variables?: Record<string, unknown> } | undefined)?.Variables ?? {})

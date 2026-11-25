@@ -1,3 +1,6 @@
+// Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+// SPDX-License-Identifier: Apache-2.0
+
 package com.aws.blocks.kotlin.oidc
 
 import kotlinx.serialization.Serializable
@@ -5,7 +8,7 @@ import kotlinx.serialization.Serializable
 /**
  * The signed-in user, as the backend reports it.
  *
- * Only [userId] and [username] are always present. An AWS Blocks `Auth` block also reports the
+ * Only [userId] and [username] are always present. A CDK Blocks `Auth` block also reports the
  * optional fields; a backend that omits one leaves it `null`, or [groups] empty.
  *
  * @property userId the backend's id for the user.

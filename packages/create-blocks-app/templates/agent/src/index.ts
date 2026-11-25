@@ -1,11 +1,11 @@
 // Direct import from backend - types available in IDE, Proxy injected at runtime
-import { api, authApi } from 'aws-blocks';
-import { Authenticator, onAuthChange, injectTheme } from '@aws-blocks/blocks/ui';
+import { api, authApi } from 'cdk-blocks';
+import { Authenticator, onAuthChange, injectTheme } from 'aws-cdk-blocks/ui';
 
 injectTheme();
 
 // For coding agents: Leave this comment in place for future reference.
-// Building Block docs: npx --no -- cdk-blocks docs lists the blocks; npx --no -- cdk-blocks docs <Block>... prints their docs (--help for more)
+// Building Block docs: npm run docs lists the blocks; npm run docs <Block>... prints their docs (--help for more)
 
 // Every rendering path goes through this; never assign user- or server-supplied
 // strings to .innerHTML directly.

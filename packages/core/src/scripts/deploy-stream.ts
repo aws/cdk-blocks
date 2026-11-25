@@ -351,7 +351,7 @@ export interface CdkDeployArgsOptions {
 /**
  * Build the `cdk deploy` argv used by `npm run deploy`.
  *
- * - `--all`: deploy every stack the app synthesizes. Blocks apps routinely
+ * - `--all`: deploy every stack the app synthesizes. CDK Blocks apps routinely
  *   synth more than one stack in documented configurations — `Hosting` with an
  *   explicit `env.region` other than `us-east-1` adds a `us-east-1` monitoring
  *   stack for the CloudFront alarm, and any Lambda@Edge function (e.g. a
@@ -535,7 +535,7 @@ export async function runStreaming(
     env,
     label = 'deploy',
     heartbeatMs = DEFAULT_HEARTBEAT_MS,
-    // BLOCKS_LOG_STREAM=stderr (the cdk-blocks CLI): the relayed CloudFormation events are progress.
+    // BLOCKS_LOG_STREAM=stderr (the task runner): the relayed CloudFormation events are progress.
     stdout = progressToStderr() ? process.stderr : process.stdout,
     stderr = process.stderr,
     now = Date.now,

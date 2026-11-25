@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The local user pool's persisted state: `.bb-data/<fullId>/state.json`, plus
+ * The local user pool's persisted state: `.cdk-blocks/local/data/<fullId>/state.json`, plus
  * verification codes (`last-code.json`, the `codeDelivery` hook), sign-in
  * challenges and the synthetic tokens the mock mints.
  *
@@ -46,7 +46,7 @@
 import crypto from 'node:crypto';
 import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { ChildLogger } from '@aws-blocks/bb-logger';
+import type { ChildLogger } from '@aws-cdk-blocks/bb-logger';
 import { WRONG_CODE_MESSAGE } from '../enumeration.js';
 import { AuthErrors } from '../errors.js';
 import { decodeJwtPayload } from '../sessions.js';
@@ -212,6 +212,11 @@ export function serviceError(name: string, message: string): Error {
 
 /** @internal */
 export const userNotFound = (): Error => serviceError(AuthErrors.UserNotFound, 'User does not exist.');
+
+/** One character Cognito refuses at either end of a password (ASCII only). See `MockStore.enforcePasswordFormat`. */
+const ASCII_WHITESPACE = /^[ \t\n\v\f\r]$/;
+/** A character Cognito refuses anywhere in a password. See `MockStore.enforcePasswordFormat`. */
+const LINE_BREAK = /[\n\r]/;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Parsing (tolerant)
@@ -466,7 +471,7 @@ function idTokenAttributeClaims(attributes: Record<string, string>): Record<stri
 
 /** What the store needs from its host. */
 export interface MockStoreOptions {
-	/** `getMockDataDir(auth)` — `.bb-data/<fullId>/`. */
+	/** `getMockDataDir(auth)` — `.cdk-blocks/local/data/<fullId>/`. */
 	dataDir: string;
 	/** The `Auth` instance's `fullId` (token issuer / audience). */
 	fullId: string;
@@ -706,6 +711,37 @@ export class MockStore {
 		this.flush();
 	}
 
+	/**
+	 * Refuse a password in the format Cognito refuses: the `Password` /
+	 * `ProposedPassword` / `PreviousPassword` / `TemporaryPassword` member of
+	 * `SignUp`, `ConfirmForgotPassword`, `ChangePassword`,
+	 * `AdminSetUserPassword` and `AdminCreateUser` must match
+	 * `^[\S]+.*[\S]+$`, and a request that does not is answered with
+	 * `InvalidParameterException` before the pool's policy is consulted.
+	 * The password is never trimmed: trimming would store a password the user
+	 * did not type.
+	 *
+	 * What Cognito does, checked against the live service: the first and last
+	 * character must not be an ASCII space, `\t`, `\n`, `\v`, `\f` or `\r`,
+	 * and the password must not contain `\n` or `\r` anywhere. Other inner
+	 * whitespace is allowed, and so is non-ASCII whitespace (U+00A0, U+2003,
+	 * U+0085, U+2028, U+2029) anywhere. An empty string is skipped: the
+	 * password is optional for a passwordless user.
+	 */
+	enforcePasswordFormat(password: string): void {
+		if (typeof password !== 'string' || password.length === 0) return;
+		if (
+			ASCII_WHITESPACE.test(password[0]) ||
+			ASCII_WHITESPACE.test(password[password.length - 1]) ||
+			LINE_BREAK.test(password)
+		) {
+			throw serviceError(
+				AuthErrors.InvalidParameter,
+				'Password must not begin or end with whitespace, or contain a line break.',
+			);
+		}
+	}
+
 	enforcePasswordPolicy(password: string): void {
 		const p = this.opts.passwordPolicy ?? {};
 		const missing: string[] = [];
@@ -776,7 +812,7 @@ export class MockStore {
 
 	/**
 	 * The most recent code, for e2e tests and `npm run dev` (no mailbox
-	 * locally). Test scaffolding only — not secure storage; `.bb-data/` is
+	 * locally). Test scaffolding only — not secure storage; `.cdk-blocks/local/data/` is
 	 * gitignored. Overwritten on every code, so only the last one is visible.
 	 */
 	private writeLastCode(purpose: CodeDeliveryPurpose, username: string, code: string): void {

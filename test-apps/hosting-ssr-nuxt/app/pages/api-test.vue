@@ -230,8 +230,8 @@ const probeCounter = {
 
 const probeListPosts = {
   feature: 'api.listPosts()',
-  description: 'Reads the public posts feed from KVStore via the Blocks Lambda. No auth required.',
-  source: 'aws-blocks/index.ts → ApiNamespace listPosts',
+  description: 'Reads the public posts feed from KVStore via the CDK Blocks Lambda. No auth required.',
+  source: 'cdk-blocks/index.ts → ApiNamespace listPosts',
   buttons: [
     {
       label: 'Call listPosts',
@@ -245,8 +245,8 @@ const probeListPosts = {
 
 const probeCheckAuth = {
   feature: 'api.authCheckAuth()',
-  description: 'Returns the current session info if logged in, or null. Demonstrates Blocks auth round-trip.',
-  source: 'aws-blocks/index.ts → ApiNamespace authCheckAuth',
+  description: 'Returns the current session info if logged in, or null. Demonstrates CDK Blocks auth round-trip.',
+  source: 'cdk-blocks/index.ts → ApiNamespace authCheckAuth',
   buttons: [
     {
       label: 'Call authCheckAuth',
@@ -261,7 +261,7 @@ const probeCheckAuth = {
 const probeAuthFlow = {
   feature: 'api.authSignUp + authConfirmSignUp + authSignIn',
   description: 'Full auth flow: create disposable account, fetch the verification code, confirm, sign in. Cookie set as a result.',
-  source: 'aws-blocks/index.ts → Auth helpers',
+  source: 'cdk-blocks/index.ts → Auth helpers',
   buttons: [
     {
       label: 'Run full auth flow',
@@ -293,8 +293,8 @@ const probeAuthFlow = {
 
 const probeProfile = {
   feature: 'api.getProfile() (auth-protected)',
-  description: 'Calls a protected Blocks endpoint. Returns the current user\'s profile or 401 if unauthenticated.',
-  source: 'aws-blocks/index.ts → getProfile (uses auth.requireAuth)',
+  description: 'Calls a protected CDK Blocks endpoint. Returns the current user\'s profile or 401 if unauthenticated.',
+  source: 'cdk-blocks/index.ts → getProfile (uses auth.requireAuth)',
   buttons: [
     {
       label: 'Call getProfile',
@@ -313,7 +313,7 @@ const probeProfile = {
 const probeCrud = {
   feature: 'api.createPost / listMyPosts / deletePost (auth-protected)',
   description: 'Posts CRUD round-trip, auth-protected. Will fail with 401 if you have not signed in. Run the auth flow above first.',
-  source: 'aws-blocks/index.ts → posts CRUD',
+  source: 'cdk-blocks/index.ts → posts CRUD',
   buttons: [
     {
       label: 'Create + list + delete',
@@ -333,8 +333,8 @@ const probeCrud = {
 
 const probeAuthApi = {
   feature: 'authApi (separate ApiNamespace)',
-  description: 'The authApi namespace is the Blocks-owned alternative to the api namespace. Tests that multiple ApiNamespaces coexist.',
-  source: 'aws-blocks/index.ts → authApi',
+  description: 'The authApi namespace is the CDK Blocks-owned alternative to the api namespace. Tests that multiple ApiNamespaces coexist.',
+  source: 'cdk-blocks/index.ts → authApi',
   buttons: [
     {
       label: 'List authApi members',
@@ -354,10 +354,10 @@ const probeAuthApi = {
       <p :style="{ color: '#666', margin: 0 }">
         Click any button to invoke a route. Two route classes:
         <span :style="{ background: '#000', color: '#fff', padding: '2px 8px', borderRadius: '4px', marginLeft: '8px', fontSize: '12px' }">Framework</span>
-        <span :style="{ marginLeft: '4px', fontSize: '13px' }">= server/api/* (shadowed by Blocks' /api/* CloudFront behavior)</span>
+        <span :style="{ marginLeft: '4px', fontSize: '13px' }">= server/api/* (shadowed by CDK Blocks' /api/* CloudFront behavior)</span>
         <br />
-        <span :style="{ background: '#00B894', color: '#000', padding: '2px 8px', borderRadius: '4px', marginRight: '4px', fontSize: '12px' }">Blocks</span>
-        = ApiNamespace endpoints (route to Blocks Lambda)
+        <span :style="{ background: '#00B894', color: '#000', padding: '2px 8px', borderRadius: '4px', marginRight: '4px', fontSize: '12px' }">CDK Blocks</span>
+        = ApiNamespace endpoints (route to CDK Blocks Lambda)
       </p>
       <details :style="{ marginTop: '8px' }">
         <summary :style="{ cursor: 'pointer' }">config.json</summary>
@@ -395,8 +395,8 @@ const probeAuthApi = {
     </ul>
 
     <h3 :style="{ borderTop: '1px solid #eee', paddingTop: '16px', marginBottom: '12px', marginTop: '24px' }">
-      <span :style="{ background: '#00B894', color: '#000', padding: '3px 10px', borderRadius: '4px', fontSize: '14px' }">Blocks</span>
-      routes — ApiNamespace (<code>aws-blocks/index.ts</code>)
+      <span :style="{ background: '#00B894', color: '#000', padding: '3px 10px', borderRadius: '4px', fontSize: '14px' }">CDK Blocks</span>
+      routes — ApiNamespace (<code>cdk-blocks/index.ts</code>)
     </h3>
 
     <ProbeCard v-bind="probeListPosts" />

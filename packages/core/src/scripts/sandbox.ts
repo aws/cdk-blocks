@@ -4,6 +4,8 @@
 import { REUSE_FRONTEND_BUILD_CONTEXT } from '../common/frontend-build.js';
 import { readFileSync, existsSync, rmSync } from "node:fs";
 import { migrateLegacyDeployedConfig, writeDeployedConfig } from './deployed-config.js';
+import { migrateLegacySandboxDir } from './migrate-sandbox-dir.js';
+import { BLOCKS_SANDBOX_DIR } from '../common/constants.js';
 import { join, resolve, dirname } from "node:path";
 import { deleteSandboxSecrets, loadEnvFile } from './ensure-secrets.js';
 import { assertAwsCredentials, type AssertAwsCredentialsOptions } from './preflight-credentials.js';
@@ -11,6 +13,7 @@ import { resolveDeploymentTarget } from './deployment-target.js';
 import { trackCommand } from '../telemetry/trackCommand.js';
 import { buildAndSendEvent } from '../telemetry/client.js';
 import { classifyError } from '../telemetry/trackCommand.js';
+import type { CommandName } from '../telemetry/types.js';
 import { getCdkTelemetryEnv, getFrameworkSinkEnv } from './cdk-telemetry-env.js';
 import { createFrameworkSink, registerFrameworkFromSink } from '../telemetry/framework-sink.js';
 import { DeployProcessError, formatDeploySignal } from './deploy-stream.js';
@@ -59,11 +62,11 @@ export interface SandboxOptions {
    * it falls back to a full deploy.
    */
   preview?: boolean;
-  /** How the user runs this command, in the guidance (for example `cdk-blocks sandbox`). Default: `npm run sandbox`. */
+  /** How the user runs this command, in the guidance. Default: `npm run sandbox`. */
   invocation?: string;
-  /** How the user destroys the sandbox, in the guidance (for example `cdk-blocks sandbox destroy`). Default: `npm run sandbox:destroy`. */
+  /** How the user destroys the sandbox, in the guidance. Default: `npm run sandbox:destroy`. */
   destroyInvocation?: string;
-  /** How the user deploys a hosted preview, in the guidance (for example `cdk-blocks sandbox preview`). Default: `npm run sandbox:preview`. */
+  /** How the user deploys a hosted preview, in the guidance. Default: `npm run sandbox:preview`. */
   previewInvocation?: string;
   /**
    * Called with the deployed sandbox stack's outputs after the first deploy, in
@@ -80,7 +83,7 @@ export interface SandboxOptions {
  * `shell: true`, because the args are only concatenated, never escaped.
  */
 export function buildDevServerSpawn(devCommand: string | undefined): { command: string; args: string[] } {
-  return { command: devCommand || 'npx tsx watch aws-blocks/scripts/server.ts', args: [] };
+  return { command: devCommand || 'npx tsx watch cdk-blocks/scripts/server.ts', args: [] };
 }
 
 /**
@@ -265,7 +268,7 @@ export function buildSandboxWatchArgs({ outDir, projectRoot }: SandboxDeployArgs
     "cdk", "watch",
     "--hotswap-fallback",
     // Its own assembly directory, as the sandbox deploy has: in the default
-    // `./cdk.out`, a `cdk-blocks deploy` of the app beside it failed on CDK's lock.
+    // `./cdk.out`, a `npm run deploy` of the app beside it failed on CDK's lock.
     "--output", `${outDir}/cdk.out`,
     "--outputs-file", outputsFileIn(outDir, 'sandbox'),
     "--context", `projectRoot=${projectRoot}`,
@@ -286,7 +289,7 @@ export function sandboxIsDeployOnly({ deployOnly = false, preview = false }: Pic
 }
 
 /**
- * Refuse a sandbox deploy or destroy while a `cdk-blocks sandbox` session of the
+ * Refuse a sandbox deploy or destroy while a `npm run sandbox` session of the
  * app at `projectRoot` runs (see {@link liveSandboxSession}): its `cdk watch`
  * deploys every change to the same stack and uses the same cloud assembly
  * directory, so both would fail on CDK's lock or race on the stack.
@@ -296,16 +299,16 @@ export function assertNoRunningSandbox(projectRoot: string, invocation: string):
   const running = liveSandboxSession(projectRoot);
   if (!running) return;
   throw new Error(
-    `A \`cdk-blocks sandbox\` is running in this app (pid ${running.pid}, dev server on :${running.port}), and its cdk watch ` +
+    `A \`npm run sandbox\` is running in this app (pid ${running.pid}, dev server on :${running.port}), and its cdk watch ` +
       `deploys every change to the sandbox. Stop it first, with Ctrl-C in its terminal or ` +
-      `\`npx --no -- cdk-blocks dev stop --port ${running.port}\`, then re-run \`${invocation}\`.`,
+      `\`npm run dev:stop -- --port ${running.port}\`, then re-run \`${invocation}\`.`,
   );
 }
 
 /**
  * Refuse a sandbox that will start a dev server while any dev session of the
  * app at `projectRoot` is live (see {@link liveDevSession}), also a
- * `cdk-blocks dev` that is still starting: the app runs one dev server at a
+ * `npm run dev` that is still starting: the app runs one dev server at a
  * time, so the sandbox's would be refused only after the deploy, and the
  * sandbox ends with it. `invocation` is the command to re-run.
  */
@@ -315,7 +318,7 @@ export function assertNoRunningDevServer(projectRoot: string, invocation: string
   throw new Error(
     `A dev server of this app is already ${running.starting ? 'starting' : 'running'} on :${running.port} (pid ${running.pid}), ` +
       `and the sandbox would start another one. Stop it first, with Ctrl-C in its terminal or ` +
-      `\`npx --no -- cdk-blocks dev stop --port ${running.port}\`, then re-run \`${invocation}\`.`,
+      `\`npm run dev:stop -- --port ${running.port}\`, then re-run \`${invocation}\`.`,
   );
 }
 
@@ -422,7 +425,7 @@ export type SandboxFailurePhase = 'synth' | 'deploy';
 
 /**
  * What a failed sandbox deploy needs from the operator, by cause:
- * - `locked`: another CDK process is using the same `.blocks-sandbox` output;
+ * - `locked`: another CDK process is using the same `.cdk-blocks-sandbox` output;
  * - `in-progress`: CloudFormation is still updating the stack (for example after an interrupted deploy);
  * - `failed-stack`: a stack is left `*_FAILED` or `ROLLBACK_COMPLETE`, which Express Mode doesn't roll back;
  * - `synth`: the app failed to synthesize, so no stack was touched;
@@ -502,7 +505,7 @@ export function sandboxFailureHint(
     case 'locked':
       return [
         "",
-        `ℹ️  Another CDK command is using this app's .blocks-sandbox output (another \`${invocation}\` or`,
+        `ℹ️  Another CDK command is using this app's .cdk-blocks-sandbox output (another \`${invocation}\` or`,
         `   \`${destroyInvocation}\`). Let it finish or stop it, then re-run: run one sandbox command at a time.`,
       ].join("\n");
     case 'in-progress':
@@ -533,7 +536,7 @@ export function sandboxFailureHint(
 /**
  * Stop the sandbox's watch processes: reap both detached trees first, then
  * report. The report comes last because stdout/stderr may already be gone —
- * `cdk-blocks sandbox 2>&1 | tee log` loses `tee` to the same Ctrl-C — and nothing
+ * `npm run sandbox 2>&1 | tee log` loses `tee` to the same Ctrl-C — and nothing
  * printed may delay or prevent the reap: both children run in their own
  * process groups, so nothing else signals them, and a leaked `cdk watch` keeps
  * deploying to AWS.
@@ -573,7 +576,7 @@ interface SandboxHistory {
 }
 
 /**
- * Starts a sandbox, recording the run in `.blocks/deploy-history.jsonl`.
+ * Starts a sandbox, recording the run in `.cdk-blocks/deploy-history.jsonl`.
  *
  * The recorder starts HERE, before any work, as `deploy()` does. It used to be
  * created just before the CDK deploy, after credential and bootstrap preflight,
@@ -615,7 +618,7 @@ export async function startSandbox(options: SandboxOptions) {
 async function runStartSandbox(options: SandboxOptions, history: SandboxHistory) {
   const {
     backendPath,
-    outDir = ".blocks-sandbox",
+    outDir = ".cdk-blocks-sandbox",
     clientPort = 3000,
     devCommand,
     preview = false,
@@ -626,12 +629,16 @@ async function runStartSandbox(options: SandboxOptions, history: SandboxHistory)
   } = options;
   const deployOnly = sandboxIsDeployOnly(options);
   const sandboxStartTime = Date.now();
+  // `sandbox:deploy` and `sandbox:preview` report under their own names, so the
+  // dashboard does not mix their one-shot deploy time into the watch-mode startup time.
+  const telemetryCommand: CommandName = options.preview ? 'sandbox:preview' : options.deployOnly ? 'sandbox:deploy' : 'sandbox';
   // A closed output pipe or terminal must not crash the runner (see ignoreClosedOutput).
   ignoreClosedOutput();
-  // Before anything reaches AWS: a running `cdk-blocks sandbox` already deploys every change,
+  // Before anything reaches AWS: a running `npm run sandbox` already deploys every change,
   // and a sandbox that starts a dev server can't run beside another dev server of the app.
   assertNoRunningSandbox(process.cwd(), invocation);
   if (!deployOnly) assertNoRunningDevServer(process.cwd(), invocation);
+  migrateLegacySandboxDir(process.cwd());
   migrateLegacyDeployedConfig(outDir);
 
   // Load .env.local so CDK can read secret ARNs and other config.
@@ -650,7 +657,7 @@ async function runStartSandbox(options: SandboxOptions, history: SandboxHistory)
     await assertAwsCredentials({ command: 'sandbox', invocation, projectRoot: process.cwd(), checkBootstrap: true });
   } catch (error) {
     buildAndSendEvent({
-      command: 'sandbox',
+      command: telemetryCommand,
       state: 'FAIL',
       duration: Date.now() - sandboxStartTime,
       error: classifyError(error),
@@ -673,7 +680,7 @@ async function runStartSandbox(options: SandboxOptions, history: SandboxHistory)
   } catch (error) {
     // Not wrapped in trackCommand (see the credential check above): emit FAIL.
     buildAndSendEvent({
-      command: 'sandbox',
+      command: telemetryCommand,
       state: 'FAIL',
       duration: Date.now() - sandboxStartTime,
       error: classifyError(error),
@@ -714,7 +721,7 @@ async function runStartSandbox(options: SandboxOptions, history: SandboxHistory)
   try {
     // Synthesize once, so the deploy decision is based on what is about to be
     // deployed (not on local state that may be missing — a fresh clone, a
-    // cleaned .blocks-sandbox, another machine). The deploy below reuses this
+    // cleaned .cdk-blocks-sandbox, another machine). The deploy below reuses this
     // assembly, so the framework build still runs only once.
     // Each cdk step runs under the deploy's signal policy (see CdkRunOptions.deferSignals): a stray
     // SIGTERM must neither kill this process mid-deploy nor leave cdk running unwatched.
@@ -743,7 +750,7 @@ async function runStartSandbox(options: SandboxOptions, history: SandboxHistory)
     registerFrameworkFromSink(frameworkSink);
     history.fail(error);
     buildAndSendEvent({
-      command: 'sandbox',
+      command: telemetryCommand,
       state: 'FAIL',
       duration: Date.now() - sandboxStartTime,
       error: { code: 'CDK_DEPLOY_FAILED', phase: 'deploy' },
@@ -789,7 +796,7 @@ async function runStartSandbox(options: SandboxOptions, history: SandboxHistory)
   if (hostingUrl) console.log(`🌐 ${preview ? 'Preview' : 'Hosting'} URL: ${hostingUrl}`);
 
   buildAndSendEvent({
-    command: 'sandbox',
+    command: telemetryCommand,
     state: 'SUCCESS',
     duration: Date.now() - sandboxStartTime,
   });
@@ -851,7 +858,7 @@ async function runStartSandbox(options: SandboxOptions, history: SandboxHistory)
       ...process.env,
       NODE_OPTIONS: '',
       BLOCKS_API_URL: apiUrl,
-      // The dev server records this session in its pidfile, so `cdk-blocks dev stop` says it stopped the sandbox.
+      // The dev server records this session in its pidfile, so `npm run dev:stop` says it stopped the sandbox.
       [SANDBOX_SESSION_ENV]: String(process.pid),
     },
   });
@@ -867,7 +874,7 @@ async function runStartSandbox(options: SandboxOptions, history: SandboxHistory)
   process.on("SIGINT", () => cleanup());
   process.on("SIGTERM", () => cleanup());
   // The session is its dev server and its `cdk watch`: when the dev server ends
-  // (`cdk-blocks dev stop`, a crash), stop the watch too, which would otherwise go
+  // (`npm run dev:stop`, a crash), stop the watch too, which would otherwise go
   // on hotswapping every save into the sandbox, out of reach of any command.
   devServer.once('exit', (code, signal) => {
     if (cleaningUp) return;
@@ -880,9 +887,9 @@ async function runStartSandbox(options: SandboxOptions, history: SandboxHistory)
 }
 
 /**
- * The exit code of `cdk-blocks sandbox` when its dev server ends on its own: 0 when
- * it was stopped (exit 0, a signal, or a shell's 128+n for one: `cdk-blocks dev
- * stop` SIGTERMs or SIGKILLs it), 1 when it failed (a startup failure exits 1).
+ * The exit code of `npm run sandbox` when its dev server ends on its own: 0 when
+ * it was stopped (exit 0, a signal, or a shell's 128+n for one: `npm run dev:stop`
+ * SIGTERMs or SIGKILLs it), 1 when it failed (a startup failure exits 1).
  */
 export function sandboxDevServerExitCode(code: number | null, signal: NodeJS.Signals | null): number {
   return signal !== null || code === null || code === 0 || code > 128 ? 0 : 1;
@@ -1624,7 +1631,7 @@ async function edgeStacksBlocked(deps: DestroyRetryDeps, stacks: AssemblyStack[]
  * relative to the project root. The retry reads the stack list from it. Its own
  * directory, so a production `destroy` running at the same time can't clear it.
  */
-const SANDBOX_DESTROY_ASSEMBLY_DIR = '.blocks-sandbox/sandbox-destroy.out';
+const SANDBOX_DESTROY_ASSEMBLY_DIR = '.cdk-blocks-sandbox/sandbox-destroy.out';
 
 export async function destroySandbox(backendPath: string, options: { invocation?: string } = {}) {
   ignoreClosedOutput();
@@ -1659,7 +1666,8 @@ export async function runSandboxDestroy(
   log.progress("🗑️  Destroying sandbox...");
   // Its `cdk watch` would redeploy what this deletes, and shares the cloud assembly directory.
   assertNoRunningSandbox(process.cwd(), invocation);
-  migrateLegacyDeployedConfig(join(process.cwd(), '.blocks-sandbox'));
+  migrateLegacySandboxDir(process.cwd());
+  migrateLegacyDeployedConfig(join(process.cwd(), BLOCKS_SANDBOX_DIR));
 
   // Load .env.local first, as the sandbox deploy does: an AWS_PROFILE or
   // AWS_REGION set there selects the target, so the pre-check below must see it.

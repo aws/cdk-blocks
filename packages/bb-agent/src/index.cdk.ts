@@ -1,11 +1,11 @@
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { BuildingBlockScope, synthGuard } from '@aws-blocks/core/cdk';
-import type { ScopeParent } from '@aws-blocks/core';
-import { KVStore } from '@aws-blocks/bb-kv-store';
-import { Realtime } from '@aws-blocks/bb-realtime';
-import { FileBucket } from '@aws-blocks/bb-file-bucket';
+import { BuildingBlockScope, synthGuard } from '@aws-cdk-blocks/core/cdk';
+import type { ScopeParent } from '@aws-cdk-blocks/core';
+import { KVStore } from '@aws-cdk-blocks/bb-kv-store';
+import { Realtime } from '@aws-cdk-blocks/bb-realtime';
+import { FileBucket } from '@aws-cdk-blocks/bb-file-bucket';
 import * as cdk from 'aws-cdk-lib';
 import * as ec2 from 'aws-cdk-lib/aws-ec2';
 import * as iam from 'aws-cdk-lib/aws-iam';
@@ -58,7 +58,7 @@ export class Agent extends BuildingBlockScope {
 			},
 		});
 
-		// The agent loop runs on the AgentCore Runtime (as the shared Blocks execution role) and
+		// The agent loop runs on the AgentCore Runtime (as the shared CDK Blocks execution role) and
 		// streams to the browser over Realtime. AgentCoreRuntime co-bundles the app backend,
 		// provisions the runtime, adds the bedrock-agentcore trust + Bedrock to the shared role, and
 		// injects the config location so the container loads the same app config as the handler
@@ -114,7 +114,7 @@ export class Agent extends BuildingBlockScope {
 		}
 	}
 
-	// Runtime-only methods throw during synth (see `synthGuard` in `@aws-blocks/core/cdk`).
+	// Runtime-only methods throw during synth (see `synthGuard` in `@aws-cdk-blocks/core/cdk`).
 	stream(..._args: unknown[]): never { return synthGuard('Agent', 'stream'); }
 	resume(..._args: unknown[]): never { return synthGuard('Agent', 'resume'); }
 	createConversationId(..._args: unknown[]): never { return synthGuard('Agent', 'createConversationId'); }

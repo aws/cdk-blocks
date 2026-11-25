@@ -3,12 +3,12 @@
   "version": "0.1.0",
   "type": "module",
   "blocksTemplate": "nextjs",
-  "blocksTemplateDescription": "Next.js 16 App Router with Server + Client Components calling Blocks",
+  "blocksTemplateDescription": "Next.js 16 App Router with Server + Client Components calling CDK Blocks",
   "engines": {
     "node": ">=22.0.0"
   },
   "workspaces": [
-    "aws-blocks"
+    "cdk-blocks"
   ],
   "scripts": {
     "typecheck": "tsc --noEmit",
@@ -31,6 +31,14 @@
     "config": "cdk-blocks config",
     "typegen": "cdk-blocks generate types",
     "test:e2e": "tsx -C browser --test-force-exit test/e2e.test.ts",
+    "docs": "cdk-blocks docs",
+    "docs:search": "cdk-blocks docs --search",
+    "docs:api": "cdk-blocks docs --api",
+    "db": "cdk-blocks db",
+    "whoami": "cdk-blocks whoami",
+    "migrate": "cdk-blocks migrate",
+    "help": "cdk-blocks --help",
+    "generate-client": "cdk-blocks generate client",
     "vendorize": "cdk-blocks vendorize"
   },
   "blocks": {
@@ -39,15 +47,15 @@
     }
   },
   "dependencies": {
-    "@aws-blocks/blocks": "*",
-    "@aws-blocks/hosting": "*",
+    "aws-cdk-blocks": "*",
+    "@aws-cdk-blocks/hosting": "*",
     "next": "^16.4.3",
     "react": "^19.3.1",
     "react-dom": "^19.3.1"
   },
   "devDependencies": {
     "@opennextjs/aws": "~4.1.14",
-    "@types/node": "^20.19.43",
+    "@types/node": "^22.12.0",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "typescript": "^5.9.3",

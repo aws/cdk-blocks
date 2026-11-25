@@ -43,7 +43,7 @@ function block(overrides: Partial<DiscoveredBlock> = {}): DiscoveredBlock {
 		id: 'todos',
 		fullId: 'my-app-todos',
 		category: 'data',
-		file: 'aws-blocks/index.ts',
+		file: 'cdk-blocks/index.ts',
 		line: 42,
 		...overrides,
 	};
@@ -379,12 +379,12 @@ describe('navStatus', () => {
 				blocks: blocksResponse({
 					blocksSource: 'unavailable',
 					blocksErrorCode: 'NOT_A_BLOCKS_PROJECT',
-					blocksError: 'No aws-blocks/index.ts found.',
+					blocksError: 'No cdk-blocks/index.ts found.',
 				}),
 				pending: false,
 				failed: false,
 			}),
-			{ kind: 'unavailable', code: 'NOT_A_BLOCKS_PROJECT', message: 'No aws-blocks/index.ts found.' },
+			{ kind: 'unavailable', code: 'NOT_A_BLOCKS_PROJECT', message: 'No cdk-blocks/index.ts found.' },
 		);
 	});
 
@@ -401,7 +401,7 @@ describe('navStatus', () => {
 			blocks: blocksResponse({
 				blocks: [],
 				unknownConstructs: [
-					{ text: 'blocks.Mystery', file: 'aws-blocks/index.ts', line: 3, reason: 'unknown-type' },
+					{ text: 'blocks.Mystery', file: 'cdk-blocks/index.ts', line: 3, reason: 'unknown-type' },
 				],
 			}),
 			pending: false,
@@ -708,10 +708,10 @@ describe('buildInventoryTree — the local environment has nothing to read, whic
 
 	it('explains the nav\u2019s own absence without sending the reader to the page they are on', () => {
 		// The nav footer used to borrow the Resources PILLAR's sentence, which ends
-		// "or open Blocks to see what your app declares" -- and the nav renders on
+		// "or open CDK Blocks to see what your app declares" -- and the nav renders on
 		// the Blocks page, so it instructed the reader to open the page they were
 		// already on. This sentence is scoped to what the nav lost.
-		assert.doesNotMatch(NAV_RESOURCES_NOT_APPLICABLE, /open Blocks/i);
+		assert.doesNotMatch(NAV_RESOURCES_NOT_APPLICABLE, /open CDK Blocks/i);
 		assert.notEqual(NAV_RESOURCES_NOT_APPLICABLE, localNotApplicableReason('resources'));
 		// It must still name what is missing, or the absence reads as an empty stack.
 		assert.match(NAV_RESOURCES_NOT_APPLICABLE, /framework sections/i);
@@ -883,7 +883,7 @@ describe('buildInventoryTree — unrecognised things', () => {
 			blocks: blocksResponse({
 				blocks: [],
 				unknownConstructs: [
-					{ text: 'blocks.Mystery', file: 'aws-blocks/index.ts', line: 9, reason: 'unknown-type' },
+					{ text: 'blocks.Mystery', file: 'cdk-blocks/index.ts', line: 9, reason: 'unknown-type' },
 				],
 			}),
 			resources: { state: 'pending' },

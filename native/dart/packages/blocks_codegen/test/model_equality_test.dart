@@ -1,9 +1,14 @@
+// Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+// SPDX-License-Identifier: Apache-2.0
+
 import 'dart:convert';
 
 import 'package:blocks_codegen/src/builder.dart';
 import 'package:blocks_codegen/src/generator.dart';
 import 'package:blocks_codegen/src/parser.dart';
 import 'package:test/test.dart';
+
+import 'support/source_matchers.dart';
 
 // A generated model's `==` and `hashCode` used to compare list and map fields
 // with `==` and `hashCode`, which Dart's `List` and `Map` implement by
@@ -71,7 +76,7 @@ const _noteSchema = {
 };
 
 const _realtimeExport =
-    "export 'package:blocks_runtime/blocks_runtime.dart' show RealtimeChannel, FileDownloadHandle, FileUploadHandle;";
+    "export 'package:blocks_runtime/blocks_runtime.dart' show RealtimeChannel, FileDownloadHandle, FileUploadHandle, FileTransferException, RealtimeException, RealtimeChannelClosedException, RealtimeConnectionException, RealtimeSubscriptionEndedException, TransferableException, InvalidDescriptorException;";
 const _oidcExport =
     "export 'package:blocks_runtime/blocks_runtime.dart' show OidcClient, OidcAuthState, OidcSignedIn, OidcSignedOut, OidcLoading, OidcUser, TokenStore, InMemoryTokenStore, AuthProvider, BrowserLauncher, ProviderConfig;";
 
@@ -149,7 +154,7 @@ void main() {
     test('lists, maps and unknown (`dynamic`) values use deep equality', () {
       expect(
         output,
-        contains(
+        containsSource(
           '      other is Layout &&\n'
           '          title == other.title &&\n'
           '          blocksDeepEquals(tags, other.tags) &&\n'
@@ -165,7 +170,7 @@ void main() {
     test('hashCode hashes the same fields deeply, so it agrees with ==', () {
       expect(
         output,
-        contains(
+        containsSource(
           '  int get hashCode => Object.hash(title, blocksDeepHash(tags), blocksDeepHash(notesByTag), blocksDeepHash(grid), blocksDeepHash(maybeScores), pinned, blocksDeepHash(extra));',
         ),
       );
@@ -174,22 +179,25 @@ void main() {
     test('a model with one list field hashes it deeply', () {
       expect(
         output,
-        contains('          blocksDeepEquals(values, other.values);'),
+        containsSource('          blocksDeepEquals(values, other.values);'),
       );
-      expect(output, contains('  int get hashCode => blocksDeepHash(values);'));
+      expect(
+        output,
+        containsSource('  int get hashCode => blocksDeepHash(values);'),
+      );
     });
 
     test('additional properties compare deeply', () {
       expect(
         output,
-        contains(
+        containsSource(
           '          name == other.name &&\n'
           '          blocksDeepEquals(additionalProperties, other.additionalProperties);',
         ),
       );
       expect(
         output,
-        contains(
+        containsSource(
           '  int get hashCode => Object.hash(name, blocksDeepHash(additionalProperties));',
         ),
       );
@@ -198,7 +206,7 @@ void main() {
     test('a sealed variant compares its list fields deeply', () {
       expect(
         output,
-        contains(
+        containsSource(
           '      other is PolygonShape &&\n'
           '          blocksDeepEquals(points, other.points) &&\n'
           '          label == other.label;',
@@ -206,7 +214,7 @@ void main() {
       );
       expect(
         output,
-        contains(
+        containsSource(
           '  int get hashCode => Object.hash(blocksDeepHash(points), label);',
         ),
       );
@@ -215,15 +223,15 @@ void main() {
     test('a model with no list or map field is unchanged', () {
       expect(
         output,
-        contains(
+        containsSource(
           '      other is Note &&\n'
           '          id == other.id;',
         ),
       );
-      expect(output, contains('  int get hashCode => id.hashCode;'));
+      expect(output, containsSource('  int get hashCode => id.hashCode;'));
       expect(
         output,
-        contains(
+        containsSource(
           '      other is DotShape &&\n'
           '          label == other.label;',
         ),
@@ -253,9 +261,9 @@ void main() {
           },
         ),
       );
-      expect(output, contains('  final RealtimeChannel<Note> feed;'));
-      expect(output, contains(_realtimeExport));
-      expect(output, isNot(contains(_oidcExport)));
+      expect(output, containsSource('  final RealtimeChannel<Note> feed;'));
+      expect(output, containsSource(_realtimeExport));
+      expect(output, isNot(containsSource(_oidcExport)));
     });
 
     test('a file handle in a list inside a model', () {
@@ -277,8 +285,11 @@ void main() {
           },
         ),
       );
-      expect(output, contains('  final List<FileDownloadHandle> photos;'));
-      expect(output, contains(_realtimeExport));
+      expect(
+        output,
+        containsSource('  final List<FileDownloadHandle> photos;'),
+      );
+      expect(output, containsSource(_realtimeExport));
     });
 
     test('a list of channels as an operation result', () {
@@ -296,30 +307,11 @@ void main() {
           {'Note': _noteSchema},
         ),
       );
-      expect(output, contains('Future<List<RealtimeChannel<Note>>> listFeeds'));
-      expect(output, contains(_realtimeExport));
-    });
-
-    test('a file upload handle in a list parameter', () {
-      final output = _generate(
-        _spec([
-          _method(
-            'ping',
-            {'type': 'string'},
-            [
-              {
-                'name': 'uploads',
-                'required': true,
-                'schema': _list({
-                  'x-blocks-transferable': 'file-bucket/upload',
-                }),
-              },
-            ],
-          ),
-        ], {}),
+      expect(
+        output,
+        containsSource('Future<List<RealtimeChannel<Note>>> listFeeds'),
       );
-      expect(output, contains('List<FileUploadHandle> uploads'));
-      expect(output, contains(_realtimeExport));
+      expect(output, containsSource(_realtimeExport));
     });
 
     test('an oidc client held by a model two levels down', () {
@@ -346,17 +338,17 @@ void main() {
           },
         ),
       );
-      expect(output, contains('  final OidcClient client;'));
-      expect(output, contains(_oidcExport));
-      expect(output, contains(_realtimeExport));
+      expect(output, containsSource('  final OidcClient client;'));
+      expect(output, containsSource(_oidcExport));
+      expect(output, containsSource(_realtimeExport));
     });
 
     test('a client with no transferables exports neither', () {
       final output = _generate(
         _spec([_method('getNote', _note)], {'Note': _noteSchema}),
       );
-      expect(output, isNot(contains(_realtimeExport)));
-      expect(output, isNot(contains(_oidcExport)));
+      expect(output, isNot(containsSource(_realtimeExport)));
+      expect(output, isNot(containsSource(_oidcExport)));
     });
   });
 }

@@ -1,11 +1,21 @@
 // GENERATED CODE — DO NOT MODIFY BY HAND
 // Generator: blocks-codegen
 // Source: test v1.0.0
-// Requires blocks_runtime 0.2.0 or later.
+// Requires blocks_runtime 1.0.0 or later.
 // ignore_for_file: constant_identifier_names
+// dart format width=80
 
 import 'package:blocks_runtime/blocks_runtime.dart';
-export 'package:blocks_runtime/blocks_runtime.dart' show BlocksClient, BlocksRpcException, SessionStore, InMemorySessionStore;
+export 'package:blocks_runtime/blocks_runtime.dart'
+    show
+        ApiException,
+        BlocksClient,
+        BlocksException,
+        ClientClosedException,
+        InMemorySessionStore,
+        SessionStore,
+        TransportException,
+        isBlocksError;
 
 // --- Models ---
 
@@ -77,12 +87,22 @@ class Doc {
           level == other.level;
 
   @override
-  int get hashCode => Object.hash($id, $$v, toJson$, fromJson$, hashCode$, toString$, int$, String$, level);
+  int get hashCode => Object.hash(
+    $id,
+    $$v,
+    toJson$,
+    fromJson$,
+    hashCode$,
+    toString$,
+    int$,
+    String$,
+    level,
+  );
 
   @override
-  String toString() => 'Doc(\$id: ${$id}, \$\$v: ${$$v}, toJson\$: ${toJson$}, fromJson\$: ${fromJson$}, hashCode\$: ${hashCode$}, toString\$: ${toString$}, int\$: ${int$}, String\$: ${String$}, level: $level)';
+  String toString() =>
+      'Doc(\$id: ${$id}, \$\$v: ${$$v}, toJson\$: ${toJson$}, fromJson\$: ${fromJson$}, hashCode\$: ${hashCode$}, toString\$: ${toString$}, int\$: ${int$}, String\$: ${String$}, level: $level)';
 }
-
 
 class Extras {
   final String additionalProperties$;
@@ -101,7 +121,8 @@ class Extras {
       additionalProperties$: json['additionalProperties'] as String,
       id: json['id'] as String,
       additionalProperties: Map.fromEntries(
-        json.entries.where((e) => !knownKeys.contains(e.key))
+        json.entries
+            .where((e) => !knownKeys.contains(e.key))
             .map((e) => MapEntry(e.key, e.value as int)),
       ),
     );
@@ -112,7 +133,8 @@ class Extras {
       'additionalProperties': additionalProperties$,
       'id': id,
       for (final e in additionalProperties.entries)
-        if (!const {'additionalProperties', 'id'}.contains(e.key)) e.key: e.value,
+        if (!const {'additionalProperties', 'id'}.contains(e.key))
+          e.key: e.value,
     };
   }
 
@@ -125,57 +147,88 @@ class Extras {
           blocksDeepEquals(additionalProperties, other.additionalProperties);
 
   @override
-  int get hashCode => Object.hash(additionalProperties$, id, blocksDeepHash(additionalProperties));
+  int get hashCode => Object.hash(
+    additionalProperties$,
+    id,
+    blocksDeepHash(additionalProperties),
+  );
 
   @override
-  String toString() => 'Extras(additionalProperties\$: ${additionalProperties$}, id: $id, additionalProperties: $additionalProperties)';
+  String toString() =>
+      'Extras(additionalProperties\$: ${additionalProperties$}, id: $id, additionalProperties: $additionalProperties)';
 }
 
+sealed class Level {
+  static const values$ = LevelKnown.values$;
+  static const index$ = LevelKnown.index$;
+  static const name$ = LevelKnown.name$;
+  static const $hidden = LevelKnown.$hidden;
+  static const ok = LevelKnown.ok;
+  static const values = LevelKnown.values;
 
-enum Level {
+  String toJson();
+  static Level fromJson(String json) =>
+      LevelKnown._jsonMap[json] ?? LevelUnknown(json);
+}
+
+enum LevelKnown implements Level {
   values$,
   index$,
   name$,
   $hidden,
-  ok
-;
+  ok;
 
-  static const _jsonMap = <String, Level>{
+  static const _jsonMap = <String, LevelKnown>{
     'values': values$,
     'index': index$,
     'name': name$,
     '_hidden': $hidden,
     'ok': ok,
   };
-  static const _toJsonMap = <Level, String>{
+  static const _toJsonMap = <LevelKnown, String>{
     values$: 'values',
     index$: 'index',
     name$: 'name',
     $hidden: '_hidden',
     ok: 'ok',
   };
+  @override
   String toJson() => _toJsonMap[this]!;
-  static Level fromJson(String json) => _jsonMap[json]!;
 }
 
+final class LevelUnknown implements Level {
+  final String value;
+
+  const LevelUnknown(this.value);
+
+  @override
+  String toJson() => value;
+
+  @override
+  bool operator ==(Object other) =>
+      other is LevelUnknown && value == other.value;
+
+  @override
+  int get hashCode => value.hashCode;
+
+  @override
+  String toString() =>
+      'LevelUnknown'
+      '($value)';
+}
 
 class Api {
   final BlocksClient _client;
   Api(this._client);
 
   Future<Doc> getDoc({required String $id, int? int$}) async {
-    final params = <dynamic>[
-      $id,
-      if (int$ != null) int$,
-    ];
+    final params = <dynamic>[$id, if (int$ != null) int$];
     final result = await _client.call('api.getDoc', params);
     return Doc.fromJson(result as Map<String, dynamic>);
   }
 
   Future<Extras> putExtras({required Extras extras}) async {
-    final params = <dynamic>[
-      extras.toJson(),
-    ];
+    final params = <dynamic>[extras.toJson()];
     final result = await _client.call('api.putExtras', params);
     return Extras.fromJson(result as Map<String, dynamic>);
   }
@@ -186,15 +239,20 @@ class Api {
   }
 }
 
-
-// --- Blocks Client ---
+// --- CDK Blocks Client ---
 
 class Blocks {
   late final Api api;
+  late final BlocksClient _client;
 
   Blocks({required String baseUrl, SessionStore? sessionStore}) {
     final client = BlocksClient(baseUrl: baseUrl, sessionStore: sessionStore);
+    _client = client;
     api = Api(client);
   }
-}
 
+  /// Closes the client. A call after this throws a [ClientClosedException],
+  /// and so does an `OidcClient` one of its calls returned. Closing twice
+  /// does nothing more.
+  void close() => _client.close();
+}

@@ -5,13 +5,16 @@
  * Shared types for the Metrics building block.
  * This file has zero runtime dependencies — types only.
  */
-import type { ChildLogger } from '@aws-blocks/bb-logger';
+import type { ChildLogger } from '@aws-cdk-blocks/bb-logger';
 
 /**
  * Units supported by CloudWatch. Using a unit enables automatic conversions
  * in dashboards (e.g., Bytes → Megabytes) and clearer Y-axis labels.
  *
  * Covers the most common use cases. For unlisted units, use 'None'.
+ *
+ * Lists every unit CloudWatch accepts in an EMF document (the `MetricDatum.Unit`
+ * values). Any other unit is rejected with `MetricsErrors.InvalidUnit`.
  */
 export type MetricUnit =
 	| 'Count'
@@ -22,8 +25,24 @@ export type MetricUnit =
 	| 'Kilobytes'
 	| 'Megabytes'
 	| 'Gigabytes'
+	| 'Terabytes'
+	| 'Bits'
+	| 'Kilobits'
+	| 'Megabits'
+	| 'Gigabits'
+	| 'Terabits'
 	| 'Percent'
+	| 'Bytes/Second'
+	| 'Kilobytes/Second'
+	| 'Megabytes/Second'
+	| 'Gigabytes/Second'
+	| 'Terabytes/Second'
 	| 'Bits/Second'
+	| 'Kilobits/Second'
+	| 'Megabits/Second'
+	| 'Gigabits/Second'
+	| 'Terabits/Second'
+	| 'Count/Second'
 	| 'None';
 
 /**

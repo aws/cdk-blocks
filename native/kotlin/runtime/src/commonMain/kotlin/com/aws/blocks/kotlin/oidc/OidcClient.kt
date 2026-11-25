@@ -1,3 +1,6 @@
+// Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+// SPDX-License-Identifier: Apache-2.0
+
 package com.aws.blocks.kotlin.oidc
 
 import com.aws.blocks.kotlin.BlocksClient
@@ -89,7 +92,7 @@ class OidcClient<P : OidcProvider> internal constructor(
     @InternalBlocksApi
     var platformLauncher: OidcPlatformLauncher = createPlatformLauncher()
 
-    // Blocks backend does not append padding
+    // CDK Blocks backend does not append padding
     private val base64 = Base64.UrlSafe.withPadding(Base64.PaddingOption.PRESENT_OPTIONAL)
 
     /**

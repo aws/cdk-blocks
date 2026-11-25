@@ -4,12 +4,12 @@
 import { SQSClient, SendMessageCommand, SendMessageBatchCommand } from '@aws-sdk/client-sqs';
 import { ReceiveMessageCommand, DeleteMessageCommand, ChangeMessageVisibilityCommand } from '@aws-sdk/client-sqs';
 import type { SendMessageBatchCommandOutput } from '@aws-sdk/client-sqs';
-import { Scope, registerSdkIdentifiers, getSdkIdentifiers, installClientUserAgent, blocksError } from '@aws-blocks/core';
-import { getConfigSync, getContainerComputeId, isContainerRuntime, registerContainerPoller } from '@aws-blocks/core';
-import { dispatchJobToWorker, isJobWorker } from '@aws-blocks/core';
-import { EventSourceMapping, sanitizeConfigKey } from '@aws-blocks/core/bb-utils';
+import { Scope, registerSdkIdentifiers, getSdkIdentifiers, installClientUserAgent, blocksError } from '@aws-cdk-blocks/core';
+import { getConfigSync, getContainerComputeId, isContainerRuntime, registerContainerPoller } from '@aws-cdk-blocks/core';
+import { dispatchJobToWorker, isJobWorker } from '@aws-cdk-blocks/core';
+import { EventSourceMapping, sanitizeConfigKey } from '@aws-cdk-blocks/core/bb-utils';
 import { registerAsyncJob } from './job-registry.js';
-import type { ScopeParent } from '@aws-blocks/core';
+import type { ScopeParent } from '@aws-cdk-blocks/core';
 import type { StandardSchemaV1 } from '@standard-schema/spec';
 import type {
 	AsyncJobContext,
@@ -22,9 +22,10 @@ import type {
 } from './types.js';
 import { AsyncJobErrors, BatchSubmitFailedError } from './errors.js';
 import { JobStatusTracker, statusNotTrackedError } from './status.js';
+import { validateDelaySeconds } from './validation.js';
 import { BB_NAME, BB_VERSION } from './version.js';
-import { Logger } from '@aws-blocks/bb-logger';
-import type { ChildLogger } from '@aws-blocks/bb-logger';
+import { Logger } from '@aws-cdk-blocks/bb-logger';
+import type { ChildLogger } from '@aws-cdk-blocks/bb-logger';
 
 export { AsyncJobErrors, BatchSubmitFailedError } from './errors.js';
 export type {
@@ -442,6 +443,7 @@ export class AsyncJob<T = unknown> extends Scope {
 
 	async submit(payload: T, options?: SubmitOptions): Promise<{ jobId: string }> {
 		this.ensureQueueUrl();
+		validateDelaySeconds(options?.delaySeconds);
 		const messageBody = await this.validatePayload(payload);
 
 		const result = await this._sqsClient.send(new SendMessageCommand({
@@ -569,6 +571,10 @@ export class AsyncJob<T = unknown> extends Scope {
 		if (payloads.length > MAX_BATCH_PAYLOADS) {
 			throw blocksError(AsyncJobErrors.BatchTooLarge, `Batch contains ${payloads.length} payloads, exceeds the ${MAX_BATCH_PAYLOADS} per-call limit`);
 		}
+
+		// One delay applies to every entry, so an invalid one would make SQS reject
+		// them all; check it up front instead of wrapping that in BatchSubmitFailed.
+		validateDelaySeconds(options?.delaySeconds);
 
 		// Validate and serialize every payload before enqueuing anything, so one bad
 		// payload fails the whole call rather than half-submitting the batch.

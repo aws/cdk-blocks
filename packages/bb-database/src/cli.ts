@@ -22,9 +22,9 @@ import type { BlockFlags } from './cli/owned.js';
 import { DEFAULT_CONNECTION_NAME, DEFAULT_SCHEMA } from './constants.js';
 import { causeChain } from './errors.js';
 
-// The name in the usage text: `bb-database`, or the command of a wrapper that runs this file (`cdk-blocks db`).
+// The name in the usage text: `bb-database`, or the task that runs this file (`npm run db --`).
 const COMMAND = process.env.BB_DATABASE_COMMAND || 'bb-database';
-// A wrapper runs this file from the project root; a path the user typed is relative to their own directory.
+// A wrapper runs this file from the project root; explicit paths are relative to its starting directory.
 const START_DIR = process.env.BB_DATABASE_START_DIR;
 const fromCaller = (path: string | undefined): string | undefined =>
 	path === undefined || !START_DIR ? path : resolve(START_DIR, path);
@@ -43,17 +43,17 @@ Commands:
       Record <file> as applied without running it, for a file that describes what the database already
       has (a schema dump). With --stage, on the database of that stage. Repeat the option for more files.
   types [--name <name>] [--schema <schema>] [--out <file>]
-      Write one Tables interface for Kysely (default aws-blocks/database.types.ts).
+      Write one Tables interface for Kysely (default cdk-blocks/database.types.ts).
   status [dir] [--name <name>] [--schema <schema>] [--stage sandbox|production]
       List the applied and the pending files of [dir].
 
 For a block that provisions its cluster (no connection string), name the block:
   types [dir] --block <id> [--type dsql|aurora] [--cluster <id>] [--schema <schema>] [--out <file>]
-      Write the Tables interface from the block's migration files (default aws-blocks/migrations/<id>).
+      Write the Tables interface from the block's migration files (default cdk-blocks/migrations/<id>).
       --type aurora, or --cluster with the id of its DatabaseCluster, for a block that is not on its own
       Aurora DSQL cluster.
   status [dir] --block <id> [--cluster <id>] [--schema <schema>]
-      List the applied and the pending files in the block's local database under .bb-data/.
+      List the applied and the pending files in the block's local database under .cdk-blocks/local/data/.
 
 Options for every command:
   --output json|text   json prints one object on stdout and nothing else (default text)

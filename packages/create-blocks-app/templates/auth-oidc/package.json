@@ -8,7 +8,7 @@
     "node": ">=22.0.0"
   },
   "workspaces": [
-    "aws-blocks"
+    "cdk-blocks"
   ],
   "scripts": {
     "typecheck": "tsc -b --force",
@@ -31,6 +31,14 @@
     "typegen": "cdk-blocks generate types",
     "destroy": "cdk-blocks destroy",
     "test:e2e": "tsx --tsconfig tsconfig.node.json -C browser --test-force-exit test/e2e.test.ts",
+    "docs": "cdk-blocks docs",
+    "docs:search": "cdk-blocks docs --search",
+    "docs:api": "cdk-blocks docs --api",
+    "db": "cdk-blocks db",
+    "whoami": "cdk-blocks whoami",
+    "migrate": "cdk-blocks migrate",
+    "help": "cdk-blocks --help",
+    "generate-client": "cdk-blocks generate client",
     "vendorize": "cdk-blocks vendorize"
   },
   "blocks": {
@@ -39,11 +47,11 @@
     }
   },
   "dependencies": {
-    "@aws-blocks/blocks": "*",
-    "@aws-blocks/hosting": "*"
+    "aws-cdk-blocks": "*",
+    "@aws-cdk-blocks/hosting": "*"
   },
   "devDependencies": {
-    "@types/node": "^20.19.43",
+    "@types/node": "^22.12.0",
     "typescript": "^5.9.3",
     "vite": "^6.4.5",
     "tsx": "^4.23.15",

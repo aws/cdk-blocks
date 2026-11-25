@@ -4,7 +4,7 @@
 // Real-process tests of the dev server's lifecycle: closed output, the
 // singleton guard, port ownership and fatal startup failures. Each test runs
 // `startDevServer` in its own app directory under `tsx` (optionally `tsx watch`,
-// as `cdk-blocks dev` does) on free ports.
+// as `npm run dev` does) on free ports.
 
 import { afterEach, describe, it } from 'node:test';
 import assert from 'node:assert';
@@ -116,7 +116,7 @@ function startDev(
   );
   const child = spawn(process.execPath, [tsxCli, ...(watch ? ['watch', '--clear-screen=false'] : []), entry], {
     cwd: dir,
-    env: { ...process.env, AWS_BLOCKS_DISABLE_TELEMETRY: '1', BLOCKS_DEV_QUIET: '1', BLOCKS_LOG_LEVEL: '', ...env },
+    env: { ...process.env, CDK_DISABLE_CLI_TELEMETRY: '1', BLOCKS_DEV_QUIET: '1', BLOCKS_LOG_LEVEL: '', ...env },
     stdio: ['ignore', 'pipe', 'pipe'],
     detached: posix,
   });
@@ -129,7 +129,7 @@ function startDev(
 }
 
 async function rpc(port: number): Promise<unknown> {
-  const response = await fetch(`http://127.0.0.1:${port}/aws-blocks/api`, {
+  const response = await fetch(`http://127.0.0.1:${port}/cdk-blocks/api`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ jsonrpc: '2.0', method: 'testApi.ping', params: [], id: 1 }),
@@ -179,7 +179,7 @@ describe('dev server lifecycle', { skip: !posix && 'POSIX process groups', timeo
     assert.strictEqual(dev.child.exitCode, null, 'the dev server is still running');
   });
 
-  it('ends a second cdk-blocks dev in the same app at once, with the reason, and leaves the first running', async () => {
+  it('ends a second npm run dev in the same app at once, with the reason, and leaves the first running', async () => {
     const dir = makeApp();
     const port = await freePort();
     const first = startDev(dir, { port }, { watch: true });
@@ -187,33 +187,34 @@ describe('dev server lifecycle', { skip: !posix && 'POSIX process groups', timeo
     const failureFile = join(dir, 'failure.txt');
     const second = startDev(dir, { port }, { watch: true, env: { BLOCKS_DEV_FAILURE_FILE: failureFile } });
     // Its `tsx watch` exits too: nothing is left waiting for a file change.
-    await waitFor('the second cdk-blocks dev to exit', () => second.child.exitCode !== null || second.child.signalCode !== null, [first, second]);
+    await waitFor('the second npm run dev to exit', () => second.child.exitCode !== null || second.child.signalCode !== null, [first, second]);
     assert.match(second.out.stderr, new RegExp(`already running on :${port}`));
-    assert.match(second.out.stderr, new RegExp(`cdk-blocks dev stop --port ${port}`));
-    assert.doesNotMatch(second.out.stderr, /npm run dev/);
+    assert.match(second.out.stderr, new RegExp(`npm run dev:stop -- --port ${port}`));
+    assert.doesNotMatch(second.out.stderr, /`npm run dev`/);
     assert.match(readFileSync(failureFile, 'utf-8'), new RegExp(`already running on :${port} \\(pid \\d+\\)`));
     assert.ok(await serving(port), 'the first server still serves');
     assert.strictEqual(first.child.exitCode, null);
   });
 
   it('refuses a second dev server of the same app on another port, naming the running port', async () => {
-    // Both would open the app's .bb-data: the second PGlite removed the first one's live postmaster.pid (H1).
+    // Both would open the app's .cdk-blocks/local/data: the second PGlite removed the first one's live postmaster.pid
+    // (H1).
     const dir = makeApp();
     const [port, other] = [await freePort(), await freePort()];
     const first = startDev(dir, { port }, { watch: true });
     await waitFor('the first server', () => serving(port), [first]);
     const second = startDev(dir, { port: other }, { watch: true });
-    await waitFor('the second cdk-blocks dev to exit', () => second.child.exitCode !== null || second.child.signalCode !== null, [first, second]);
+    await waitFor('the second npm run dev to exit', () => second.child.exitCode !== null || second.child.signalCode !== null, [first, second]);
     assert.strictEqual(second.child.exitCode, 1, second.out.stderr);
     assert.match(second.out.stderr, new RegExp(`a dev server of this app is already running on :${port} \\(pid \\d+\\)`));
-    assert.match(second.out.stderr, new RegExp(`npx --no -- cdk-blocks dev stop --port ${port}\``));
+    assert.match(second.out.stderr, new RegExp(`npm run dev:stop -- --port ${port}\``));
     assert.ok(!existsSync(join(dir, devPidfilePath(other))), 'the refused start leaves no pidfile');
     assert.strictEqual(await fetchText(other), undefined, 'nothing listens on the second port');
     assert.ok(await serving(port), 'the first server still serves');
   });
 
   it("gives its frontend BLOCKS_API_URL = its own front door, whatever a deploy recorded", async () => {
-    // A Next.js Server Component resolves the API from BLOCKS_API_URL before .blocks-sandbox/config.json,
+    // A Next.js Server Component resolves the API from BLOCKS_API_URL before .cdk-blocks-sandbox/config.json,
     // which a deploy used to point at AWS while `npm run dev` ran.
     const dir = makeApp();
     const [port, frontendPort] = [await freePort(), await freePort()];
@@ -223,23 +224,23 @@ describe('dev server lifecycle', { skip: !posix && 'POSIX process groups', timeo
       "import { createServer } from 'node:http';\n" +
         "createServer((_q, r) => r.end(String(process.env.BLOCKS_API_URL))).listen(Number(process.argv[2]), '127.0.0.1');\n",
     );
-    mkdirSync(join(dir, '.blocks-sandbox'));
+    mkdirSync(join(dir, '.cdk-blocks-sandbox'));
     writeFileSync(
-      join(dir, '.blocks-sandbox', 'config.production.json'),
-      JSON.stringify({ apiUrl: 'https://prod.example/aws-blocks/api', environment: 'production' }),
+      join(dir, '.cdk-blocks-sandbox', 'config.production.json'),
+      JSON.stringify({ apiUrl: 'https://prod.example/cdk-blocks/api', environment: 'production' }),
     );
     // And the config.json a deploy from core 0.8.0 or earlier wrote: the dev server replaces it with its own.
     writeFileSync(
-      join(dir, '.blocks-sandbox', 'config.json'),
-      JSON.stringify({ apiUrl: 'https://stub.example/aws-blocks/api', environment: 'production' }),
+      join(dir, '.cdk-blocks-sandbox', 'config.json'),
+      JSON.stringify({ apiUrl: 'https://stub.example/cdk-blocks/api', environment: 'production' }),
     );
     const frontend = `${quote(process.execPath)} ${quote(script)} ${frontendPort}`;
     // No BLOCKS_API_URL from the caller: with one, the dev server runs in sandbox mode.
     const dev = startDev(dir, { port, frontendPort, frontendCommand: frontend }, { env: { BLOCKS_API_URL: '' } });
     const seen = await waitFor('the frontend', () => fetchText(port).then((t) => t?.startsWith('http') && t), [dev]);
-    assert.strictEqual(seen, `http://localhost:${port}/aws-blocks/api`);
-    assert.deepStrictEqual(JSON.parse(readFileSync(join(dir, '.blocks-sandbox', 'config.json'), 'utf-8')), {
-      apiUrl: `http://localhost:${port}/aws-blocks/api`,
+    assert.strictEqual(seen, `http://localhost:${port}/cdk-blocks/api`);
+    assert.deepStrictEqual(JSON.parse(readFileSync(join(dir, '.cdk-blocks-sandbox', 'config.json'), 'utf-8')), {
+      apiUrl: `http://localhost:${port}/cdk-blocks/api`,
       environment: 'local',
     });
   });
@@ -261,10 +262,10 @@ describe('dev server lifecycle', { skip: !posix && 'POSIX process groups', timeo
     const dir = makeApp();
     const failureFile = join(dir, 'failure.txt');
     const run = startDev(dir, { port: 1 }, { watch: true, env: { BLOCKS_DEV_FAILURE_FILE: failureFile } });
-    await waitFor('cdk-blocks dev to exit', () => run.child.exitCode !== null || run.child.signalCode !== null, [run]);
+    await waitFor('npm run dev to exit', () => run.child.exitCode !== null || run.child.signalCode !== null, [run]);
     assert.match(run.out.stderr, /could not listen on 127\.0\.0\.1:1: .*EACCES/);
     assert.match(readFileSync(failureFile, 'utf-8'), /EACCES/);
-    assert.ok(!existsSync(join(dir, '.blocks-sandbox', 'dev-server.1.pid')), 'the failed start leaves no pidfile');
+    assert.ok(!existsSync(join(dir, '.cdk-blocks-sandbox', 'dev-server.1.pid')), 'the failed start leaves no pidfile');
   });
 
   it('keeps its pidfile through a reload, so a dev stop right after an edit stops it', async () => {
@@ -306,7 +307,7 @@ describe('dev server lifecycle', { skip: !posix && 'POSIX process groups', timeo
     } finally {
       process.chdir(cwd);
     }
-    await waitFor('cdk-blocks dev to exit', () => dev.child.exitCode !== null || dev.child.signalCode !== null, [dev]);
+    await waitFor('npm run dev to exit', () => dev.child.exitCode !== null || dev.child.signalCode !== null, [dev]);
     assert.strictEqual(await serving(port), false);
   });
 
@@ -343,7 +344,7 @@ describe('dev server lifecycle', { skip: !posix && 'POSIX process groups', timeo
     assert.ok(!existsSync(join(dir, devPidfilePath(port))));
   });
 
-  it("records the cdk-blocks sandbox session that started it, and keeps it from its frontend's environment (U2)", async () => {
+  it("records the npm run sandbox session that started it, and keeps it from its frontend's environment (U2)", async () => {
     const dir = makeApp();
     const [port, frontendPort] = await Promise.all([freePort(), freePort()]);
     const script = join(dir, 'frontend.mjs');
@@ -362,7 +363,7 @@ describe('dev server lifecycle', { skip: !posix && 'POSIX process groups', timeo
     assert.deepStrictEqual(record.sandbox, { pid: process.pid });
   });
 
-  it('leaves no pidfile after the cdk-blocks CLI stop: SIGTERM to the dev server, then to its tsx watch', async () => {
+  it('leaves no pidfile after the task runner stop: SIGTERM to the dev server, then to its tsx watch', async () => {
     const dir = makeApp();
     const port = await freePort();
     const dev = startDev(dir, { port }, { watch: true });
@@ -441,7 +442,7 @@ describe('dev server lifecycle', { skip: !posix && 'POSIX process groups', timeo
     const code = await dev.exited;
     assert.strictEqual(code, 1, dev.out.stderr);
     assert.match(dev.out.stderr, new RegExp(`port ${port} is in use by pid ${foreign.pid} \\(.*server\\.mjs ${port} foreign\\)`));
-    assert.match(dev.out.stderr, /choose another port with --port/);
+    assert.match(dev.out.stderr, /choose another port with `npm run dev -- --port <port>`/);
     assert.strictEqual(await fetchText(port), 'foreign', 'the unrelated server still answers');
     assert.ok(!existsSync(join(dir, devPidfilePath(port))), 'the failed start leaves no pidfile');
   });
@@ -514,11 +515,11 @@ describe('dev server lifecycle', { skip: !posix && 'POSIX process groups', timeo
     await waitFor('the server', () => dev.out.stdout.includes('local server running'), [dev]);
     assert.ok(dev.out.stdout.includes(`running on http://${host}:${port}`), dev.out.stdout);
     const config = await fetch(`http://${host}:${port}/.blocks-sandbox/config.json`).then((r) => r.json());
-    assert.deepStrictEqual(config, { apiUrl: `http://${host}:${port}/aws-blocks/api`, environment: 'local' });
+    assert.deepStrictEqual(config, { apiUrl: `http://${host}:${port}/cdk-blocks/api`, environment: 'local' });
     const page = `http://${host}:5173`;
-    const response = await fetch(`http://${host}:${port}/aws-blocks/api`, { method: 'OPTIONS', headers: { Origin: page } });
+    const response = await fetch(`http://${host}:${port}/cdk-blocks/api`, { method: 'OPTIONS', headers: { Origin: page } });
     assert.strictEqual(response.headers.get('access-control-allow-origin'), page);
-    const foreign = await fetch(`http://${host}:${port}/aws-blocks/api`, { method: 'OPTIONS', headers: { Origin: 'https://evil.example' } });
+    const foreign = await fetch(`http://${host}:${port}/cdk-blocks/api`, { method: 'OPTIONS', headers: { Origin: 'https://evil.example' } });
     assert.strictEqual(foreign.headers.get('access-control-allow-origin'), `http://${host}:${port}`);
   });
 
@@ -530,14 +531,14 @@ describe('dev server lifecycle', { skip: !posix && 'POSIX process groups', timeo
     await waitFor('the server', () => dev.out.stdout.includes('local server running'), [dev]);
     // A page opened at the machine address calls the API at that address, not at localhost.
     const config = await fetch(`http://${lan}:${port}/.blocks-sandbox/config.json`).then((r) => r.json());
-    assert.deepStrictEqual(config, { apiUrl: '/aws-blocks/api', environment: 'local' });
+    assert.deepStrictEqual(config, { apiUrl: '/cdk-blocks/api', environment: 'local' });
     // Node.js readers of the file need an origin, so the file keeps the absolute URL.
-    assert.deepStrictEqual(JSON.parse(readFileSync(join(dir, '.blocks-sandbox', 'config.json'), 'utf-8')), {
-      apiUrl: `http://localhost:${port}/aws-blocks/api`,
+    assert.deepStrictEqual(JSON.parse(readFileSync(join(dir, '.cdk-blocks-sandbox', 'config.json'), 'utf-8')), {
+      apiUrl: `http://localhost:${port}/cdk-blocks/api`,
       environment: 'local',
     });
     const page = `http://${lan}:${port}`;
-    const response = await fetch(`${page}/aws-blocks/api`, {
+    const response = await fetch(`${page}/cdk-blocks/api`, {
       method: 'POST',
       headers: { Origin: page, 'Content-Type': 'application/json' },
       body: JSON.stringify({ jsonrpc: '2.0', method: 'testApi.ping', params: [], id: 1 }),
@@ -546,7 +547,7 @@ describe('dev server lifecycle', { skip: !posix && 'POSIX process groups', timeo
     const body: unknown = await response.json();
     assert.ok(body && typeof body === 'object' && 'result' in body && body.result === 'pong', JSON.stringify(body));
     for (const origin of ['https://evil.example', `http://${lan}:5173`]) {
-      const foreign = await fetch(`${page}/aws-blocks/api`, { method: 'OPTIONS', headers: { Origin: origin } });
+      const foreign = await fetch(`${page}/cdk-blocks/api`, { method: 'OPTIONS', headers: { Origin: origin } });
       assert.strictEqual(foreign.headers.get('access-control-allow-origin'), `http://localhost:${port}`, origin);
     }
   });

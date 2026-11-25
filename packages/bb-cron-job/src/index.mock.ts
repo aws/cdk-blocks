@@ -1,16 +1,16 @@
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { Scope, registerSdkIdentifiers } from '@aws-blocks/core';
-import type { ScopeParent } from '@aws-blocks/core';
+import { Scope, registerSdkIdentifiers } from '@aws-cdk-blocks/core';
+import type { ScopeParent } from '@aws-cdk-blocks/core';
 import type {
 	CronJobEvent,
 	CronJobOptions,
 } from './types.js';
-import { Logger } from '@aws-blocks/bb-logger';
-import type { ChildLogger } from '@aws-blocks/bb-logger';
+import { Logger } from '@aws-cdk-blocks/bb-logger';
+import type { ChildLogger } from '@aws-cdk-blocks/bb-logger';
 import { BB_NAME, BB_VERSION } from './version.js';
-import { assertNotMockInDeployedEnv } from '@aws-blocks/core/bb-utils';
+import { assertNotMockInDeployedEnv } from '@aws-cdk-blocks/core/bb-utils';
 
 // Fail closed if this mock entry loads in a deployed env — see assertNotMockInDeployedEnv.
 assertNotMockInDeployedEnv('bb-cron-job');
@@ -18,7 +18,7 @@ assertNotMockInDeployedEnv('bb-cron-job');
 export { CronJobErrors } from './errors.js';
 export type { CronJobEvent, CronJobOptions } from './types.js';
 
-import { parseScheduleForMock, validateTimezone, type CronFields, type RateSchedule, type CronSchedule } from './schedule.js';
+import { parseScheduleForMock, validateSchedule, validateTimezone, type CronFields, type RateSchedule, type CronSchedule } from './schedule.js';
 
 /**
  * Scheduled task execution backed by EventBridge Scheduler and Lambda.
@@ -89,10 +89,15 @@ export class CronJob<T = void> extends Scope {
 		this._enabled = options.enabled !== false;
 		registerSdkIdentifiers(this.fullId, { scheduleName: `mock-${this.fullId}` });
 
-		if (options.timezone) {
+		// The synth gate first, in the same order as the CDK and AWS entries (schedule,
+		// then timezone), so an input with both wrong gets the same named error.
+		validateSchedule(options.schedule);
+		// `!== undefined` (not truthiness) so `timezone: ''` is rejected, as at synth.
+		if (options.timezone !== undefined) {
 			validateTimezone(options.timezone);
 		}
 
+		// Then the mock's own parser, which also flags valid cron it can't simulate.
 		this._schedule = parseScheduleForMock(options.schedule);
 
 		if (this._enabled) {
@@ -105,10 +110,19 @@ export class CronJob<T = void> extends Scope {
 	private _start(): void {
 		if (this._schedule.type === 'rate') {
 			console.log(`[CronJob:${this.id}] scheduled: rate(${formatMs(this._schedule.intervalMs)})`);
-			if (this._schedule.intervalMs > MAX_TIMEOUT_MS) {
-				this._scheduleLongRateTick(Date.now() + this._schedule.intervalMs);
+			// Slots count from the start time at whole seconds; `_fire` drops milliseconds either way.
+			const startMs = Math.floor(Date.now() / 1000) * 1000;
+			const intervalMs = this._schedule.intervalMs;
+			if (intervalMs > MAX_TIMEOUT_MS) {
+				this._scheduleLongRateTick(startMs + intervalMs);
 			} else {
-				this._timer = setInterval(() => this._fire(), this._schedule.intervalMs);
+				let lastSlot = 0;
+				this._timer = setInterval(() => {
+					// Count slots from the wall clock, not from ticks: a suspended machine
+					// pauses the interval, and the next run reports the latest slot due.
+					lastSlot = Math.max(lastSlot + 1, Math.floor((Date.now() - startMs) / intervalMs));
+					this._fire(startMs + lastSlot * intervalMs);
+				}, intervalMs);
 				(this._timer as NodeJS.Timeout).unref();
 			}
 		} else {
@@ -120,8 +134,9 @@ export class CronJob<T = void> extends Scope {
 	 * Fires a rate schedule longer than `setTimeout`/`setInterval` allow (about 24.8 days). Node
 	 * clamps a longer delay to 1 ms, so wait for `fireAt` in steps, then fire and schedule the next one.
 	 * If the clock jumped past several intervals (for example the machine was asleep), the handler runs
-	 * once and the next run is the first later slot on the same cadence: like EventBridge Scheduler, the
-	 * mock does not run the slots it missed.
+	 * once, with `scheduledTime` set to the latest slot that was due, and the next run is the first
+	 * later slot on the same cadence: like EventBridge Scheduler, the mock does not run the slots it
+	 * missed.
 	 */
 	private _scheduleLongRateTick(fireAt: number): void {
 		const delayMs = fireAt - Date.now();
@@ -130,9 +145,10 @@ export class CronJob<T = void> extends Scope {
 		} else {
 			this._timer = setTimeout(
 				() => {
-					this._fire();
 					const intervalMs = (this._schedule as RateSchedule).intervalMs;
 					const missedSlots = Math.max(Math.floor((Date.now() - fireAt) / intervalMs), 0);
+					// After missed slots the one run reports the latest slot that was due.
+					this._fire(fireAt + missedSlots * intervalMs);
 					this._scheduleLongRateTick(fireAt + (missedSlots + 1) * intervalMs);
 				},
 				Math.max(delayMs, 0),
@@ -148,11 +164,8 @@ export class CronJob<T = void> extends Scope {
 		if (next === null) {
 			// Nothing matches within the search window (e.g. a leap day years away):
 			// search again later instead of firing on a date the schedule doesn't match.
-			if (canNeverMatch(sched.fields)) {
-				console.warn(`[CronJob:${this.id}] schedule can never match a real date (e.g. day 30 of February), so it will never fire. In AWS this would fail, check the day and month fields.`);
-			} else {
-				console.log(`[CronJob:${this.id}] no fire time within a year, checking again later`);
-			}
+			// A day that never exists (Feb 30) is rejected in the constructor instead.
+			console.log(`[CronJob:${this.id}] no fire time within a year, checking again later`);
 			this._timer = setTimeout(() => this._scheduleCronTick(), MAX_TIMEOUT_MS);
 			(this._timer as NodeJS.Timeout).unref();
 			return;
@@ -165,16 +178,21 @@ export class CronJob<T = void> extends Scope {
 			this._timer = setTimeout(() => this._scheduleCronTick(), MAX_TIMEOUT_MS);
 		} else {
 			this._timer = setTimeout(() => {
-				this._fire();
+				this._fire(next.getTime());
 				this._scheduleCronTick();
 			}, Math.max(delayMs, 1000));
 		}
 		(this._timer as NodeJS.Timeout).unref();
 	}
 
-	private _fire(): void {
+	/**
+	 * Runs the handler for the schedule slot `slotMs`. The event carries the slot, not the
+	 * time the timer ran (timers run a few ms late), formatted without milliseconds as
+	 * EventBridge Scheduler's `<aws.scheduler.scheduled-time>` is (`2026-03-01T00:10:00Z`).
+	 */
+	private _fire(slotMs: number): void {
 		const event: CronJobEvent<T> = {
-			scheduledTime: new Date().toISOString(),
+			scheduledTime: new Date(slotMs).toISOString().replace(/\.\d{3}Z$/, 'Z'),
 			jobName: this.fullId,
 			input: this._input as T,
 		};
@@ -194,15 +212,6 @@ export class CronJob<T = void> extends Scope {
 
 /** Largest delay `setTimeout` accepts; longer delays fire immediately. */
 const MAX_TIMEOUT_MS = 2_147_483_647;
-
-/** Longest each month can be, with February at its leap-year length. */
-const MAX_DAYS_IN_MONTH = [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
-
-/** True when no listed day of month exists in any listed month, so the schedule can never fire. */
-function canNeverMatch(fields: CronFields): boolean {
-	if (fields.dayOfMonth.length === 0) return false;
-	return !fields.month.some(m => fields.dayOfMonth.some(d => d <= MAX_DAYS_IN_MONTH[m - 1]));
-}
 
 /** Returns the next matching minute within a year after `after`, or `null` if there is none. */
 function nextCronTime(fields: CronFields, after: Date, timezone?: string): Date | null {

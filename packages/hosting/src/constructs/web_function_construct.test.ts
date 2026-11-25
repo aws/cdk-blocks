@@ -1,3 +1,6 @@
+// Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+// SPDX-License-Identifier: Apache-2.0
+
 import { afterEach, describe, it } from 'node:test';
 import assert from 'node:assert';
 import * as fs from 'fs';
@@ -195,7 +198,7 @@ void describe('HostingConstruct — compute.type web-function', () => {
     assert.match(guardEntry, /await import\("\.\/index\.mjs"\)/);
   });
 
-  void it('forwards Blocks env, timeout, and webFunction tuning', () => {
+  void it('forwards CDK Blocks env, timeout, and webFunction tuning', () => {
     const stack = createEnvStack();
     webFunctionHosting(stack, {
       timeout: Duration.seconds(120),

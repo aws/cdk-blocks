@@ -2,13 +2,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Re-export everything from core
-export * from '@aws-blocks/core';
+export * from '@aws-cdk-blocks/core';
 
 // Override core's untyped getSdkIdentifiers with typed overloads
 export { getSdkIdentifiers } from './sdk-identifiers.js';
 
-import { BB_NAME, BB_VERSION } from '@aws-blocks/bb-lambda-compute/version';
-import { Scope } from '@aws-blocks/core';
+import { BB_NAME, BB_VERSION } from '@aws-cdk-blocks/bb-lambda-compute/version';
+import { Scope } from '@aws-cdk-blocks/core';
 
 Scope._setDefaultBlockForTelemetry(BB_NAME, BB_VERSION);
 
@@ -17,20 +17,20 @@ Scope._setDefaultBlockForTelemetry(BB_NAME, BB_VERSION);
 // Each export below includes a brief summary of what the Building Block does
 // and when to use it. For full documentation (API reference, examples, best
 // practices, scaling characteristics), print the block's docs bundled in this
-// package with `npx --no -- cdk-blocks docs <package>`, where `<package>` is the
-// name in each JSDoc block without the `@aws-blocks/` scope (e.g.
-// `npx --no -- cdk-blocks docs bb-kv-store`). `npx --no -- cdk-blocks docs` lists them all.
+// package with `npm run docs <package>`, where `<package>` is the
+// name in each JSDoc block without the `@aws-cdk-blocks/` scope (e.g.
+// `npm run docs bb-kv-store`). `npm run docs` lists them all.
 //
 
 /**
- * **Shared auth interfaces and UI components for all Blocks auth Building Blocks.**
+ * **Shared auth interfaces and UI components for all CDK Blocks auth Building Blocks.**
  *
  * Provides the `BlocksAuth` interface (implemented by every auth BB), auth state
  * types, and framework-agnostic UI components (`Authenticator`, `AuthenticatedContent`,
  * `onAuthChange`). Import these when writing provider-agnostic auth code.
  *
- * Package: `@aws-blocks/auth-common`
- * Full docs: `npx --no -- cdk-blocks docs auth-common`.
+ * Package: `@aws-cdk-blocks/auth-common`
+ * Full docs: `npm run docs auth-common`.
  */
 export type {
 	AuthAction,
@@ -40,7 +40,7 @@ export type {
 	AuthUser,
 	AuthUserOf,
 	BlocksAuth,
-} from '@aws-blocks/auth-common';
+} from '@aws-cdk-blocks/auth-common';
 export type {
 	AgentConfig,
 	AgentResult,
@@ -55,7 +55,7 @@ export type {
 	ToolFactory,
 	ToolHandlerArgs,
 	ToolsConfig,
-} from '@aws-blocks/bb-agent';
+} from '@aws-cdk-blocks/bb-agent';
 /**
  * **AI agent with streaming, tool calling, and conversation persistence.**
  *
@@ -65,11 +65,11 @@ export type {
  * history persisted to DynamoDB. Streaming via AsyncJob + Realtime.
  * Set `inferenceOnly: true` for simple prompt→response without persistence.
  *
- * Package: `@aws-blocks/bb-agent`
- * Full docs: `npx --no -- cdk-blocks docs bb-agent`.
+ * Package: `@aws-cdk-blocks/bb-agent`
+ * Full docs: `npm run docs bb-agent`.
  */
-export { Agent, AgentErrors, BedrockModels, OllamaModels } from '@aws-blocks/bb-agent';
-export type { AppSettingOptions } from '@aws-blocks/bb-app-setting';
+export { Agent, AgentErrors, BedrockModels, OllamaModels } from '@aws-cdk-blocks/bb-agent';
+export type { AppSettingOptions } from '@aws-cdk-blocks/bb-app-setting';
 /**
  * **Single application configuration value backed by SSM Parameter Store.**
  *
@@ -80,10 +80,10 @@ export type { AppSettingOptions } from '@aws-blocks/bb-app-setting';
  * credentials. Each instance maps to exactly one SSM parameter. Supports schema
  * validation for typed objects.
  *
- * Package: `@aws-blocks/bb-app-setting`
- * Full docs: `npx --no -- cdk-blocks docs bb-app-setting`.
+ * Package: `@aws-cdk-blocks/bb-app-setting`
+ * Full docs: `npm run docs bb-app-setting`.
  */
-export { AppSetting, AppSettingErrors } from '@aws-blocks/bb-app-setting';
+export { AppSetting, AppSettingErrors } from '@aws-cdk-blocks/bb-app-setting';
 export type {
 	AsyncJobBaseOptions,
 	AsyncJobContext,
@@ -94,7 +94,7 @@ export type {
 	BatchSubmitResult,
 	SubmitOptions,
 	WaitUntilCompleteOptions,
-} from '@aws-blocks/bb-async-job';
+} from '@aws-cdk-blocks/bb-async-job';
 /**
  * **Background job processing backed by SQS, run on Lambda or a container.**
  *
@@ -105,11 +105,11 @@ export type {
  * to 10,000 per call), optional delay, schema validation, and automatic retries
  * with dead-letter queue.
  *
- * Package: `@aws-blocks/bb-async-job`
- * Full docs: `npx --no -- cdk-blocks docs bb-async-job`.
+ * Package: `@aws-cdk-blocks/bb-async-job`
+ * Full docs: `npm run docs bb-async-job`.
  */
-export { AsyncJob, AsyncJobErrors } from '@aws-blocks/bb-async-job';
-export type * from '@aws-blocks/bb-auth';
+export { AsyncJob, AsyncJobErrors } from '@aws-cdk-blocks/bb-async-job';
+export type * from '@aws-cdk-blocks/bb-auth';
 /**
  * **Authentication — email + password, social sign-in, OIDC and SAML in one block.**
  *
@@ -122,28 +122,28 @@ export type * from '@aws-blocks/bb-auth';
  * identity provider for development. Replaces `AuthBasic`, `AuthCognito` and
  * `AuthOIDC`.
  *
- * Package: `@aws-blocks/bb-auth`
- * Full docs: `npx --no -- cdk-blocks docs bb-auth`.
+ * Package: `@aws-cdk-blocks/bb-auth`
+ * Full docs: `npm run docs bb-auth`.
  *
  * @see {@link BlocksAuth} for the provider-agnostic auth interface all auth BBs implement.
  */
-export { Auth, AuthErrors, customOauth2, github, isAuthError, relayOrigin, stubIdp } from '@aws-blocks/bb-auth';
+export { Auth, AuthErrors, customOauth2, github, isAuthError, relayOrigin, stubIdp } from '@aws-cdk-blocks/bb-auth';
 /**
  * **`Compute` — choose where a workload runs by stating its type.**
  *
  * Construct a `Compute` with an explicit `type` (`'serverless'` | `'container'`)
- * and that type's options; Blocks maps the type to the AWS service that backs it
+ * and that type's options; CDK Blocks maps the type to the AWS service that backs it
  * (`serverless` → Lambda, `container` → Fargate) — the service name never appears
  * in your code. Options are a discriminated union on `type`, so an attribute that
  * doesn't apply to the chosen type is a compile error. Hand the result to a
  * handler-bearing block via its `compute` option (e.g. `AsyncJob`); omit it and
  * the workload uses the app default (serverless).
  *
- * Package: `@aws-blocks/bb-compute`
- * Full docs: `npx --no -- cdk-blocks docs bb-compute`.
+ * Package: `@aws-cdk-blocks/bb-compute`
+ * Full docs: `npm run docs bb-compute`.
  */
-export { Compute, type ComputeProps } from '@aws-blocks/bb-compute';
-export type { CronJobEvent, CronJobOptions } from '@aws-blocks/bb-cron-job';
+export { Compute, type ComputeProps } from '@aws-cdk-blocks/bb-compute';
+export type { CronJobEvent, CronJobOptions } from '@aws-cdk-blocks/bb-cron-job';
 /**
  * **Scheduled task execution backed by EventBridge Scheduler and Lambda.**
  *
@@ -152,16 +152,16 @@ export type { CronJobEvent, CronJobOptions } from '@aws-blocks/bb-cron-job';
  * IANA timezones, and typed static input. No runtime methods — the
  * constructor defines the schedule and handler.
  *
- * Package: `@aws-blocks/bb-cron-job`
- * Full docs: `npx --no -- cdk-blocks docs bb-cron-job`.
+ * Package: `@aws-cdk-blocks/bb-cron-job`
+ * Full docs: `npm run docs bb-cron-job`.
  */
-export { CronJob, CronJobErrors } from '@aws-blocks/bb-cron-job';
+export { CronJob, CronJobErrors } from '@aws-cdk-blocks/bb-cron-job';
 export type {
 	DashboardOptions,
 	MetricConfig,
 	MetricsBBRef,
 	MetricsSource,
-} from '@aws-blocks/bb-dashboard';
+} from '@aws-cdk-blocks/bb-dashboard';
 /**
  * **Auto-generated CloudWatch Dashboard for application observability.**
  *
@@ -171,23 +171,25 @@ export type {
  * `metrics` for app-wide custom-metric widgets, and toggle sections with the
  * `logs` / `traces` options.
  *
- * Package: `@aws-blocks/bb-dashboard`
- * Full docs: `npx --no -- cdk-blocks docs bb-dashboard`.
+ * Package: `@aws-cdk-blocks/bb-dashboard`
+ * Full docs: `npm run docs bb-dashboard`.
  */
-export { Dashboard, DashboardErrors } from '@aws-blocks/bb-dashboard';
+export { Dashboard, DashboardErrors } from '@aws-cdk-blocks/bb-dashboard';
 export type {
 	ClusterKind,
 	ClusterType,
 	ConnectionStringSource,
+	DataApiOptions,
 	DatabaseClusterOptions,
 	DatabaseOptions,
 	ExistingClusterOptions,
 	ExistingClusterRef,
+	LegacyDatabaseClusterOptions,
 	ScopedDatabase,
 	SqlQuery,
 	Transaction,
 	TransactionOptions,
-} from '@aws-blocks/bb-database';
+} from '@aws-cdk-blocks/bb-database';
 /**
  * **SQL database on PostgreSQL.**
  *
@@ -197,13 +199,28 @@ export type {
  * PostgreSQL Serverless v2 (express configuration), or to put several
  * databases on one cluster, pass a `DatabaseCluster` as `cluster`. For a
  * PostgreSQL database that already exists, pass `DatabaseCluster.fromExisting()`.
- * Migrations are ordered `.sql` files in `aws-blocks/migrations/<id>/`.
+ * Migrations are ordered `.sql` files in `cdk-blocks/migrations/<id>/`.
  *
- * Package: `@aws-blocks/bb-database`
- * Full docs: `npx --no -- cdk-blocks docs bb-database`.
+ * Package: `@aws-cdk-blocks/bb-database`
+ * Full docs: `npm run docs bb-database`.
  */
-export { Database, DatabaseCluster, DatabaseErrors, sql } from '@aws-blocks/bb-database';
-export type { EmailMessage, EmailOptions, SendBatchResult, SendResult } from '@aws-blocks/bb-email-client';
+export { Database, DatabaseCluster, DatabaseErrors, sql } from '@aws-cdk-blocks/bb-database';
+/**
+ * **The Aurora cluster of `Database` in `@aws-blocks/bb-data`, kept in the stack.**
+ *
+ * Use it only to move an app that deployed `Database` of `@aws-blocks/bb-data`
+ * to `Database` of this package without a change to its cluster: give it the
+ * id and the options of that `Database`, and pass it as the `cluster` of a
+ * `Database` with a new id. For a new cluster, use `DatabaseCluster`.
+ *
+ * Package: `@aws-cdk-blocks/bb-database`
+ * Full docs: `npm run docs bb-database`.
+ *
+ * @deprecated Only for an app that deployed `Database` of `@aws-blocks/bb-data`. The class is frozen and
+ *   gets no new features. The steps are in the README section "Upgrade from `@aws-blocks/bb-data`".
+ */
+export { LegacyDatabaseCluster } from '@aws-cdk-blocks/bb-database';
+export type { EmailMessage, EmailOptions, SendBatchResult, SendResult } from '@aws-cdk-blocks/bb-email-client';
 /**
  * **Transactional email with AWS SES integration.**
  *
@@ -211,10 +228,10 @@ export type { EmailMessage, EmailOptions, SendBatchResult, SendResult } from '@a
  * notifications, and other one-to-one or bulk email. Supports single and
  * batch sending with partial failure handling.
  *
- * Package: `@aws-blocks/bb-email-client`
- * Full docs: `npx --no -- cdk-blocks docs bb-email-client`.
+ * Package: `@aws-cdk-blocks/bb-email-client`
+ * Full docs: `npm run docs bb-email-client`.
  */
-export { EmailClient, EmailErrors } from '@aws-blocks/bb-email-client';
+export { EmailClient, EmailErrors } from '@aws-cdk-blocks/bb-email-client';
 export type {
 	CorsRule,
 	ExternalBucketRef as FBExternalBucketRef,
@@ -228,7 +245,7 @@ export type {
 	PutOptions as FBPutOptions,
 	PutUrlOptions,
 	ScanOptions as FBScanOptions,
-} from '@aws-blocks/bb-file-bucket';
+} from '@aws-cdk-blocks/bb-file-bucket';
 /**
  * **File storage backed by Amazon S3.**
  *
@@ -238,10 +255,10 @@ export type {
  * listing. For key-value data and queryable records with indexes, use
  * `KVStore`.
  *
- * Package: `@aws-blocks/bb-file-bucket`
- * Full docs: `npx --no -- cdk-blocks docs bb-file-bucket`.
+ * Package: `@aws-cdk-blocks/bb-file-bucket`
+ * Full docs: `npm run docs bb-file-bucket`.
  */
-export { FileBucket, FileBucketErrors } from '@aws-blocks/bb-file-bucket';
+export { FileBucket, FileBucketErrors } from '@aws-cdk-blocks/bb-file-bucket';
 export type {
 	ChunkingConfig,
 	ChunkingStrategy,
@@ -254,7 +271,7 @@ export type {
 	RetrieveResult,
 	SourceConfig,
 	WaitUntilSyncedOptions,
-} from '@aws-blocks/bb-knowledge-base';
+} from '@aws-cdk-blocks/bb-knowledge-base';
 /**
  * **Semantic document retrieval backed by Bedrock Knowledge Bases.**
  *
@@ -264,10 +281,10 @@ export type {
  * auto-populate `folder` metadata. In production, documents are synced to S3
  * and indexed via Bedrock with configurable chunking and embedding models.
  *
- * Package: `@aws-blocks/bb-knowledge-base`
- * Full docs: `npx --no -- cdk-blocks docs bb-knowledge-base`.
+ * Package: `@aws-cdk-blocks/bb-knowledge-base`
+ * Full docs: `npm run docs bb-knowledge-base`.
  */
-export { KnowledgeBase, KnowledgeBaseErrors } from '@aws-blocks/bb-knowledge-base';
+export { KnowledgeBase, KnowledgeBaseErrors } from '@aws-cdk-blocks/bb-knowledge-base';
 // A type keeps its own name. It gets the block prefix only when another block
 // in this file exports a type with the same name (`PutOptions` and
 // `ScanOptions` are also names of `FileBucket`).
@@ -294,7 +311,7 @@ export type {
 	SortCondition,
 	ValueOf,
 	Where,
-} from '@aws-blocks/bb-kv-store';
+} from '@aws-cdk-blocks/bb-kv-store';
 /**
  * **Key-value and document storage backed by DynamoDB, with optional secondary indexes.**
  *
@@ -307,8 +324,8 @@ export type {
  * cost at rest, scales automatically. Use `Database` when you need SQL
  * JOINs or transactions.
  *
- * Package: `@aws-blocks/bb-kv-store`
- * Full docs: `npx --no -- cdk-blocks docs bb-kv-store`.
+ * Package: `@aws-cdk-blocks/bb-kv-store`
+ * Full docs: `npm run docs bb-kv-store`.
  */
 /**
  * **The store of `KVStore` release 0.4.0 or earlier, for an upgrade.**
@@ -320,8 +337,8 @@ export type {
  * migrate the data in your own code, however is appropriate for your app. For
  * new data, use `KVStore`.
  *
- * Package: `@aws-blocks/bb-kv-store`
- * Full docs: `npx --no -- cdk-blocks docs bb-kv-store`.
+ * Package: `@aws-cdk-blocks/bb-kv-store`
+ * Full docs: `npm run docs bb-kv-store`.
  *
  * @deprecated Only for the upgrade of a store from release 0.4.0 or earlier. The class is frozen: it has
  *   the methods of release 0.4.0 and gets no new features. Use `KVStore` for new data, and remove the
@@ -329,8 +346,8 @@ export type {
  *   0.4.0 or earlier":
  *   https://github.com/aws-devtools-labs/aws-blocks/blob/main/packages/bb-kv-store/README.md#upgrade-from-release-040-or-earlier
  */
-export { KVStore, KVStoreErrors, LegacyKVStore } from '@aws-blocks/bb-kv-store';
-export type { ChildLogger, LogEntry, LoggingOptions, LogLevel } from '@aws-blocks/bb-logger';
+export { KVStore, KVStoreErrors, LegacyKVStore } from '@aws-cdk-blocks/bb-kv-store';
+export type { ChildLogger, LogEntry, LoggingOptions, LogLevel } from '@aws-cdk-blocks/bb-logger';
 /**
  * **Structured logging with consistent JSON format, log levels, and contextual metadata.**
  *
@@ -342,10 +359,10 @@ export type { ChildLogger, LogEntry, LoggingOptions, LogLevel } from '@aws-block
  * For numeric measurements over time, use `Metrics`. For distributed
  * request tracing, use `Tracing`.
  *
- * Package: `@aws-blocks/bb-logger`
- * Full docs: `npx --no -- cdk-blocks docs bb-logger`.
+ * Package: `@aws-cdk-blocks/bb-logger`
+ * Full docs: `npm run docs bb-logger`.
  */
-export { Logger, LoggingErrors } from '@aws-blocks/bb-logger';
+export { Logger, LoggingErrors } from '@aws-cdk-blocks/bb-logger';
 export type {
 	EmitOptions,
 	ExternalMetricsRef,
@@ -354,7 +371,7 @@ export type {
 	MetricsEmitter,
 	MetricsOptions,
 	MetricUnit,
-} from '@aws-blocks/bb-metrics';
+} from '@aws-cdk-blocks/bb-metrics';
 /**
  * **Custom application metrics backed by Amazon CloudWatch (via EMF).**
  *
@@ -364,17 +381,17 @@ export type {
  * latency impact. Supports dimensions, high-resolution (1s) metrics,
  * batch emission, and child emitters for scoped dimension inheritance.
  *
- * Package: `@aws-blocks/bb-metrics`
- * Full docs: `npx --no -- cdk-blocks docs bb-metrics`.
+ * Package: `@aws-cdk-blocks/bb-metrics`
+ * Full docs: `npm run docs bb-metrics`.
  */
-export { Metrics, MetricsErrors } from '@aws-blocks/bb-metrics';
+export { Metrics, MetricsErrors } from '@aws-cdk-blocks/bb-metrics';
 export type {
 	DisconnectReason,
 	GetChannelOptions,
 	RealtimeChannel,
 	RealtimeSubscription,
 	SubscribeOptions,
-} from '@aws-blocks/bb-realtime';
+} from '@aws-cdk-blocks/bb-realtime';
 /**
  * **Real-time pub/sub messaging backed by AppSync Events.**
  *
@@ -383,11 +400,11 @@ export type {
  * validation on publish. Local dev uses WebSocket bridge; production uses
  * AppSync Events API.
  *
- * Package: `@aws-blocks/bb-realtime`
- * Full docs: `npx --no -- cdk-blocks docs bb-realtime`.
+ * Package: `@aws-cdk-blocks/bb-realtime`
+ * Full docs: `npm run docs bb-realtime`.
  */
-export { Realtime } from '@aws-blocks/bb-realtime';
-export type { SecretOptions, SecretReadOptions, SecretVersion, SecretVersionInfo } from '@aws-blocks/bb-secret';
+export { Realtime, RealtimeErrors } from '@aws-cdk-blocks/bb-realtime';
+export type { SecretOptions, SecretReadOptions, SecretVersion, SecretVersionInfo } from '@aws-cdk-blocks/bb-secret';
 /**
  * **Single application secret backed by AWS Secrets Manager.**
  *
@@ -403,11 +420,11 @@ export type { SecretOptions, SecretReadOptions, SecretVersion, SecretVersionInfo
  * instead; `AppSetting` with `secret: true` is only a free, encrypted fallback
  * for a low-value secret (e.g. a prototype).
  *
- * Package: `@aws-blocks/bb-secret`
- * Full docs: `npx --no -- cdk-blocks docs bb-secret`.
+ * Package: `@aws-cdk-blocks/bb-secret`
+ * Full docs: `npm run docs bb-secret`.
  */
-export { Secret, SecretErrors } from '@aws-blocks/bb-secret';
-export type { AnnotationValue, Segment, TracerOptions } from '@aws-blocks/bb-tracer';
+export { Secret, SecretErrors } from '@aws-cdk-blocks/bb-secret';
+export type { AnnotationValue, Segment, TracerOptions } from '@aws-cdk-blocks/bb-tracer';
 /**
  * **Distributed tracing backed by AWS X-Ray.**
  *
@@ -416,10 +433,10 @@ export type { AnnotationValue, Segment, TracerOptions } from '@aws-blocks/bb-tra
  * (DB calls, HTTP requests, business logic) with `startSegment`. Use
  * annotations for searchable values and metadata for debugging data.
  *
- * Package: `@aws-blocks/bb-tracer`
- * Full docs: `npx --no -- cdk-blocks docs bb-tracer`.
+ * Package: `@aws-cdk-blocks/bb-tracer`
+ * Full docs: `npm run docs bb-tracer`.
  */
-export { Tracer } from '@aws-blocks/bb-tracer';
+export { Tracer } from '@aws-cdk-blocks/bb-tracer';
 export type {
 	ComputeOptions,
 	ComputeType,
@@ -428,8 +445,8 @@ export type {
 	ContainerSize,
 	ScalingSignal,
 	ServerlessComputeOptions,
-} from '@aws-blocks/core';
+} from '@aws-cdk-blocks/core';
 
-// Blocks generated by `@aws-blocks/create-block` (contributor mode) are re-exported here.
+// Blocks generated by `@aws-cdk-blocks/create-block` (contributor mode) are re-exported here.
 // <!-- BEGIN:generated-block-exports -->
 // <!-- END:generated-block-exports -->

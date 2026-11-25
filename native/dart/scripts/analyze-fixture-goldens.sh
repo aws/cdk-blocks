@@ -1,11 +1,17 @@
 #!/usr/bin/env bash
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+
 # Runs `dart analyze` over every codegen fixture's Dart golden and fails if any
 # has an analyzer error. The goldens are what `blocks_codegen` emits for each
 # spec, so an error here is an error in a customer's generated client.
 #
 # Usage: analyze-fixture-goldens.sh [FIXTURES_DIR]
 #   FIXTURES_DIR  defaults to native/codegen-fixtures. Each `*/dart/client.dart`
-#                 under it is analyzed.
+#                 under it is analyzed. A fixture whose Dart golden is
+#                 `dart/codegen-error.txt` (a spec the generator refuses) has
+#                 no client to analyze and is skipped; one with both files
+#                 fails the run.
 #   DART          the dart executable (default: dart).
 #
 # The goldens are copied into a scratch package that depends on the in-repo
@@ -35,6 +41,14 @@ stub_dependencies() {
 }
 
 mkdir -p "$WORK/lib"
+# The goldens are checked with the dart_style blocks_codegen formats with, at
+# the constraint its pubspec declares, not the SDK's bundled `dart format`:
+# the two can lay code out differently, and a golden can only match one.
+DART_STYLE_CONSTRAINT="$(sed -n 's/^  dart_style: *//p' "$DART_DIR/packages/blocks_codegen/pubspec.yaml")"
+if [ -z "$DART_STYLE_CONSTRAINT" ]; then
+  echo "error: no dart_style dependency in blocks_codegen/pubspec.yaml" >&2
+  exit 1
+fi
 cat > "$WORK/pubspec.yaml" <<YAML
 name: fixture_goldens
 publish_to: none
@@ -45,9 +59,20 @@ dependencies:
     path: $DART_DIR/packages/blocks_runtime
 $(stub_dependencies)
 dev_dependencies:
+  dart_style: $DART_STYLE_CONSTRAINT
   lints: ^6.0.0
 YAML
 cp "$DART_DIR/analysis_options.yaml" "$WORK/analysis_options.yaml"
+
+refused=0
+for error_golden in "$FIXTURES_DIR"/*/dart/codegen-error.txt; do
+  [ -f "$error_golden" ] || continue
+  if [ -f "$(dirname "$error_golden")/client.dart" ]; then
+    echo "error: $(dirname "$error_golden") has both client.dart and codegen-error.txt" >&2
+    exit 1
+  fi
+  refused=$((refused + 1))
+done
 
 count=0
 for golden in "$FIXTURES_DIR"/*/dart/client.dart; do
@@ -65,6 +90,15 @@ fi
   cat "$WORK/pub-get.log" >&2
   exit 1
 }
+
+# The goldens are what blocks_codegen emits, in a package at the oldest
+# language version blocks_runtime supports: the dart_style it formats with
+# must leave them as is.
+if ! format_report="$(cd "$WORK" && "$DART" run dart_style:format --output=none --set-exit-if-changed lib 2>&1)"; then
+  printf '%s\n' "$format_report" >&2
+  echo "FAIL: dart_style would change Dart fixture golden(s); blocks_codegen must emit formatted code" >&2
+  exit 1
+fi
 
 # Machine format: SEVERITY|TYPE|CODE|FILE|LINE|COLUMN|LENGTH|MESSAGE.
 # `dart analyze` exits 0-3 when it ran: 0 no issues, 1 infos, 2 warnings,
@@ -97,3 +131,6 @@ if [ -n "$errors" ]; then
 fi
 
 echo "OK: $count Dart fixture golden(s) analyze with 0 errors (warnings and lints are advisory)"
+if [ "$refused" -gt 0 ]; then
+  echo "Skipped $refused fixture(s) whose Dart golden is an expected codegen-error.txt"
+fi

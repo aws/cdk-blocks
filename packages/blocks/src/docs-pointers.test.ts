@@ -3,7 +3,7 @@
 
 /**
  * Every Building Block re-export in src/index.ts names its package and points at
- * that block's bundled docs through `cdk-blocks docs <package>`. The pointer is plain
+ * that block's bundled docs through `npm run docs <package>`. The pointer is plain
  * JSDoc text, so a renamed or newly EXCLUDED package (scripts/block-packages.mjs) would
  * otherwise leave a dead `Full docs:` name without any build failing.
  *
@@ -24,7 +24,7 @@ test('each Package: entry in src/index.ts points at its own bundled docs', async
 	const { getBlockPackages } = await import(pathToFileURL(join(repoRoot, 'scripts', 'block-packages.mjs')).href);
 	const bundled = new Set<string>(getBlockPackages());
 
-	const packageLines = [...source.matchAll(/^ \* Package: `@aws-blocks\/([a-z0-9-]+)`$/gm)];
+	const packageLines = [...source.matchAll(/^ \* Package: `@aws-cdk-blocks\/([a-z0-9-]+)`$/gm)];
 	const docsLines = [...source.matchAll(/^ \* Full docs: (.*)$/gm)];
 	assert.ok(packageLines.length > 0, 'expected src/index.ts to contain Package: lines');
 	assert.strictEqual(docsLines.length, packageLines.length, 'every Package: line needs exactly one Full docs: line');
@@ -35,9 +35,9 @@ test('each Package: entry in src/index.ts points at its own bundled docs', async
 		assert.ok((docs.index ?? 0) > (pkg.index ?? 0), `Full docs: for ${name} must follow its Package: line`);
 		assert.strictEqual(
 			docs[1],
-			`\`npx --no -- cdk-blocks docs ${name}\`.`,
-			`Full docs: for @aws-blocks/${name} must name its bundled docs`,
+			`\`npm run docs ${name}\`.`,
+			`Full docs: for @aws-cdk-blocks/${name} must name its bundled docs`,
 		);
-		assert.ok(bundled.has(name), `@aws-blocks/${name} is not bundled by gen-block-docs (see getBlockPackages)`);
+		assert.ok(bundled.has(name), `@aws-cdk-blocks/${name} is not bundled by gen-block-docs (see getBlockPackages)`);
 	}
 });

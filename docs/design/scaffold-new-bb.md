@@ -1,6 +1,6 @@
 # Design draft — a scaffolder for new Building Blocks (`create-block`)
 
-> Status: **Implemented** as `@aws-blocks/create-block` (this PR). This doc records
+> Status: **Implemented** as `@aws-cdk-blocks/create-block` (this PR). This doc records
 > the original design rationale — what a Block is, what wiring a new one requires,
 > and why the CLI is shaped the way it is. The §7 open questions are all resolved:
 > one auto-detecting CLI (contributor / customer / external), a single
@@ -12,7 +12,7 @@
 A command that generates a new Building Block (BB) — the `bb-*` package skeleton
 (all conditional-export layers, tests, docs, version script) **and** wires up every
 registration touchpoint so the block is buildable, exported from the umbrella
-`@aws-blocks/blocks`, and exercised by the comprehensive test app in one step.
+`aws-cdk-blocks`, and exercised by the comprehensive test app in one step.
 
 Today this is a ~30-minute, error-prone, copy-`bb-kv-store`-and-gut-it ritual with
 **6 hand-edited touchpoints** across the monorepo (see §4). It's exactly the kind of
@@ -20,7 +20,7 @@ mechanical, easy-to-get-subtly-wrong work a generator should own.
 
 ## 2. What constitutes a Block (analyses #1–#2)
 
-From the tech design (`08-building-block-architecture.md`, KIT = AWS Blocks) and the
+From the tech design (`08-building-block-architecture.md`, KIT = AWS CDK Blocks) and the
 implemented reality (`AGENTS.md`, `bb-kv-store`):
 
 A BB bundles **three/four implementations behind one strongly-typed import**, selected
@@ -30,7 +30,7 @@ by `package.json` conditional exports:
 |---|---|---|
 | `cdk` | `index.cdk.ts` | `cdk synth` (`--conditions=cdk`) — provisions infra, grants IAM |
 | `aws-runtime` | `index.aws.ts` | inside the deployed Lambda — real AWS SDK calls |
-| `default` + `types` | `index.mock.ts` | `npm run dev` + tests — local mock, persists to `.bb-data/` |
+| `default` + `types` | `index.mock.ts` | `npm run dev` + tests — local mock, persists to `.cdk-blocks/local/data/` |
 | `browser` | `index.browser.ts` | client bundle — server-side methods stubbed to throw |
 
 Load-bearing conventions every layer shares: extend `Scope` (never wrap it);
@@ -65,7 +65,7 @@ packages/bb-{name}/
     index.aws.ts        # aws-runtime; SDK client w/ buildUserAgentChain()
     index.cdk.ts        # cdk; provisions infra, grants on this.executionRole, synthGuard stubs
     index.browser.ts    # stub class (no-op ctor) + re-export errors
-    index.test.ts       # node:test; resets .bb-data in beforeEach
+    index.test.ts       # node:test; resets .cdk-blocks/local/data in beforeEach
     parity.test.ts      # mock↔aws↔browser behavioral parity
     index.cdk.test.ts   # Template.fromStack assertions; synthGuard throws
 ```
@@ -85,7 +85,7 @@ are hand-edited and **none** are generated from the block's source:
    `aws-blocks.vendorize` map (`pkg → [ClassName]`).
 4. **root `package.json` `workspaces`** — append `"packages/bb-{name}"`.
 5. **`test-apps/comprehensive`** — dep as `"*"` + a `new {Class}(scope, ...)` instance in
-   `aws-blocks/index.ts` + a `test/{name}.test.ts` (zero casts).
+   `cdk-blocks/index.ts` + a `test/{name}.test.ts` (zero casts).
 6. **`npx changeset add`.**
 
 **Derived artifacts are already automated — the generator should *call* these, not
@@ -106,7 +106,7 @@ its own skip list keyed by package name — add the package to that skip list to
 The extending guide's **Pattern 3 (Custom BB)** is the *external* mirror of this: a user
 in their own repo authors the same 3-file shape under their `packages/bb-*`, names it
 `@their-org/bb-*`, pins the same `aws-cdk-lib`/`constructs` peers, tags `keywords:
-["aws-blocks"]`, and skips **all** monorepo wiring (§4 touchpoints 1–5 don't exist for
+["cdk-blocks"]`, and skips **all** monorepo wiring (§4 touchpoints 1–5 don't exist for
 them). Same skeleton, different (or absent) wiring. The guide literally recommends
 "copy `bb-kv-store`, rename, gut it" — i.e. begging for a generator.
 
@@ -120,7 +120,7 @@ Mirror `create-blocks-app` exactly (it's the house style): **zero runtime deps**
 prompts, `--yes` to skip. Templates are real directories copied with `cp` + structural
 edits (not string templating).
 
-- **Invocation:** `npm create @aws-blocks/block@latest MyBlock` (a new
+- **Invocation:** `npm create @aws-cdk-blocks/block@latest MyBlock` (a new
   `packages/create-block` package, bin `create-block`), plus a repo convenience alias
   `npm run new:bb` for contributors.
 - **Auto-detect mode** (same trick as `create-blocks-app` detecting Amplify), in priority
@@ -132,7 +132,7 @@ edits (not string templating).
     and `npm install` so your app can import it without publishing. App code untouched;
     scope derived from your root package name (or `--scope`). This is the "scaffold **and
     link** a subpackage" case.
-  - **external** — anywhere else → standalone `@<scope>/bb-*`, `keywords: ["aws-blocks"]`,
+  - **external** — anywhere else → standalone `@<scope>/bb-*`, `keywords: ["cdk-blocks"]`,
     no workspace wiring.
 - **Prompts / flags:** block class name (PascalCase, no "BB" prefix) → package name
   `bb-{kebab}`; `--dir`, `--scope`, `--yes`, `--skip-install`, `--skip-verify`,
@@ -145,7 +145,7 @@ edits (not string templating).
   `index*.ts` re-export lists, kept alphabetical), then runs `npm run sync-docs` and
   prints the remaining human step (add a real instance + assertions to comprehensive —
   we scaffold a stub, the author fleshes it out).
-- **Verifies:** ends by running `npm run build -w @aws-blocks/bb-{name} && npm test -w …`
+- **Verifies:** ends by running `npm run build -w @aws-cdk-blocks/bb-{name} && npm test -w …`
   (skippable) so the author starts from green.
 
 ## 7. Decisions (resolved — reflected in the implementation)
@@ -157,6 +157,6 @@ edits (not string templating).
    `Scope` skeleton). Composite and client-facing shapes are deferred to a
    follow-up, keeping the initial surface small.
 3. **Packaging** — ✅ both: a publishable `create-block` bin (`npm create
-   @aws-blocks/block`) and the repo `npm run new:bb`.
+   @aws-cdk-blocks/block`) and the repo `npm run new:bb`.
 4. **Umbrella re-export editing** — ✅ HTML markers in `index.ts` / `index.cdk.ts`
    (idempotent, re-runnable).

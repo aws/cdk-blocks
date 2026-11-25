@@ -26,13 +26,13 @@ const POSTGRES_URL = /^postgres(?:ql)?:\/\//i;
  */
 export function parseConnectionString(value: unknown, source: string): ConnectionFields {
 	if (value === null || value === undefined || (typeof value === 'string' && value.trim() === '')) {
-		throw configError(`${source} has no value. Store a connection string with \`cdk-blocks db connect\`.`);
+		throw configError(`${source} has no value. Store a connection string with \`npm run db connect\`.`);
 	}
 	if (typeof value !== 'string' || !POSTGRES_URL.test(value.trim())) {
 		throw configError(
 			// A secret that was never stored reads as a random placeholder, so "not set" and "malformed" look the same here.
 			`${source} is not set, or is not a PostgreSQL connection string (a postgres:// or postgresql:// URL). ` +
-				'Store one with `cdk-blocks db connect`.',
+				'Store one with `npm run db connect`.',
 		);
 	}
 	let url: URL;
@@ -66,7 +66,7 @@ export function parseConnectionString(value: unknown, source: string): Connectio
 // What an error calls the place a connection string is read from. The value itself is never in a message.
 /** The local value of connection `name`. */
 export const localConnectionLabel = (name: string): string =>
-	`The local value of connection '${name}' (.bb-data/settings.json)`;
+	`The local value of connection '${name}' (.cdk-blocks/local/data/settings.json)`;
 /** The SSM parameter of a stage. */
 export const ssmConnectionLabel = (parameterName: string): string => `The SSM parameter ${parameterName}`;
 /** An `AppSetting`, a `Secret` or another source that the application passed as `connectionString`. */

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { signUp, confirmSignUp, signIn, signOut, getCurrentUser } from 'aws-amplify/auth';
-import { api } from 'aws-blocks';
+import { api } from 'cdk-blocks';
 
 export default function App() {
   const [user, setUser] = useState<any>(null);
@@ -120,7 +120,7 @@ export default function App() {
 
   return (
     <div style={{ maxWidth: 500, margin: '2rem auto', fontFamily: 'system-ui' }}>
-      <h1>Amplify + Blocks</h1>
+      <h1>Amplify + CDK Blocks</h1>
 
       <section>
         <h2>Public</h2>

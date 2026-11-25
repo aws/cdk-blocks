@@ -1,7 +1,7 @@
 name: blocks_runtime_flutter
 description: Flutter-specific implementations for blocks_runtime (secure storage, OAuth browser flow)
-version: 0.2.0
-homepage: https://docs.aws.amazon.com/blocks/latest/devguide
+version: 1.0.0
+homepage: https://docs.aws.amazon.com/cdk/blocks/devguide
 repository: https://github.com/aws-devtools-labs/aws-blocks
 issue_tracker: https://github.com/aws-devtools-labs/aws-blocks/issues
 
@@ -12,7 +12,7 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  blocks_runtime: ^0.2.0
+  blocks_runtime: ^1.0.0
   flutter_secure_storage: ^11.1.0
   url_launcher: ^6.2.0
   app_links: ^7.0.0
@@ -24,7 +24,29 @@ dev_dependencies:
   # 2.16.2 or later, which compiles against it. ^2.14.0 admits both, so no cap
   # is needed.
   build_runner: ^2.14.0
+  # The generated test/flutter_secure_store_test.mocks.dart imports it (for
+  # SecureStorageUpgradeStatus, added in 2.1.0), so pub publish needs it declared.
+  flutter_secure_storage_platform_interface: ^2.1.0
   flutter_test:
     sdk: flutter
+  http: ^1.2.0
   lints: ^6.0.0
   mockito: ^5.6.0
+
+# A Dart-only plugin: Flutter calls BlocksRuntimeFlutterPlugin.registerWith()
+# before main on each platform listed, which makes the secure store the
+# default session store. Web is left out on purpose: the browser keeps the
+# session cookies there.
+flutter:
+  plugin:
+    platforms:
+      android:
+        dartPluginClass: BlocksRuntimeFlutterPlugin
+      ios:
+        dartPluginClass: BlocksRuntimeFlutterPlugin
+      linux:
+        dartPluginClass: BlocksRuntimeFlutterPlugin
+      macos:
+        dartPluginClass: BlocksRuntimeFlutterPlugin
+      windows:
+        dartPluginClass: BlocksRuntimeFlutterPlugin

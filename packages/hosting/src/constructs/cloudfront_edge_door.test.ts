@@ -1,3 +1,6 @@
+// Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+// SPDX-License-Identifier: Apache-2.0
+
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import * as fs from 'node:fs';
@@ -49,7 +52,7 @@ const compose = (id: string, opts: { internal: boolean; https: boolean }) => {
     plan,
     bucket,
     staticDir: '.',
-    api: { url: 'https://abc123.execute-api.us-west-2.amazonaws.com/prod/aws-blocks/api' },
+    api: { url: 'https://abc123.execute-api.us-west-2.amazonaws.com/prod/cdk-blocks/api' },
   });
   buildFrontDoor(
     stack,
@@ -132,7 +135,7 @@ describe('cloudFrontEdgeDoor — an HTTPS router at its own domain', () => {
         plan,
         bucket,
         staticDir: '.',
-        api: { url: 'https://abc123.execute-api.us-west-2.amazonaws.com/prod/aws-blocks/api' },
+        api: { url: 'https://abc123.execute-api.us-west-2.amazonaws.com/prod/cdk-blocks/api' },
       });
       buildFrontDoor(stack, cloudFrontEdgeDoor, { ...input, upstream: { service: 'alb', url: alb.url, originHandle: alb.originHandle } }, { wiringCheck: false });
       const t = Template.fromStack(stack);
@@ -162,7 +165,13 @@ type Behavior = {
 const edgeFor = (
   id: string,
   p: HostingPlan,
-  opts: { image?: boolean; server?: boolean; apiPaths?: string[]; staticDir?: string } = {},
+  opts: {
+    image?: boolean;
+    server?: boolean;
+    apiPaths?: string[];
+    staticDir?: string;
+    errorPages?: { notFound?: string; serverError?: string };
+  } = {},
 ) => {
   const stack = new Stack(new App(), id, { env: { account: '111111111111', region: 'us-east-1' } });
   const bucket = new Bucket(stack, 'Assets');
@@ -174,9 +183,10 @@ const edgeFor = (
     plan: p,
     bucket,
     staticDir: opts.staticDir ?? '.',
+    ...(opts.errorPages ? { errorPages: opts.errorPages } : {}),
     ...(server ? { server: { fn: server, streaming: false } } : {}),
     ...(image ? { image: { fn: image, url: image.addFunctionUrl({ authType: FunctionUrlAuthType.AWS_IAM }) } } : {}),
-    api: { url: 'https://abc123.execute-api.us-east-1.amazonaws.com/prod/aws-blocks/api', paths: opts.apiPaths },
+    api: { url: 'https://abc123.execute-api.us-east-1.amazonaws.com/prod/cdk-blocks/api', paths: opts.apiPaths },
   });
   buildFrontDoor(
     stack,
@@ -233,6 +243,22 @@ describe('cloudFrontEdgeDoor — behaviors, caching, rules', () => {
     assert.ok(server, 'server-route cache policy present');
     assert.equal(server.ParametersInCacheKeyAndForwardedToOrigin.CookiesConfig.CookieBehavior, 'all');
     assert.equal(server.MaxTTL, 86400);
+  });
+
+  it("a server route's cache key: every cookie and the whole query string, no request header (what the SSR cache guard assumes)", () => {
+    // The hosting construct's SSR cache guard treats every cookie, and the Next.js router
+    // headers (carried in the query string as `_rsc`), as keyed behind this door; a change
+    // here must change that guard config too.
+    const { t, config } = edgeFor('SrvKey', serverPlan([{ pattern: '/*', kind: 'server' }]), { server: true });
+    const policies = t.findResources('AWS::CloudFront::CachePolicy');
+    const key = policies[(config.DefaultCacheBehavior.CachePolicyId as { Ref: string }).Ref]?.Properties.CachePolicyConfig
+      .ParametersInCacheKeyAndForwardedToOrigin;
+    assert.ok(key, 'server-route cache policy present');
+    assert.equal(key.CookiesConfig.CookieBehavior, 'all');
+    assert.equal(key.QueryStringsConfig.QueryStringBehavior, 'all');
+    assert.equal(key.HeadersConfig.HeaderBehavior, 'none');
+    assert.equal(key.EnableAcceptEncodingGzip, true);
+    assert.equal(key.EnableAcceptEncodingBrotli, true);
   });
 
   it("a server's 5xx is never cached; a site without a server keeps the default error caching", () => {
@@ -297,6 +323,36 @@ describe('cloudFrontEdgeDoor — behaviors, caching, rules', () => {
     assert.equal(Annotations.fromStack(stack).findWarning('*', Match.stringLikeRegexp('StackedEdgeBehaviorLimit')).length, 1);
   });
 
+  it('over the budget, single-file S3 routes give way before an S3 prefix, last first', () => {
+    const entries: HostingPlan['routes']['entries'] = [
+      ...Array.from({ length: 30 }, (_, i) => ({ pattern: `/file-${String(i).padStart(2, '0')}.txt`, kind: 'static' as const })),
+      { pattern: '/assets/*', kind: 'static' },
+      { pattern: '/*', kind: 'server' },
+    ];
+    const { config, behaviors, s3Id } = edgeFor('BudgetPrefix', serverPlan(entries), { server: true });
+    assert.equal(behaviors.length, 24);
+    assert.equal(behaviors.find((b) => b.PathPattern === '/assets/*')?.TargetOriginId, s3Id, 'the prefix keeps its S3 behavior');
+    const files = behaviors.filter((b) => b.PathPattern?.startsWith('/file-')).map((b) => b.PathPattern);
+    assert.deepEqual(files, Array.from({ length: 23 }, (_, i) => `/file-${String(i).padStart(2, '0')}.txt`), 'the first files keep theirs, in order');
+    assert.notEqual(config.DefaultCacheBehavior.TargetOriginId, s3Id, 'the router default serves the rest');
+  });
+
+  it("over the budget, the error pages keep their S3 behaviors (they are not single files that give way)", () => {
+    const entries: HostingPlan['routes']['entries'] = [
+      ...Array.from({ length: 24 }, (_, i) => ({ pattern: `/p${i}/*`, kind: 'static' as const })),
+      { pattern: '/*', kind: 'server' },
+    ];
+    const { config, behaviors, s3Id } = edgeFor('BudgetErrors', serverPlan(entries), {
+      server: true,
+      errorPages: { notFound: './404.html', serverError: './500.html' },
+    });
+    assert.equal(behaviors.length, 24);
+    for (const page of ['/builds/b42/404.html', '/builds/b42/500.html']) {
+      assert.equal(behaviors.find((b) => b.PathPattern === page)?.TargetOriginId, s3Id, `${page} keeps its S3 behavior`);
+      assert.ok(config.CustomErrorResponses?.some((e) => e.ResponsePagePath === page));
+    }
+  });
+
   it('an API path a kept S3 pattern could shadow keeps its (uncached) behavior ahead of it', () => {
     const entries: HostingPlan['routes']['entries'] = [
       ...Array.from({ length: 30 }, (_, i) => ({ pattern: `/s${i}/*`, kind: 'static' as const })),
@@ -348,7 +404,7 @@ describe('cloudFrontEdgeDoor — the router default of a site without a server',
         staticDir: '.',
         ...(server ? { server: { fn: server, url: server.addFunctionUrl({ authType: FunctionUrlAuthType.AWS_IAM }), streaming: false } } : {}),
         api: {
-          url: 'https://abc123.execute-api.us-west-2.amazonaws.com/prod/aws-blocks/api',
+          url: 'https://abc123.execute-api.us-west-2.amazonaws.com/prod/cdk-blocks/api',
           paths: Array.from({ length: 30 }, (_, i) => `/hook${i}/*`),
         },
       });
@@ -387,7 +443,7 @@ describe('cloudFrontEdgeDoor — the origin-verify secret never crosses a plain-
       plan,
       bucket,
       staticDir: '.',
-      api: { url: 'https://abc123.execute-api.us-east-1.amazonaws.com/prod/aws-blocks/api' },
+      api: { url: 'https://abc123.execute-api.us-east-1.amazonaws.com/prod/cdk-blocks/api' },
     });
     buildFrontDoor(
       stack,
@@ -434,7 +490,7 @@ describe('cloudFrontEdgeDoor — the origin-verify secret never crosses a plain-
   });
 
   it('`allowPlainHttp: true` outside a sandbox sends the secret over plain HTTP, with an acknowledgeable production warning', () => {
-    const ID = '@aws-blocks/hosting:PlainHttpAllowedInProduction';
+    const ID = '@aws-cdk-blocks/hosting:PlainHttpAllowedInProduction';
     const allowed = (acknowledge: boolean) => {
       const stack = build(acknowledge ? 'AllowedAck' : 'Allowed', { protocol: 'http' }, false, true);
       if (acknowledge) Annotations_.of(stack).acknowledgeWarning(ID);
@@ -449,7 +505,7 @@ describe('cloudFrontEdgeDoor — the origin-verify secret never crosses a plain-
     assert.match(text, /origin secret crosses the edge → router hop in cleartext/);
     assert.match(text, /`allowPlainHttp: true`/);
     assert.match(text, /trusted/);
-    assert.match(text, /Annotations\.of\(stack\)\.acknowledgeWarning\('@aws-blocks\/hosting:PlainHttpAllowedInProduction'\)/);
+    assert.match(text, /Annotations\.of\(stack\)\.acknowledgeWarning\('@aws-cdk-blocks\/hosting:PlainHttpAllowedInProduction'\)/);
     assert.equal(allowed(true).found.length, 0, 'acknowledged on the stack');
   });
 

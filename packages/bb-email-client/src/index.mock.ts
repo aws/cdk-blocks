@@ -1,9 +1,9 @@
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { Scope } from '@aws-blocks/core';
-import { getMockDataDir, assertNotMockInDeployedEnv } from '@aws-blocks/core/bb-utils';
-import type { ScopeParent } from '@aws-blocks/core';
+import { Scope } from '@aws-cdk-blocks/core';
+import { getMockDataDir, assertNotMockInDeployedEnv } from '@aws-cdk-blocks/core/bb-utils';
+import type { ScopeParent } from '@aws-cdk-blocks/core';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { BB_NAME, BB_VERSION } from './version.js';
@@ -25,8 +25,8 @@ export type {
 
 import type { EmailOptions, EmailMessage, SendResult, SendBatchResult } from './types.js';
 import { resolveMaxBatchSize, validateBatchSize, validateMessage } from './validation.js';
-import { Logger } from '@aws-blocks/bb-logger';
-import type { ChildLogger } from '@aws-blocks/bb-logger';
+import { Logger } from '@aws-cdk-blocks/bb-logger';
+import type { ChildLogger } from '@aws-cdk-blocks/bb-logger';
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -99,6 +99,7 @@ export class EmailClient extends Scope {
 	 * @param message - The email message to send (to, subject, body, optional html/cc/bcc).
 	 * @returns The mock message ID for the sent email.
 	 * @throws {EmailErrors.InvalidInput} If any address fails validation or recipient count exceeds 50.
+	 * @throws {EmailErrors.InvalidInput} If the message has no recipients (To, CC and BCC all empty or absent).
 	 * @throws {EmailErrors.SendFailed} If the message exceeds 40 MB.
 	 */
 	async send(message: EmailMessage): Promise<SendResult> {

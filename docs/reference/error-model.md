@@ -1,6 +1,6 @@
 # Error model
 
-How AWS Blocks errors are named, thrown, sent to the client and caught. The short version: a Building Block error is identified by its **`name`**, a Building Block constant such as `ConditionalCheckFailedException`. The same `isBlocksError(e, SomeErrors.Foo)` call matches it on the server and in the browser.
+How AWS CDK Blocks errors are named, thrown, sent to the client and caught. The short version: a Building Block error is identified by its **`name`**, a Building Block constant such as `ConditionalCheckFailedException`. The same `isBlocksError(e, SomeErrors.Foo)` call matches it on the server and in the browser.
 
 The decisions behind this are [D-003](../DECISIONS.md) (the `name` crosses the wire) and [G6](../design/API-DESIGN.md) (typed error constants). The code lives in `packages/core/src/errors.ts` and `packages/core/src/rpc.ts`.
 
@@ -9,11 +9,11 @@ The decisions behind this are [D-003](../DECISIONS.md) (the `name` crosses the w
 | Export | From | Use it to |
 |---|---|---|
 | `{Block}Errors` | each Building Block's `src/errors.ts` | Name the errors a block can throw, and match on them |
-| `isBlocksError(e, name)` | `@aws-blocks/core` | Narrow a caught error, on the server or the client |
-| `blocksError(name, message)` | `@aws-blocks/core` | Throw a named Building Block error from inside a block |
-| `brandBlocksError(err)` | `@aws-blocks/core` | Mark an already-built named `Error` as safe to send to the client |
-| `ApiError(message, status, options)` | `@aws-blocks/core` | Throw an error with a status code, usually from an API method |
-| `hasAuthError(state, name)` | `@aws-blocks/core` (client code: `@aws-blocks/blocks/client`) | Branch on a failed `AuthState` returned by `setAuthState` or `submitAuthAction` |
+| `isBlocksError(e, name)` | `@aws-cdk-blocks/core` | Narrow a caught error, on the server or the client |
+| `blocksError(name, message)` | `@aws-cdk-blocks/core` | Throw a named Building Block error from inside a block |
+| `brandBlocksError(err)` | `@aws-cdk-blocks/core` | Mark an already-built named `Error` as safe to send to the client |
+| `ApiError(message, status, options)` | `@aws-cdk-blocks/core` | Throw an error with a status code, usually from an API method |
+| `hasAuthError(state, name)` | `@aws-cdk-blocks/core` (app code, server and client: `aws-cdk-blocks`) | Branch on a failed `AuthState` returned by `setAuthState` or `submitAuthAction` |
 
 `isWireSafeError` is also exported. It is one of the checks the serializer uses, described under [Sending errors to the client](#sending-errors-to-the-client); the other, `isApiErrorLike`, is internal to core.
 
@@ -28,7 +28,7 @@ export const KVStoreErrors = {
 } as const;
 ```
 
-Keys drop the `Exception` suffix. Values keep it, and the value is what `error.name` is compared against. Reuse an AWS SDK name when it describes something the customer asked for (a conditional write that failed). Use an AWS Blocks name when the AWS one is a generic bucket (`ValidationException`) or describes infrastructure the block hides.
+Keys drop the `Exception` suffix. Values keep it, and the value is what `error.name` is compared against. Reuse an AWS SDK name when it describes something the customer asked for (a conditional write that failed). Use a CDK Blocks name when the AWS one is a generic bucket (`ValidationException`) or describes infrastructure the block hides.
 
 The local mock and the AWS runtime throw the same names, so code that catches an error works the same in local development and in AWS. The `parity.test.ts` suites in `bb-kv-store` and `bb-file-bucket` check this for those blocks.
 
@@ -136,7 +136,7 @@ The client (`decodeRpcResponse`) turns the envelope back into `new ApiError(mess
 
 ### Why a brand and not `instanceof`
 
-An app can end up with more than one copy of `@aws-blocks/core` in `node_modules`, when npm cannot dedupe a version. An `ApiError` built by one copy then fails `instanceof ApiError` in the other copy, which would turn a deliberate 409 into a nameless 500.
+An app can end up with more than one copy of `@aws-cdk-blocks/core` in `node_modules`, when npm cannot dedupe a version. An `ApiError` built by one copy then fails `instanceof ApiError` in the other copy, which would turn a deliberate 409 into a nameless 500.
 
 The brand is `Symbol.for('aws-blocks.wireSafeError')`, which is the same symbol in every copy. It is non-enumerable, so it never appears in `JSON.stringify` or logs. The serializer treats an error as an `ApiError` when it is an `instanceof ApiError`, or when it carries the brand **and** a numeric `status` (`isApiErrorLike`). A branded plain `Error` has no `status`, so it takes the 500 row.
 
@@ -158,12 +158,11 @@ Anything a route writes itself through `ctx.response` is sent unchanged. A timeo
 - `errorName` — the Building Block error constant. It is set when the failure was an `ApiError` with a non-default name.
 - `retriable` — `true` when the user can retry the current step. `Auth` uses this to keep the user on the current challenge instead of starting over.
 
-The state is a plain object, not an `Error`, so use `hasAuthError` rather than `isBlocksError`. In browser code, submit the action with `submitAuthAction` from `@aws-blocks/blocks/ui`: it returns the same `AuthState` and also notifies `onAuthChange` / `AuthenticatedContent` subscribers. A direct `authApi.setAuthState()` call notifies nothing on the page, so a UI that renders from `onAuthChange` never sees the sign-in.
+The state is a plain object, not an `Error`, so use `hasAuthError` rather than `isBlocksError`. In browser code, submit the action with `submitAuthAction` from `aws-cdk-blocks/ui`: it returns the same `AuthState` and also notifies `onAuthChange` / `AuthenticatedContent` subscribers. A direct `authApi.setAuthState()` call notifies nothing on the page, so a UI that renders from `onAuthChange` never sees the sign-in.
 
 ```typescript
-import { hasAuthError } from '@aws-blocks/blocks/client';
-import { submitAuthAction } from '@aws-blocks/blocks/ui';
-import { AuthErrors } from '@aws-blocks/bb-auth';
+import { AuthErrors, hasAuthError } from 'aws-cdk-blocks';
+import { submitAuthAction } from 'aws-cdk-blocks/ui';
 
 const next = await submitAuthAction(authApi, { action: 'signIn', username, password });
 if (hasAuthError(next, AuthErrors.NotAuthorized)) {
@@ -171,9 +170,9 @@ if (hasAuthError(next, AuthErrors.NotAuthorized)) {
 }
 ```
 
-The constants are `AuthErrors`, exported from `@aws-blocks/bb-auth` (and re-exported by `@aws-blocks/blocks` for backend code). See the [`Auth` README](../../packages/bb-auth/README.md).
+The constants are `AuthErrors`, exported from `@aws-cdk-blocks/bb-auth` (and re-exported by `aws-cdk-blocks`, for backend and browser code). See the [`Auth` README](../../packages/bb-auth/README.md).
 
-To import `AuthErrors` in browser code, list `@aws-blocks/bb-auth` in your app's own `dependencies`: the browser entry of `@aws-blocks/blocks` does not re-export it. The string name, `'NotAuthorizedException'`, works without it.
+Browser code imports `AuthErrors` from `aws-cdk-blocks`, like the backend: the browser entry of `aws-cdk-blocks` re-exports every block's error constants and the error matchers. The string name, `'NotAuthorizedException'`, works too.
 
 ## Related
 

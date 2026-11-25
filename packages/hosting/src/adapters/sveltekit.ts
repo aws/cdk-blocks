@@ -1,3 +1,6 @@
+// Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * SvelteKit adapter — works for any SvelteKit 2 project.
  *
@@ -19,6 +22,18 @@
  * then restores the original in a `finally`. When the user already configured
  * `@sveltejs/adapter-node`, the bridge is skipped and the build runs as-is.
  *
+ * Server dependencies: the server function's bundle is `build/`, without the
+ * app's `node_modules`. adapter-node leaves every package in the app's
+ * `dependencies` as a bare import (its docs expect `node_modules` next to the
+ * server), so the build always runs with a Node.js preload that gives
+ * `vite build` a bridge config (in a temporary directory, never in the project)
+ * importing the app's own and appending a build-only Vite plugin setting
+ * `ssr.noExternal: true`: the server output then carries its dependencies,
+ * whichever adapter config the app has. After the build, a module the server
+ * needs that `build/` can't provide fails synth
+ * (`SvelteKitUnbundledDependencyError`) instead of deploying a server that
+ * crashes on its first request. See `sveltekit-server-deps.ts`.
+ *
  * Inputs read from the project after build (`build/` — adapter-node's default
  * `out`):
  *   - `build/index.js`      — the server entry (`node index.js`)
@@ -26,11 +41,12 @@
  *   - `build/prerendered/`  — prerendered HTML pages
  *   - `build/server/`       — the SSR bundle
  */
-import { shouldSkipBuild } from './shared/build_profile.js';
+import { buildProfile, shouldSkipBuild } from './shared/build_profile.js';
 import { spawn } from './spawn.js';
 import { appBuildEnv } from './shared/app_build_env.js';
 import { normalizeBasePath } from './shared/basepath.js';
 import { warnIfVercelCron } from './shared/feature_warnings.js';
+import { unresolvedServerImports, withViteBundlePreload } from './sveltekit-server-deps.js';
 import * as fs from 'fs';
 import * as path from 'path';
 import fg from 'fast-glob';
@@ -190,6 +206,12 @@ export const sveltekitAdapter = (
     });
   }
 
+  // build/ is the whole server bundle: an import it can't resolve would crash
+  // the server on its first request, after a deploy that reports success. A
+  // destroy (`reuseBuild: 'if-present'`) deploys no server, so a stale build/
+  // must not stand in the way of deleting the stack.
+  if (buildProfile().reuseBuild !== 'if-present') assertServerDependenciesBundled(buildDir);
+
   // Warn (don't fail) when a vercel.json declares crons — parity with the
   // other adapters; the hosting architecture wires no scheduler.
   warnIfVercelCron(projectDir);
@@ -232,7 +254,34 @@ export const sveltekitAdapter = (
 
 // ---- version guard ----
 
-const assertSvelteKitVersion = (projectDir: string): void => {
+/** Public issue tracking SvelteKit 3 support; named in the refusal so users can follow it. */
+const SVELTEKIT_3_ISSUE_URL = 'https://github.com/aws/cdk-blocks/issues/984';
+
+/**
+ * The build-free check core `Hosting` runs (through `assertFrameworkSupported`)
+ * before the app's `buildCommand`: refuse an installed `@sveltejs/kit` outside
+ * {@link VERIFIED_SVELTEKIT_RANGE}, and pass when it is not installed yet,
+ * because the `buildCommand` may install it. The adapter runs the full
+ * {@link assertSvelteKitVersion} after the build, which refuses a missing
+ * install. Writes nothing.
+ * @param projectDir - absolute path to the SvelteKit project root
+ */
+export const preflightSvelteKitVersion = (projectDir: string): void => {
+  if (!getProjectPackageInfo('@sveltejs/kit', projectDir)?.version) return;
+  assertSvelteKitVersion(projectDir);
+};
+
+/**
+ * Throw `UnsupportedSvelteKitVersionError` unless the installed `@sveltejs/kit`
+ * is within {@link VERIFIED_SVELTEKIT_RANGE}. Reads the installed version (not
+ * the `package.json` range) and writes nothing, so it is safe to call before
+ * any build: core `Hosting` calls it (through `assertFrameworkSupported` and
+ * {@link preflightSvelteKitVersion}, which skips a not-yet-installed kit)
+ * before it runs the app's `buildCommand`, and the adapter calls it again
+ * before its own build.
+ * @param projectDir - absolute path to the SvelteKit project root
+ */
+export const assertSvelteKitVersion = (projectDir: string): void => {
   const info = getProjectPackageInfo('@sveltejs/kit', projectDir);
   const version = info?.version;
   // Enforce the FULL verified range — both the floor (< 2.0 rejected) and the
@@ -240,6 +289,19 @@ const assertSvelteKitVersion = (projectDir: string): void => {
   // `build/` layout the manifest builder depends on, so we refuse it until the
   // range is deliberately bumped after re-verification. `satisfies` honors the
   // `<` bound the version_pins.test.ts asserts on.
+  if (version && semver.valid(version) && semver.major(version) >= 3) {
+    // SvelteKit 3 (what `npx sv create` scaffolds) moved its config into the
+    // `sveltekit()` Vite plugin and needs Vite 8; the bridge and the build
+    // layout are only verified on SvelteKit 2. Say exactly what to pin.
+    throw new HostingError('UnsupportedSvelteKitVersionError', {
+      message: `SvelteKit ${version} is not supported yet: Hosting supports SvelteKit 2 (${VERIFIED_SVELTEKIT_RANGE}).`,
+      resolution:
+        'Pin the SvelteKit 2 toolchain and keep the SvelteKit config in svelte.config.js: ' +
+        '`npm install -D @sveltejs/kit@^2 @sveltejs/adapter-node@^5 @sveltejs/vite-plugin-svelte@^5 vite@^6` ' +
+        '(or your package manager equivalent). SvelteKit 3 support is tracked in ' +
+        `${SVELTEKIT_3_ISSUE_URL}.`,
+    });
+  }
   if (!version || !semver.satisfies(version, VERIFIED_SVELTEKIT_RANGE)) {
     throw new HostingError('UnsupportedSvelteKitVersionError', {
       message: `SvelteKit version ${
@@ -447,6 +509,28 @@ export default {
 };
 `;
 
+/**
+ * Fail synth when the server in `build/` needs a module that `build/` itself
+ * can't provide: the function ships `build/` alone, so the import fails with
+ * `ERR_MODULE_NOT_FOUND` on the first request.
+ */
+const assertServerDependenciesBundled = (buildDir: string): void => {
+  const unresolved = [...unresolvedServerImports(buildDir)];
+  if (unresolved.length === 0) return;
+  const listed = unresolved.map(([specifier, file]) => `${specifier} (imported from build/${file})`).join(', ');
+  throw new HostingError('SvelteKitUnbundledDependencyError', {
+    message:
+      `The SvelteKit server imports modules that the deployed server function would not have: ${listed}. ` +
+      'The function ships build/ without node_modules, and without what a symlink or relative path in it leads to outside build/.',
+    resolution:
+      'Remove these packages from `ssr.external` in your Vite config so the build bundles them, ' +
+      'and rebuild (a build reused with BLOCKS_SKIP_FRONTEND_BUILD may predate the bundling). ' +
+      'The deploy builds the server with `ssr.noExternal: true` on the Vite config the build loads; ' +
+      'when the build command leaves that config unclear (the build log then says so), ' +
+      'set `ssr: { noExternal: true }` in it yourself.',
+  });
+};
+
 type PackageManager = 'pnpm' | 'yarn' | 'bun' | 'npm';
 
 /**
@@ -581,7 +665,9 @@ const runSvelteKitBuild = (
   process.stderr.write(`\u{1F528} Running SvelteKit build: ${cmd.join(' ')}\n`);
   try {
     const [bin, ...args] = cmd;
-    spawn.sync(bin!, args, { cwd: projectDir, stdio: 'inherit', env: appBuildEnv() });
+    // Bundle the server's dependencies into build/ (see the header), with the
+    // transparent bridge and with the app's own adapter-node alike.
+    withViteBundlePreload(appBuildEnv(), (env) => spawn.sync(bin!, args, { cwd: projectDir, stdio: 'inherit', env }));
   } catch (error) {
     throw new HostingError(
       'SvelteKitBuildError',

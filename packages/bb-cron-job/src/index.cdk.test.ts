@@ -21,13 +21,13 @@ import { dirname, join } from 'node:path';
  */
 import { after, before, describe, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { ContainerCompute } from '@aws-blocks/bb-container-compute/cdk';
-import { LambdaCompute } from '@aws-blocks/bb-lambda-compute/cdk';
-import { isBlocksError } from '@aws-blocks/core';
-import { sanitizeConfigKey } from '@aws-blocks/core/bb-utils';
-import { BlocksPresets, BlocksStack, Scope, getRegisteredConfigValue } from '@aws-blocks/core/cdk';
-import type { DefaultComputeFactory } from '@aws-blocks/core/cdk/internal';
-import { ComputeBase } from '@aws-blocks/core/cdk/internal';
+import { ContainerCompute } from '@aws-cdk-blocks/bb-container-compute/cdk';
+import { LambdaCompute } from '@aws-cdk-blocks/bb-lambda-compute/cdk';
+import { isBlocksError } from '@aws-cdk-blocks/core';
+import { sanitizeConfigKey } from '@aws-cdk-blocks/core/bb-utils';
+import { BlocksPresets, BlocksStack, Scope, getRegisteredConfigValue } from '@aws-cdk-blocks/core/cdk';
+import type { DefaultComputeFactory } from '@aws-cdk-blocks/core/cdk/internal';
+import { ComputeBase } from '@aws-cdk-blocks/core/cdk/internal';
 import * as cdk from 'aws-cdk-lib';
 import { Template } from 'aws-cdk-lib/assertions';
 import type { IWidget } from 'aws-cdk-lib/aws-cloudwatch';
@@ -123,6 +123,29 @@ describe('CronJob synth-time schedule validation', () => {
 		assert.throws(
 			() => new CronJob(stack, 'job', { schedule: 'rate(10 seconds)', handler: async () => {} }),
 			(e: unknown) => isBlocksError(e, CronJobErrors.InvalidSchedule),
+		);
+	});
+
+	// EventBridge rejects these at deploy; synth must reject them first.
+	for (const [label, schedule] of [
+		['both day fields set', 'cron(0 12 * * MON *)'],
+		['neither day field set', 'cron(0 0 ? * ? *)'],
+		['Feb 30', 'cron(0 0 30 2 ? *)'],
+	]) {
+		test(`rejects a cron with ${label} at synth (${schedule})`, async () => {
+			const stack = await makeStack(`CronInvalidDays${label.replace(/\W/g, '')}`);
+			assert.throws(
+				() => new CronJob(stack, 'job', { schedule, handler: async () => {} }),
+				(e: unknown) => isBlocksError(e, CronJobErrors.InvalidSchedule),
+			);
+		});
+	}
+
+	test('rejects an empty timezone at synth', async () => {
+		const stack = await makeStack('CronEmptyTz');
+		assert.throws(
+			() => new CronJob(stack, 'job', { schedule: 'rate(5 minutes)', timezone: '', handler: async () => {} }),
+			(e: unknown) => isBlocksError(e, CronJobErrors.InvalidTimezone),
 		);
 	});
 

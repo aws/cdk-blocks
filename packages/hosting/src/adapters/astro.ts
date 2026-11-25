@@ -1,3 +1,6 @@
+// Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * Astro adapter — works for any Astro 4+ project (`output: 'static' |
  * 'server' | 'hybrid'`). Reads the user's `astro.config.{ts,mjs,js}`
@@ -31,6 +34,7 @@ import { emitTrailingSlashRedirects } from './shared/trailing_slash.js';
 import { warnIfVercelCron } from './shared/feature_warnings.js';
 import * as fs from 'fs';
 import * as path from 'path';
+import { fileURLToPath } from 'url';
 import fg from 'fast-glob';
 import semver from 'semver';
 import { createJiti } from 'jiti';
@@ -144,7 +148,7 @@ export const astroAdapter = (options: AstroAdapterOptions): DeployManifest => {
     (config.output as AstroOutput | undefined) ?? 'static';
   const trailingSlash: AstroTrailingSlash =
     (config.trailingSlash as AstroTrailingSlash | undefined) ?? 'ignore';
-  const liftedRedirects = liftAstroRedirects(config);
+  const liftedRedirects = liftAstroRedirects(config, projectDir);
   const basePath = normalizeBasePath(
     typeof config.base === 'string' ? config.base : undefined,
   );
@@ -205,6 +209,7 @@ export const astroAdapter = (options: AstroAdapterOptions): DeployManifest => {
           clientDir,
           serverDir,
           output,
+          pagesDir: path.join(resolveSrcDir(projectDir, config.srcDir), 'pages'),
         });
 
   // Astro's `/_image` endpoint runs INSIDE the SSR Lambda (no separate image
@@ -229,7 +234,9 @@ export const astroAdapter = (options: AstroAdapterOptions): DeployManifest => {
   }
 
   // Lift the user's astro.config `redirects:` table out of the SSR
-  // Lambda and onto the CloudFront viewer-request Function.
+  // Lambda and onto the CloudFront viewer-request Function. Dynamic sources
+  // are translated to the doors' `/*` form or left to Astro's router (see
+  // `liftAstroRedirects`).
   //
   // No count cap: under KVS edge routing redirects are DATA (chunked `d{n}`
   // KVS entries the viewer-request function reads at runtime), not literals
@@ -343,6 +350,12 @@ type AstroConfigShape = {
      */
     service?: { entrypoint?: string; config?: unknown };
   };
+  /**
+   * The project's source directory (default `./src`). Its `pages/` folder is
+   * checked before a `public/` folder is routed to S3 as a whole (see
+   * {@link publicFileRoutes}).
+   */
+  srcDir?: string | URL;
 };
 
 /**
@@ -710,19 +723,38 @@ const loadAstroConfig = (projectDir: string): AstroConfigShape => {
  * skipped silently — Astro treats malformed redirect entries the same way
  * (they fall through to its router) and we don't want a typo in
  * `astro.config` to fail the whole build.
+ *
+ * Dynamic sources (Astro route params, `[param]` / `[...rest]`) go through
+ * {@link translateAstroRedirect}: a trailing rest param becomes the doors'
+ * `/*` suffix wildcard (plus a bare-prefix companion, since a rest param also
+ * matches the empty tail), and any other dynamic source is NOT lifted, so
+ * Astro's own router answers it (the server in SSR output, its generated
+ * redirect pages in static output). Every door then sees only patterns it
+ * can express: exact paths and a trailing `/*`.
+ *
+ * Order: Astro matches a static route before a dynamic one, and the doors
+ * match first-to-last, so exact sources come first, then wildcard sources by
+ * longest prefix, each group in declared order.
+ *
+ * @internal Exported for tests.
  */
-const liftAstroRedirects = (config: Record<string, unknown>): Redirect[] => {
+export const liftAstroRedirects = (
+  config: Record<string, unknown>,
+  projectDir?: string,
+): Redirect[] => {
   const redirects = config.redirects;
   if (!redirects || typeof redirects !== 'object') return [];
-  const out: Redirect[] = [];
+  const exact: Redirect[] = [];
+  const wildcard: Redirect[] = [];
+  const keptInAstro: string[] = [];
   for (const [source, value] of Object.entries(
     redirects as Record<string, unknown>,
   )) {
+    let destination: string;
+    let statusCode: 301 | 302 | 307 | 308 = 301;
     if (typeof value === 'string') {
-      out.push({ source, destination: value, statusCode: 301 });
-      continue;
-    }
-    if (
+      destination = value;
+    } else if (
       value &&
       typeof value === 'object' &&
       'destination' in value &&
@@ -730,14 +762,138 @@ const liftAstroRedirects = (config: Record<string, unknown>): Redirect[] => {
     ) {
       const v = value as { destination: string; status?: unknown };
       const rawStatus = typeof v.status === 'number' ? v.status : 301;
-      const statusCode: 301 | 302 | 307 | 308 =
+      statusCode =
         rawStatus === 302 || rawStatus === 307 || rawStatus === 308
           ? rawStatus
           : 301;
-      out.push({ source, destination: v.destination, statusCode });
+      destination = v.destination;
+    } else {
+      continue;
+    }
+    let translated = translateAstroRedirect(source, destination);
+    // Astro matches the app's own pages and public files before a rest-param
+    // redirect; the doors match redirects first. So a wildcard whose prefix
+    // also holds pages or files stays with Astro, which keeps that order.
+    const wild = translated?.find((r) => r.source.endsWith('/*'));
+    if (wild && appHasRoutesUnder(config, projectDir, wild.source.slice(0, -2))) {
+      translated = null;
+    }
+    if (translated === null) {
+      keptInAstro.push(source);
+      continue;
+    }
+    for (const r of translated) {
+      (r.source.endsWith('/*') ? wildcard : exact).push({ ...r, statusCode });
     }
   }
-  return out;
+  if (keptInAstro.length > 0) {
+    process.stdout.write(
+      `ℹ️  Astro redirect(s) left to Astro's router (a route param the front door can't match): ` +
+        `${keptInAstro.join(', ')}. Only a trailing rest param over a path with no pages of its own (\`/old/[...path]\` → \`/new/[...path]\`) ` +
+        `is applied at the front door.\n`,
+    );
+  }
+  // Stable sort: longest wildcard prefix first, declared order otherwise.
+  const byPrefix = wildcard
+    .map((r, i) => ({ r, i }))
+    .sort((a, b) => b.r.source.length - a.r.source.length || a.i - b.i)
+    .map(({ r }) => r);
+  const seen = new Set<string>();
+  return [...exact, ...byPrefix].filter((r) => {
+    if (seen.has(r.source)) return false; // first declaration wins, as in Astro
+    seen.add(r.source);
+    return true;
+  });
+};
+
+/**
+ * Whether the Astro app may have pages or public files at or under `prefix`
+ * (`/blog` → `src/pages/blog.*`, `src/pages/blog/`, `public/blog`), reading
+ * `srcDir` / `publicDir` from the config. A dynamic page on the way there
+ * (`src/pages/[section]/…`) counts too, since it may match the prefix. Unknown
+ * (`projectDir` not given) is `false`. Routes added by integrations
+ * (`injectRoute`) aren't seen.
+ */
+const appHasRoutesUnder = (
+  config: Record<string, unknown>,
+  projectDir: string | undefined,
+  prefix: string,
+): boolean => {
+  if (!projectDir) return false;
+  const segments = prefix.split('/').filter(Boolean);
+  const srcDir = typeof config.srcDir === 'string' ? config.srcDir : './src';
+  const publicDir = typeof config.publicDir === 'string' ? config.publicDir : './public';
+  if (fs.existsSync(path.resolve(projectDir, publicDir, ...segments))) return true;
+  let dir = path.resolve(projectDir, srcDir, 'pages');
+  for (const [i, segment] of segments.entries()) {
+    if (!fs.existsSync(dir) || !fs.statSync(dir).isDirectory()) return false;
+    const last = i === segments.length - 1;
+    const entries = fs.readdirSync(dir);
+    if (entries.some((f) => f.startsWith('[') || (last && path.parse(f).name === segment))) return true;
+    dir = path.join(dir, segment);
+  }
+  return false;
+};
+
+/** Matches one Astro route param segment: `[name]` or `[...name]`. */
+const ASTRO_PARAM_SEGMENT = /^\[(\.\.\.)?([A-Za-z_$][\w$]*)\]$/;
+
+/**
+ * Translate one Astro redirect into the door redirect form, or `null` when the
+ * front door can't express it and Astro's router must answer it.
+ *
+ * - No params: lifted as written.
+ * - A source whose only param is a trailing rest param (`/blog/[...slug]`):
+ *   lifted as `/blog/*` plus the bare `/blog` (a rest param matches the empty
+ *   tail too). The destination may end in the same rest param
+ *   (`/posts/[...slug]` → `/posts/*`, the tail spliced in; the bare companion
+ *   goes to `/posts`) or have no params at all (every match goes to it).
+ * - Anything else stays with Astro: a single `[param]` (the doors' trailing
+ *   `*` matches more than one segment, so it would also catch `/blog/a/b`,
+ *   which Astro doesn't), a param before the last segment or inside a segment
+ *   (`/[lang]/old`, `/blog/[id].html`), more than one param, a destination
+ *   that uses a param other than the source's trailing rest param, and an
+ *   absolute destination with params (Astro doesn't substitute those).
+ *
+ * @internal Exported for tests.
+ */
+export const translateAstroRedirect = (
+  source: string,
+  destination: string,
+): Array<{ source: string; destination: string }> | null => {
+  const hasParam = (p: string): boolean => /\[[^\]]*\]/.test(p);
+  if (!hasParam(source)) {
+    // A destination param with no source param has nothing to fill it.
+    return hasParam(destination) ? null : [{ source, destination }];
+  }
+  const srcSegments = source.split('/');
+  const last = srcSegments[srcSegments.length - 1];
+  const lastParam = ASTRO_PARAM_SEGMENT.exec(last);
+  if (lastParam?.[1] !== '...') return null;
+  const prefix = srcSegments.slice(0, -1).join('/');
+  // A root rest param (`/[...all]`) has an empty prefix and stays with Astro:
+  // its `/*` would shadow every page and asset of the app.
+  if (!prefix.startsWith('/') || hasParam(prefix)) return null;
+  const name = lastParam[2];
+
+  let wildDest: string;
+  let bareDest: string;
+  if (!hasParam(destination)) {
+    wildDest = destination;
+    bareDest = destination;
+  } else {
+    if (!destination.startsWith('/')) return null;
+    const dstSegments = destination.split('/');
+    const dstLast = dstSegments[dstSegments.length - 1];
+    const dstPrefix = dstSegments.slice(0, -1).join('/');
+    if (dstLast !== `[...${name}]` || hasParam(dstPrefix)) return null;
+    wildDest = `${dstPrefix}/*`;
+    bareDest = dstPrefix === '' ? '/' : dstPrefix;
+  }
+  return [
+    { source: `${prefix}/*`, destination: wildDest },
+    { source: prefix, destination: bareDest },
+  ];
 };
 
 const directoryHasFiles = (dir: string): boolean => {
@@ -1060,13 +1216,15 @@ const buildSsrManifest = (input: {
   clientDir: string;
   serverDir: string;
   output: AstroOutput;
+  /** The project's `src/pages` folder, for {@link publicFileRoutes}. */
+  pagesDir: string;
 }): DeployManifest => {
   // P1.6: bare and subtree forms are emitted unconditionally for
   // prerendered routes; the `emitTrailingSlashRedirects` post-pass
   // produces the canonical 308 if the user wants one. The
   // `trailingSlash` mode is read at the top-level adapter and used
   // there, not here.
-  const { distDir, clientDir, serverDir, output } = input;
+  const { distDir, clientDir, serverDir, output, pagesDir } = input;
 
   // bundle: dist/  — so the Lambda zip has `server/` and `client/` as
   // siblings; @astrojs/node's standalone runtime walks `import.meta.url`
@@ -1159,10 +1317,103 @@ const buildSsrManifest = (input: {
     }
   }
 
+  // The files Astro copies from `public/` into `dist/client/` (robots.txt,
+  // favicons, downloads) are static too: route them to S3 so no front door
+  // sends them through the SSR server (see `publicFileRoutes`).
+  routes.push(...publicFileRoutes(clientDir, pagesDir, serverRouteSegments(serverDir)));
+
   routes.push({ pattern: '/*', target: 'default' });
   manifest.routes = dedupeRoutes(routes);
 
   return manifest;
+};
+
+/** The project's source directory: `srcDir` from astro.config (a path or a `file:` URL), default `<project>/src`. */
+const resolveSrcDir = (projectDir: string, srcDir: string | URL | undefined): string => {
+  if (srcDir instanceof URL) return srcDir.protocol === 'file:' ? fileURLToPath(srcDir) : path.join(projectDir, 'src');
+  if (typeof srcDir === 'string' && srcDir.length > 0) {
+    return srcDir.startsWith('file:') ? fileURLToPath(srcDir) : path.resolve(projectDir, srcDir);
+  }
+  return path.join(projectDir, 'src');
+};
+
+/** Root-level HTML files that are never a file route: the index (the server's `/`) and the error pages. */
+const ROOT_AND_ERROR_HTML = new Set(['index.html', '404.html', '500.html']);
+
+/**
+ * Static (S3) routes for the top-level entries of an SSR build's
+ * `dist/client/` that come from `public/`, so every front door serves them
+ * from the assets bucket instead of the SSR server (which, behind a proxy
+ * door, also caps a response at the door's limit — 1 MB behind an ALB).
+ *
+ *   - a file → `/<name>` (an exact path, so it never shadows a page; Astro
+ *     itself serves a public file ahead of a page with the same path);
+ *   - a folder → `/<name>/*`, only when no page can render under it: the
+ *     folder holds no HTML (prerendered pages are routed one by one above),
+ *     and `src/pages` has no `<name>` entry and no top-level dynamic page
+ *     (`[slug].astro`, `[...path]/`), and no route in the server build's
+ *     manifest starts with `<name>` or a dynamic segment (`segments`: routes an
+ *     integration injects, i18n fallbacks). Otherwise the folder stays with
+ *     the server, which serves its files as before. Without a readable
+ *     `src/pages` no folder is routed.
+ *
+ * `_astro/` (hashed assets) is routed by the caller.
+ */
+const publicFileRoutes = (clientDir: string, pagesDir: string, segments: ReadonlySet<string> = new Set()): RouteBehavior[] => {
+  if (!fs.existsSync(clientDir)) return [];
+  let pageEntries: string[] | undefined;
+  try {
+    pageEntries = fs.readdirSync(pagesDir);
+  } catch {
+    pageEntries = undefined;
+  }
+  const hasDynamicTopLevelPage =
+    (pageEntries?.some((name) => name.startsWith('[')) ?? true) || [...segments].some((seg) => seg.startsWith('['));
+  const pageClaims = (name: string): boolean =>
+    pageEntries === undefined ||
+    hasDynamicTopLevelPage ||
+    segments.has(name) ||
+    pageEntries.some((entry) => entry === name || entry.startsWith(`${name}.`));
+  const routes: RouteBehavior[] = [];
+  for (const entry of fs.readdirSync(clientDir, { withFileTypes: true })) {
+    if (entry.name === '_astro') continue;
+    if (entry.isFile()) {
+      if (ROOT_AND_ERROR_HTML.has(entry.name)) continue;
+      routes.push({ pattern: `/${entry.name}`, target: 'static' });
+      continue;
+    }
+    if (!entry.isDirectory()) continue;
+    const holdsHtml = fg.sync('**/*.html', { cwd: path.join(clientDir, entry.name), dot: true }).length > 0;
+    if (holdsHtml || pageClaims(entry.name)) continue;
+    routes.push({ pattern: `/${entry.name}/*`, target: 'static' });
+  }
+  return routes;
+};
+
+/**
+ * The first path segment of every route the server build knows, read from the
+ * route data Astro serializes into `dist/server` (`"route":"/api/auth/[...auth]"`).
+ * That list includes what `src/pages` doesn't show: routes an integration
+ * injects (`injectRoute`) and i18n fallback routes. Used only to keep more
+ * `public/` folders with the server, so a format it doesn't recognize just
+ * leaves the `src/pages` check in charge.
+ */
+const serverRouteSegments = (serverDir: string): Set<string> => {
+  const segments = new Set<string>();
+  if (!fs.existsSync(serverDir)) return segments;
+  for (const rel of fg.sync('**/*.mjs', { cwd: serverDir, ignore: ['**/node_modules/**'] })) {
+    let source: string;
+    try {
+      source = fs.readFileSync(path.join(serverDir, rel), 'utf8');
+    } catch {
+      continue;
+    }
+    if (!source.includes('"route":"')) continue;
+    for (const m of source.matchAll(/"route":"\/([^"/]*)/g)) {
+      if (m[1]) segments.add(m[1]);
+    }
+  }
+  return segments;
 };
 
 const detectErrorPages = (

@@ -1,3 +1,6 @@
+// Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+// SPDX-License-Identifier: Apache-2.0
+
 import { afterEach, describe, it } from 'node:test';
 import assert from 'node:assert';
 import * as fs from 'fs';
@@ -401,6 +404,46 @@ void describe('ComputeConstruct', () => {
       assert.doesNotThrow(() => App.of(stack)?.synth());
     });
 
+    void it('retains a replaced edge function version (in-region stack)', () => {
+      // A Lambda@Edge version can't be deleted until CloudFront has removed its
+      // replicas, hours after the distribution stops using it. A deploy that
+      // replaces the version would otherwise wait on DELETE_FAILED retries.
+      const bundle = createBundleDir();
+      const stack = createEnvStack();
+
+      new ComputeConstruct(stack, 'Compute', {
+        name: 'edge1',
+        computeResource: edgeResource(bundle),
+      });
+
+      Template.fromStack(stack).hasResource('AWS::Lambda::Version', {
+        DeletionPolicy: 'Retain',
+        UpdateReplacePolicy: 'Retain',
+      });
+    });
+
+    void it('retains a replaced edge function version in the us-east-1 edge stack (cross-region)', () => {
+      const bundle = createBundleDir();
+      const stack = createEnvStack('us-west-2', '123456789012');
+
+      new ComputeConstruct(stack, 'Compute', {
+        name: 'edge1',
+        computeResource: edgeResource(bundle),
+      });
+
+      const app = App.of(stack);
+      assert.ok(app instanceof App);
+      const assembly = app.synth();
+      const edgeStacks = assembly.stacks.filter((s) => s.environment.region === 'us-east-1');
+      assert.strictEqual(edgeStacks.length, 1, 'one us-east-1 edge stack');
+      const versions = Object.values(
+        edgeStacks[0].template.Resources as Record<string, { Type: string; DeletionPolicy?: string; UpdateReplacePolicy?: string }>,
+      ).filter((r) => r.Type === 'AWS::Lambda::Version');
+      assert.strictEqual(versions.length, 1);
+      assert.strictEqual(versions[0].DeletionPolicy, 'Retain');
+      assert.strictEqual(versions[0].UpdateReplacePolicy, 'Retain');
+    });
+
     void it('throws EdgeComputeRequiresRegionError on a stack with no explicit region', () => {
       // Without a concrete region, experimental.EdgeFunction fails synth with
       // CDK's generic "stacks which use EdgeFunctions must have an explicitly
@@ -461,7 +504,7 @@ void describe('ComputeConstruct', () => {
     });
 
     void it('throws InvalidTimeoutError when timeout is not a Duration', () => {
-      // Regression: AWS Blocks bug-bash repro showed `timeout: 30` (a
+      // Regression: CDK Blocks bug-bash repro showed `timeout: 30` (a
       // plain number) flowing through a permissive JS-compiled wrapper
       // and crashing deep in aws-cdk-lib with `props.timeout.toSeconds
       // is not a function`. We now coerce at the L3 surface, but

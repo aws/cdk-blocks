@@ -2,7 +2,7 @@
 
 Design document for Logger. For usage, see [README.md](./README.md).
 
-**Package:** `@aws-blocks/bb-logger`
+**Package:** `@aws-cdk-blocks/bb-logger`
 **Type:** Composite (optional infrastructure)
 **AWS Service:** Amazon CloudWatch Logs (via Lambda's built-in log integration)
 
@@ -25,7 +25,7 @@ settings that might look like Logger options live elsewhere:
   on a Logger. (`LoggingOptions` has no `retention` option.)
 - **Log level** is purely per-instance *runtime* behavior. A `Logger`'s `level`
   is applied by the logger instance itself; a logger without an explicit `level`
-  defaults to `'info'` (see *Log Level Resolution* below). Blocks does **not**
+  defaults to `'info'` (see *Log Level Resolution* below). AWS CDK Blocks does **not**
   stamp an app-wide default — there is no `defaults.logLevel`, no `LOG_LEVEL`
   env var, and the CDK layer provisions nothing for level. This is why multiple
   Loggers with different levels coexist without fighting over shared config.
@@ -51,12 +51,13 @@ Fields:
 - `timestamp` — ISO 8601 timestamp from `new Date().toISOString()`.
 - `logger` — The `id` passed to the constructor.
 - `traceId` — X-Ray trace ID (auto-injected from `_X_AMZN_TRACE_ID` env var when present).
-- `awsRequestId` — the Lambda invocation's `awsRequestId`. Core's `createLambdaHandler` runs each invocation inside an `AsyncLocalStorage` scope holding it (`request-context.ts`, registered on `globalThis.__BLOCKS_REQUEST_ID_STORE__`), and the serializer reads it with `currentRequestId()` from `@aws-blocks/core/bb-utils` when it builds a line. A separately resolved copy of core reuses the store already registered on the global, so it still sees the id. The backend import and Building Block constructors run outside the first invocation's scope, so long-lived state created at init doesn't keep that request's id. Only functions built with `createLambdaHandler` set the id; SSR hosting web functions, container compute and AgentCore runtimes don't yet. It is a reserved field, so a context value under that key is ignored; it uses its own key so an app's `requestId` context field (a common name for an app-chosen correlation id) is neither replaced nor replaces it. Overlapping invocations on one container each see their own id.
+- `awsRequestId` — the Lambda invocation's `awsRequestId`. Core's `createLambdaHandler` runs each invocation inside an `AsyncLocalStorage` scope holding it (`request-context.ts`, registered on `globalThis.__BLOCKS_REQUEST_ID_STORE__`), and the serializer reads it with `currentRequestId()` from `@aws-cdk-blocks/core/bb-utils` when it builds a line. A separately resolved copy of core reuses the store already registered on the global, so it still sees the id. The backend import and Building Block constructors run outside the first invocation's scope, so long-lived state created at init doesn't keep that request's id. Only functions built with `createLambdaHandler` set the id; SSR hosting web functions, container compute and AgentCore runtimes don't yet. It is a reserved field, so a context value under that key is ignored; it uses its own key so an app's `requestId` context field (a common name for an app-chosen correlation id) is neither replaced nor replaces it. Overlapping invocations on one container each see their own id.
 - Spread fields from `defaultContext`, `child()` context, and per-call `context` (later wins).
 
 ### Serialization Safety
 
-- **Circular references** → replaced with `"[Circular]"` via WeakSet tracking.
+- **Circular references** → replaced with `"[Circular]"`. Only a reference back to an object on the current path counts; the same object under two keys is serialized both times.
+- **Repeated references** → one object is written out at most 8 times per entry; later references to it become `"[Repeated]"`. This keeps a graph whose nodes are shared at many levels from expanding exponentially.
 - **BigInt values** → converted to string representation.
 - **Functions/Symbols** → replaced with `"[unserializable]"`.
 - **Error objects in context** → extracted to `{ name, message, stack }`.
@@ -82,11 +83,27 @@ Priority order (highest wins):
 1. Constructor `options.level`
 2. Default: `'info'`
 
+The constructor resolves `options.level` once (`resolveLevel` in `emitter.ts`).
+The `LogLevel` type only checks literals, so a value read from config can be
+anything at runtime. It is trimmed and lower-cased. `undefined`, `null` and an
+empty string mean "not set" and use `'info'` silently. The aliases `'warning'`,
+`'trace'` and `'fatal'` then map to `'warn'`, `'debug'` and `'error'`, also
+silently. Any other value also gets `'info'`, and that Logger writes one `warn`
+line with `configuredLevel` / `effectiveLevel` (plus its `defaultContext`). It
+does not throw: a bad logging setting should not stop the app from starting.
+Child loggers inherit the resolved level.
+
+`resolveLevel` returns `{ level, unknown }`. The CDK `Logger` uses `unknown` to
+also add a synth warning (`@aws-cdk-blocks/bb-logger:unknownLevel`) via
+`Annotations.of(this).addWarningV2`, so the problem is listed with the other
+`cdk synth` warnings. `cdk synth --strict` turns that warning into an error;
+acknowledge it by its id to opt out.
+
 ## Mock Implementation
 
 The mock entry point (`index.mock.ts`) re-exports the AWS runtime (`index.aws.ts`) directly. Both environments use the same code: write structured JSON to `process.stdout` / `process.stderr`. There is no mock-specific behavior because the logging mechanism (stdout/stderr → CloudWatch) is provided by the Lambda runtime, not by the BB.
 
-- No files created in `.bb-data/` — logs are ephemeral.
+- No files created in `.cdk-blocks/local/data/` — logs are ephemeral.
 - Retention is a cloud-only concept (no local CloudWatch equivalent); it is a
   compute-level setting and has no effect locally.
 - Log level filtering works identically to production.

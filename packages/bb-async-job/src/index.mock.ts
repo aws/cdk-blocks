@@ -1,8 +1,8 @@
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { Scope, registerSdkIdentifiers, blocksError } from '@aws-blocks/core';
-import type { ScopeParent } from '@aws-blocks/core';
+import { Scope, registerSdkIdentifiers, blocksError } from '@aws-cdk-blocks/core';
+import type { ScopeParent } from '@aws-cdk-blocks/core';
 import type { StandardSchemaV1 } from '@standard-schema/spec';
 import { randomUUID } from 'node:crypto';
 import type {
@@ -16,10 +16,11 @@ import type {
 } from './types.js';
 import { AsyncJobErrors } from './errors.js';
 import { JobStatusTracker, statusNotTrackedError } from './status.js';
-import { Logger } from '@aws-blocks/bb-logger';
-import type { ChildLogger } from '@aws-blocks/bb-logger';
+import { validateDelaySeconds } from './validation.js';
+import { Logger } from '@aws-cdk-blocks/bb-logger';
+import type { ChildLogger } from '@aws-cdk-blocks/bb-logger';
 import { BB_NAME, BB_VERSION } from './version.js';
-import { assertNotMockInDeployedEnv } from '@aws-blocks/core/bb-utils';
+import { assertNotMockInDeployedEnv } from '@aws-cdk-blocks/core/bb-utils';
 
 // Fail closed if this mock entry loads in a deployed env — see assertNotMockInDeployedEnv.
 assertNotMockInDeployedEnv('bb-async-job');
@@ -192,12 +193,13 @@ export class AsyncJob<T = unknown> extends Scope {
 	 * sent to SQS and processed on the job's resolved Lambda or container compute.
 	 *
 	 * @param payload - The job data passed to the handler.
-	 * @param options - Optional. `delaySeconds` defers processing (0–900s).
+	 * @param options - Optional. `delaySeconds` defers processing (an integer from 0 to 900 seconds).
 	 * @returns `{ jobId }` — unique identifier for tracking.
 	 * @throws {AsyncJobErrors.PayloadTooLarge} If serialized payload exceeds 256 KB.
-	 * @throws {AsyncJobErrors.ValidationFailed} If schema validation fails.
+	 * @throws {AsyncJobErrors.ValidationFailed} If schema validation fails, or `delaySeconds` is not an integer from 0 to 900.
 	 */
 	async submit(payload: T, options?: SubmitOptions): Promise<{ jobId: string }> {
+		validateDelaySeconds(options?.delaySeconds);
 		await this.validatePayload(payload);
 		const jobId = randomUUID().slice(0, 13);
 		const sentAt = new Date().toISOString();
@@ -241,12 +243,12 @@ export class AsyncJob<T = unknown> extends Scope {
 	 * batches are rejected up front.
 	 *
 	 * @param payloads - Array of job payloads (at most {@link MAX_BATCH_PAYLOADS}).
-	 * @param options - Optional. `delaySeconds` applied to all messages.
+	 * @param options - Optional. `delaySeconds` applied to all messages (an integer from 0 to 900 seconds).
 	 * @returns `{ jobIds, failed }` — `jobIds` in the same order as input payloads (`null` for failed entries); `failed` lists any entries that could not be enqueued.
 	 * @throws {AsyncJobErrors.BatchEmpty} If payloads array is empty.
 	 * @throws {AsyncJobErrors.BatchTooLarge} If more than {@link MAX_BATCH_PAYLOADS} payloads.
 	 * @throws {AsyncJobErrors.PayloadTooLarge} If any payload exceeds 256 KB.
-	 * @throws {AsyncJobErrors.ValidationFailed} If any payload fails schema validation.
+	 * @throws {AsyncJobErrors.ValidationFailed} If any payload fails schema validation, or `delaySeconds` is not an integer from 0 to 900. Nothing is enqueued.
 	 * @throws {AsyncJobErrors.BatchSubmitFailed} If one or more messages fail to send (AWS only). A multi-chunk submit is not atomic; the error's `failed` and `jobIds` properties carry the partial results across all chunks.
 	 */
 	async submitBatch(payloads: T[], options?: SubmitOptions): Promise<BatchSubmitResult> {
@@ -257,6 +259,8 @@ export class AsyncJob<T = unknown> extends Scope {
 		if (payloads.length > MAX_BATCH_PAYLOADS) {
 			throw blocksError(AsyncJobErrors.BatchTooLarge, `Batch contains ${payloads.length} payloads, exceeds the ${MAX_BATCH_PAYLOADS} per-call limit`);
 		}
+
+		validateDelaySeconds(options?.delaySeconds);
 
 		// Validate every payload before enqueuing any, so one bad payload fails the
 		// whole call rather than half-submitting the batch — matching the AWS runtime.

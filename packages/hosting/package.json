@@ -1,8 +1,8 @@
 {
-  "name": "@aws-blocks/hosting",
-  "version": "0.5.0",
+  "name": "@aws-cdk-blocks/hosting",
+  "version": "1.0.0",
   "keywords": [
-    "aws-blocks",
+    "cdk-blocks",
     "hosting",
     "cloudfront",
     "s3",
@@ -11,12 +11,12 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/aws-devtools-labs/aws-blocks.git",
+    "url": "git+https://github.com/aws/cdk-blocks.git",
     "directory": "packages/hosting"
   },
-  "homepage": "https://github.com/aws-devtools-labs/aws-blocks/tree/main/packages/hosting#readme",
+  "homepage": "https://github.com/aws/cdk-blocks/tree/main/packages/hosting#readme",
   "bugs": {
-    "url": "https://github.com/aws-devtools-labs/aws-blocks/issues"
+    "url": "https://github.com/aws/cdk-blocks/issues"
   },
   "author": "Amazon Web Services",
   "license": "Apache-2.0",
@@ -24,6 +24,7 @@
   "files": [
     "dist",
     "README.md",
+    "CUSTOM-FRONT-DOOR.md",
     "src",
     "LICENSE"
   ],
@@ -59,7 +60,7 @@
   "scripts": {
     "build": "tsc --build && npm run bundle:handlers",
     "bundle:handlers": "node scripts/bundle-handlers.mjs",
-    "test": "node --test 'dist/**/*.test.js'",
+    "test": "node --test 'dist/**/*.test.js' 'scripts/*.test.mjs'",
     "dev": "tsc --build --watch"
   },
   "dependencies": {
@@ -68,6 +69,7 @@
     "@aws-sdk/client-secrets-manager": "^3.1156.0",
     "@aws-sdk/client-ssm": "^3.1156.0",
     "@aws-sdk/signature-v4a": "^3.1138.0",
+    "acorn": "^8.15.0",
     "cross-spawn": "^7.0.6",
     "fast-glob": "^3.3.3",
     "jiti": "^2.7.0",
@@ -76,7 +78,8 @@
     "semver": "^7.8.5",
     "zod": "^4.6.7",
     "@standard-schema/spec": "^1.1.0",
-    "@aws-sdk/client-lambda-web": "^3.1156.0"
+    "@aws-sdk/client-lambda-web": "^3.1156.0",
+    "@aws-sdk/client-cloudfront": "^3.1156.0"
   },
   "devDependencies": {
     "@types/cross-spawn": "^6.0.6",

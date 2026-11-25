@@ -2,7 +2,7 @@
 
 Design document for Dashboard. For usage, see [README.md](./README.md).
 
-**Package:** `@aws-blocks/bb-dashboard`
+**Package:** `@aws-cdk-blocks/bb-dashboard`
 **Type:** Primitive (creates new infrastructure)
 **AWS Service:** Amazon CloudWatch Dashboards
 
@@ -41,7 +41,7 @@ Design document for Dashboard. For usage, see [README.md](./README.md).
 
 ### D-DB-4: Redirect route vs direct URL embedding
 
-**Decision:** Dashboard registers a `GET /aws-blocks/dashboard` RawRoute that 302-redirects to the CloudWatch console URL, rather than embedding or serving the dashboard directly.
+**Decision:** Dashboard registers a `GET /cdk-blocks/dashboard` RawRoute that 302-redirects to the CloudWatch console URL, rather than embedding or serving the dashboard directly.
 
 **Rationale:**
 - **API compatibility** — Lets HTTP clients discover the dashboard URL programmatically
@@ -169,7 +169,7 @@ finalize pass (see D-DB-11). It does expose `logs` / `traces` display toggles.
 
 ### D-DB-11: Build the widget body at finalize, not in the constructor
 
-**Decision:** The Dashboard does **not** assemble its widgets in its constructor. It creates the `CwDashboard` resource eagerly (so the `url`, redirect route, and config registration never point at a resource that does not exist) and registers a deferred body-build (`registerDashboardFinalizer` from core) that enumerates the app's computes via `getComputes()`, calls `compute.dashboardSection(region)` on each, and adds the widgets via `dashboard.addWidgets(...)`; that runs via `finalizeDashboards()` at the end of `BlocksStack`/`BlocksBackend.create()`, after the backend module has fully imported. Only the widget *body* is deferred; the resource, `dashboardName`, `url`, the redirect route, and the config registration stay in the constructor (they need nothing from other blocks). There is no `options.computes` yet — the finalizer covers every compute in the app (see D-DB-10).
+**Decision:** The Dashboard does **not** assemble its widgets in its constructor. It creates the `CwDashboard` resource eagerly (so the `url` and redirect route never point at a resource that does not exist) and registers a deferred body-build (`registerDashboardFinalizer` from core) that enumerates the app's computes via `getComputes()`, calls `compute.dashboardSection(region)` on each, and adds the widgets via `dashboard.addWidgets(...)`; that runs via `finalizeDashboards()` at the end of `BlocksStack`/`BlocksBackend.create()`, after the backend module has fully imported. Only the widget *body* is deferred; the resource, `dashboardName`, `url`, and the redirect route stay in the constructor (they need nothing from other blocks). There is no `options.computes` yet — the finalizer covers every compute in the app (see D-DB-10).
 
 **Rationale:**
 - **Order-independence.** `dashboardSection` gates the traces section on each compute's `tracerEnabled`, which the framework flips at `finalizeTracing()` (when the app contains a `Tracer`) — and the default compute list is `getComputes()`. Building in the Dashboard constructor would miss any compute or Tracer constructed after it, and would run before tracing is finalized. Deferring to finalize means the Dashboard observes the complete app, so `new Dashboard(...)` can appear anywhere in the backend module. (`finalizeTracing` runs before `finalizeDashboards`, so trace flags are set when the dashboard reads them.)
@@ -238,24 +238,33 @@ Row 3 (y=18): [Log Volume (24w, 6h)]
 
 ### Route Implementation
 
-The Dashboard always registers a `GET` RawRoute that 302-redirects to the CloudWatch Dashboard URL:
+Unless `routePath` is `false`, the Dashboard registers a `GET` RawRoute:
 
-1. **CDK layer:** Sets a `BB_DASHBOARD_URL` environment variable on the Lambda handler containing the dashboard console URL token. Registers the RawRoute for route validation.
-2. **Runtime layer:** Registers a `RawRoute` with a handler that reads the env var and redirects:
+1. **CDK layer:** Builds the console URL from the `AWS::Region` token and the dashboard name, outputs it as a CfnOutput, and registers the RawRoute (on the Dashboard) for route validation. It passes **no** config to the runtime: an app may have several dashboards, and a single app-wide key would hold only the last one's URL.
+2. **Runtime layer:** Derives the same URL itself — the dashboard name exactly as the CDK layer derives it (`dashboardName` option, else `fullId`; shared helpers in `src/naming.ts`) and the compute's region (`AWS_REGION`, else `AWS_DEFAULT_REGION`), which is the stack's region — and registers a `RawRoute` on the Dashboard with a handler that redirects to that dashboard's own URL:
    ```typescript
    // Internally equivalent to:
-   new RawRoute(scope, 'dashboard-redirect', {
-     path: options.routePath ?? '/aws-blocks/dashboard',
+   const region = process.env.AWS_REGION || process.env.AWS_DEFAULT_REGION;
+   this.url = region ? dashboardConsoleUrl(region, this.dashboardName) : null;
+   const url = this.url;
+   new RawRoute(this, 'dashboard-redirect', {
+     path: options.routePath ?? '/cdk-blocks/dashboard',
      method: 'GET',
      handler: async (ctx) => {
-       const url = process.env.BB_DASHBOARD_URL;
+       if (!url) {
+         // No region, so no URL: answer 503 with a JSON body that points at `npx cdk deploy`.
+         ctx.response.status = 503;
+         ctx.response.headers.set('Content-Type', 'application/json');
+         ctx.response.send({ message, hint, localObservability });
+         return;
+       }
        ctx.response.status = 302;
        ctx.response.headers.set('Location', url);
        ctx.response.send('');
      },
    });
    ```
-3. **Mock layer:** Returns 503 with `{ message, hint, localObservability: { logs, metrics, traces } }` directing the user to run `npx cdk deploy` and pointing at local observability output
+3. **Mock layer:** Serves an HTML overview of configured metrics and local observability sources. It does not consult the cloud URL.
 4. **Security:** Route is public — the URL alone grants no data access (AWS Console login required)
 
 ### IAM Permissions
@@ -266,18 +275,9 @@ No runtime IAM permissions are needed because the Dashboard BB has no runtime co
 
 ## Mock Implementation
 
-- **Local dev:** The mock registers the redirect route (which returns a 503 with helpful guidance), and logs a console message on instantiation.
-- **Dev server route:** Returns 503 with JSON explaining CloudWatch Dashboards are cloud-only and directing users to run `cdk deploy`
-- **Console output:** On instantiation, the mock logs:
-  ```
-  [Dashboard] Dashboard BB: no-op in local mode (CloudWatch Dashboard is a cloud-only resource).
-  Will create CloudWatch Dashboard '{title}' on deploy. Run 'npx cdk deploy' to view.
-
-  📍 Local observability data:
-     • Logs: Check your terminal output - Logger BB writes structured JSON to stdout
-     • Metrics: Metrics BB writes EMF-formatted JSON to stdout (visible in terminal)
-     • Traces: Tracer stores mock traces to .bb-data/ and logs them to stdout
-  ```
+The mock prints the registered route path. That route returns a local page with the dashboard title,
+configured metrics and instructions for inspecting logs and traces or launching the local Admin UI.
+It does not read trace files, obtain AWS credentials, or embed an admin session token in the response.
 
 ### Dashboard Body JSON Format
 
@@ -304,9 +304,7 @@ Dashboard body is serialized as CloudWatch Dashboard JSON format during CDK synt
 
 | Behavior Difference | Impact | Mitigation |
 |------------|--------|------------|
-| No dashboard visualization locally | Cannot preview dashboard layout in local dev | No mitigation — CloudWatch Dashboards are a console feature. Use `npx cdk deploy` to a sandbox |
-| No metric data locally | Widgets would be empty even if rendered | No mitigation — metrics are ephemeral in local dev (EMF to stdout) |
-| Route returns 503 in local mode | Cannot redirect to dashboard URL locally | Route provides helpful guidance and links to local observability data (terminal output) |
+| No CloudWatch charts locally | The local route serves a configuration overview, not live CloudWatch data | Inspect EMF and logs in the dev server terminal and Tracer records in `.bb-data/` |
 
 ## Integration with Observability BBs
 
@@ -387,7 +385,7 @@ Dashboard intentionally does **not** walk the scope tree to auto-discover BBs be
 - **Zero additional security surface** — Dashboard is a CloudWatch Console page protected by AWS IAM
 - **Access requires:** AWS Console login with `cloudwatch:GetDashboard` permission
 - **No data exposure:** Dashboard displays data the viewer already has access to via IAM
-- **Redirect route:** The `/aws-blocks/dashboard` route exposes only the console link (no data); AWS Console login is still required
+- **Redirect route:** The `/cdk-blocks/dashboard` route exposes only the console link (no data); AWS Console login is still required
 
 ### Threat Model
 

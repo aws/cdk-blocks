@@ -1,3 +1,6 @@
+// Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+// SPDX-License-Identifier: Apache-2.0
+
 package com.aws.blocks.kotlin.e2e
 
 import blocks.e2e.api
@@ -63,8 +66,8 @@ class RpcWireE2ETest {
 
     /**
      * A spec's method name is sent exactly. The server has no method without a dot: it answers
-     * one with `InvalidRequest`, so a hand-written spec's dotless `ping` can't reach an AWS
-     * Blocks backend from any client. The base generator sent it as `_default.ping`, which the
+     * one with `InvalidRequest`, so a hand-written spec's dotless `ping` can't reach a
+     * CDK Blocks backend from any client. The base generator sent it as `_default.ping`, which the
      * server reads as the method `ping` of an export named `_default`.
      */
     @Test

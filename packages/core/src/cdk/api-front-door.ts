@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The `cloudfront` tier: a Blocks-managed CloudFront distribution in front of the
+ * The `cloudfront` tier: a CDK Blocks-managed CloudFront distribution in front of the
  * API.
  *
  * By default (`apigateway`) clients call the stack's shared API Gateway REST API
@@ -85,7 +85,7 @@ export const API_BEHAVIOR_OPTIONS = {
 } satisfies AddBehaviorOptions;
 
 /**
- * Viewer-request function on a Blocks CloudFront front door's API behaviors that
+ * Viewer-request function on a CDK Blocks CloudFront front door's API behaviors that
  * reach the shared gateway: stamp the host the viewer called (the distribution's
  * domain or a custom domain) as {@link PUBLIC_HOST_HEADER}, overwriting any client
  * copy. CloudFront forwards the gateway's own `Host` (see
@@ -115,7 +115,7 @@ export function publicHostStamp(scope: Construct, id: string): FunctionAssociati
 	const fn = new CloudFrontFunction(scope, id, {
 		code: FunctionCode.fromInline(PUBLIC_HOST_FUNCTION),
 		runtime: FunctionRuntime.JS_2_0,
-		comment: 'Blocks: stamp the viewer host for the API',
+		comment: 'AWS CDK Blocks: stamp the viewer host for the API',
 	});
 	return [{ function: fn, eventType: FunctionEventType.VIEWER_REQUEST }];
 }
@@ -179,9 +179,9 @@ export interface ApiFrontDoorOwner {
 /**
  * Build a CloudFront origin from the shared gateway's RPC URL.
  *
- * The shared REST API's URL is `https://{host}/{stage}/aws-blocks/api`. The
+ * The shared REST API's URL is `https://{host}/{stage}/cdk-blocks/api`. The
  * origin is the host, with the `/{stage}` segment set as its `originPath` so a
- * viewer request for `/aws-blocks/api` reaches `/{stage}/aws-blocks/api` on the
+ * viewer request for `/cdk-blocks/api` reaches `/{stage}/cdk-blocks/api` on the
  * gateway. The URL is a CloudFormation token, so host and stage are sliced out
  * in-template via `Fn::Split` rather than in JS — string methods here would
  * operate on the unresolved placeholder text.
@@ -197,7 +197,7 @@ export function httpOriginFromEndpoint(gatewayUrl: string, customHeaders?: Recor
 /**
  * The header a claiming CloudFront `Hosting` distribution adds to its API origin
  * so the backend's `apiWaf` rate rule can tell its (edge-IP) requests from
- * direct callers. `undefined` unless the backend has a Blocks-managed web ACL
+ * direct callers. `undefined` unless the backend has a CDK Blocks-managed web ACL
  * (a caller-supplied `webAclArn` is attached as-is). Calling it records that the
  * claiming distribution sends the header.
  *
@@ -232,7 +232,7 @@ export function claimApiFrontDoor(owner: Construct & ApiFrontDoorOwner, distribu
 }
 
 /**
- * Record that `Hosting` published the origin browsers reach `/aws-blocks/*` at
+ * Record that `Hosting` published the origin browsers reach `/cdk-blocks/*` at
  * (`BLOCKS_PUBLIC_ORIGIN`): its same-origin door. A managed `cloudfront`
  * distribution built anyway — for native clients, when the door doesn't claim
  * the API front-door role (every door but the CloudFront default and the
@@ -370,7 +370,7 @@ class ApiFrontDoorAspect implements cdk.IAspect {
 			functionAssociations: publicHostStamp(this.owner, `${FRONT_DOOR_ID}PublicHost`),
 		};
 		const distribution = new Distribution(this.owner, FRONT_DOOR_ID, {
-			comment: `Blocks API front door for ${stack.stackName}`,
+			comment: `API front door for ${stack.stackName}`,
 			// One catch-all behavior to the shared gateway routes RPC, auth, and raw
 			// routes alike — every namespace on a Lambda compute included, since the
 			// gateway fans those out itself.
@@ -399,7 +399,7 @@ class ApiFrontDoorAspect implements cdk.IAspect {
 		// the runtime builds without a request (e.g. Auth's federated callback
 		// `redirect_uri`) point at this distribution and its cookies. Registered at
 		// synth, before the config JSON (a Lazy) resolves.
-		// A `Hosting` door that serves `/aws-blocks/*` to browsers owns the origin
+		// A `Hosting` door that serves `/cdk-blocks/*` to browsers owns the origin
 		// (see `publishPublicOrigin`); this distribution then serves native clients only.
 		if (!this.owner._publicOriginPublishedByHosting) {
 			registerSharedConfig(this.owner, 'BLOCKS_PUBLIC_ORIGIN', frontDoorUrl);
@@ -442,7 +442,7 @@ export function resolveApiFrontDoor(apiFrontDoor: ApiFrontDoorTier | undefined):
  *   identity that routes are registered under — and a `BlocksBackend` is a
  *   construct inside a stack it does not own, possibly alongside siblings.
  * @param provision whether to build the `cloudfront` tier's distribution
- * @param gatewayUrl the shared REST API gateway URL (`https://{host}/{stage}/aws-blocks/api`),
+ * @param gatewayUrl the shared REST API gateway URL (`https://{host}/{stage}/cdk-blocks/api`),
  *   the origin the distribution forwards to
  * @param gatewayStage the shared REST API's stage, where the `apigateway` tier's
  *   WAF attaches (see `apiWaf`)

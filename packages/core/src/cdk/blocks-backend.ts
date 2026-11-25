@@ -37,6 +37,7 @@ import {
 	snapshotChildren,
 } from './blocks-roles.js';
 import { applyBlocksPermissionsBoundary, warnOnMixedBoundaries } from './permissions-boundary.js';
+import { enableRolePolicyPacking } from './role-policy-packing.js';
 import { addServicePrincipalTrustCheck } from './service-principal-trust.js';
 import { applyAppIdentity } from './app-identity.js';
 import { BLOCKS_BACKEND_ROOT, getBlocksRoot } from './root-registry.js';
@@ -70,13 +71,13 @@ export function assertCdkConditionActive(): void {
 			'Missing --conditions=cdk: Building Blocks will silently load mock implementations instead of CDK constructs.\n\n' +
 				'Fix: Set NODE_OPTIONS="--conditions=cdk" before running CDK synth:\n' +
 				'  NODE_OPTIONS="--conditions=cdk" npx cdk synth\n\n' +
-				'Or use the Blocks CLI commands (npm run deploy / npm run sandbox) which set this automatically.',
+				'Or use the AWS CDK Blocks CLI commands (npm run deploy / npm run sandbox) which set this automatically.',
 		);
 	}
 }
 
 /**
- * Timeout of the shared Blocks handler Lambda, and therefore the ceiling on a
+ * Timeout of the shared CDK Blocks handler Lambda, and therefore the ceiling on a
  * single invocation. Exported because resources that feed the handler have to
  * size their own timeouts against it (e.g. an SQS queue's visibility timeout).
  */
@@ -115,25 +116,28 @@ export interface BlocksBackendProps {
 
 /**
  * Core's `create()` props: the public {@link BlocksBackendProps} plus the
- * required `defaultComputeFactory`, spread on by the umbrella (`@aws-blocks/blocks`).
+ * required `defaultComputeFactory`, spread on by the umbrella (`aws-cdk-blocks`).
  * Customers use {@link BlocksBackendProps} and never set the factory.
  *
  * @internal
  */
 export interface CoreBlocksBackendProps extends BlocksBackendProps {
-	/** Builds the backend's default compute. Injected by `@aws-blocks/blocks`. */
+	/** Builds the backend's default compute. Injected by `aws-cdk-blocks`. */
 	defaultComputeFactory: DefaultComputeFactory;
 }
 
 /**
- * Emit a synth-time warning when the stack is deployed with a durable removal
+ * Emit a synth-time info when the stack is deployed with a durable removal
  * policy but API Gateway access logging is off — so the tradeoff is visible at
  * `cdk synth` rather than discovered as a missing audit trail later.
+ *
+ * An info, not a warning: the condition is `BlocksPresets.production`'s own
+ * default (D-033).
  *
  * `accessLogging` is deliberately off by default in BOTH presets (see the
  * {@link BlocksDefaults.accessLogging} field doc): enabling it provisions the
  * account/region-level API Gateway CloudWatch Logs role, an AWS-side singleton a
- * second Blocks stack can repoint on deploy or break on teardown. We must NOT
+ * second CDK Blocks stack can repoint on deploy or break on teardown. We must NOT
  * flip that default, but a durable deployment silently having no request-level
  * audit trail is worth surfacing.
  *
@@ -145,33 +149,33 @@ export interface CoreBlocksBackendProps extends BlocksBackendProps {
  * protection off (`{ ...BlocksPresets.production, deletionProtection: false }`),
  * and the SNAPSHOT and RETAIN_ON_UPDATE_OR_DELETE removal policies. The sandbox
  * posture (DESTROY) and any explicit `accessLogging: true` override are correctly
- * excluded; any other falsy `accessLogging` still warns, so a plain-JS caller
- * who omits the field gets both the default-off behavior AND this warning (the
- * truthiness check matches how consumer blocks read `defaults.accessLogging`).
- * Warning only — never throws — and fires at most once per
- * BlocksStack/BlocksBackend (so multiple backends in one stack each warn for
- * their own posture).
+ * excluded; any other falsy `accessLogging` still gets the info, so a plain-JS
+ * caller who omits the field gets both the default-off behavior AND this info
+ * (the truthiness check matches how consumer blocks read
+ * `defaults.accessLogging`). Info only — never throws — and emitted at most once
+ * per BlocksStack/BlocksBackend (so multiple backends in one stack each get it
+ * for their own posture).
  *
- * To silence it deliberately, acknowledge the warning on the stack or backend
+ * To silence it deliberately, acknowledge the info on the stack or backend
  * returned by `create()` after it resolves — see the message for the exact call.
  */
-function warnIfDurableWithoutAccessLogging(scope: Construct, defaults: BlocksDefaults): void {
+function infoIfDurableWithoutAccessLogging(scope: Construct, defaults: BlocksDefaults): void {
 	const isDurableAuditGap = defaults.removalPolicy !== cdk.RemovalPolicy.DESTROY && !defaults.accessLogging;
 	if (!isDurableAuditGap) return;
 
-	cdk.Annotations.of(scope).addWarningV2(
+	cdk.Annotations.of(scope).addInfoV2(
 		'blocks:apigateway:access-logging-disabled',
 		'This deployment has a durable removal policy (its stateful resources are not destroyed on ' +
 			'teardown) but API Gateway access logging is disabled, so it has no request-level audit ' +
 			'trail. It is off by default because enabling it provisions the account/region-level API ' +
-			'Gateway CloudWatch Logs role — an AWS-side singleton that a second Blocks stack in the same ' +
+			'Gateway CloudWatch Logs role — an AWS-side singleton that a second AWS CDK Blocks stack in the same ' +
 			'account+region can repoint on deploy or leave broken on teardown (see the `accessLogging` ' +
-			'field docs on the backend `defaults`). Once you have confirmed a single Blocks stack owns ' +
+			'field docs on the backend `defaults`). Once you have confirmed a single CDK Blocks stack owns ' +
 			"that role in the region, opt in by setting `accessLogging: true` in this backend's " +
 			'`defaults`; opting in also enables S3 server access logging for any FileBucket, each of ' +
 			'which then gets its own log bucket. If leaving it off is deliberate (for example a ' +
-			'multi-stack deployment where another stack owns access logging), acknowledge this warning ' +
-			"by calling `Annotations.of(stack).acknowledgeWarning('blocks:apigateway:access-logging-disabled')` " +
+			'multi-stack deployment where another stack owns access logging), acknowledge this info ' +
+			"by calling `Annotations.of(stack).acknowledgeInfo('blocks:apigateway:access-logging-disabled')` " +
 			'on the stack or backend returned by `create()`.',
 	);
 }
@@ -187,7 +191,7 @@ export const UPGRADE_GUIDE_URL =
 
 /**
  * Fail fast with an actionable message if `defaults` is missing. TypeScript
- * callers get a compile error, but `cdk` runs `aws-blocks/index.cdk.ts` through a
+ * callers get a compile error, but `cdk` runs `cdk-blocks/index.cdk.ts` through a
  * loader that doesn't type-check, so an app scaffolded before `defaults` became
  * required (or a plain-JS caller, `as any`, or a dynamically built props object)
  * reaches the constructors without it, which then throw a cryptic
@@ -214,10 +218,10 @@ export function assertBlocksDefaults(
 	}
 	throw new Error(
 		`${kind}.create() requires a \`defaults\` field. Pass a posture from the presets, typically:\n\n` +
-			"  import { BlocksPresets } from '@aws-blocks/blocks/cdk';\n" +
+			"  import { BlocksPresets } from 'aws-cdk-blocks/cdk';\n" +
 			'  defaults: sandboxMode ? BlocksPresets.sandbox : BlocksPresets.production,\n\n' +
 			'Apps scaffolded from an older create-blocks-app template need this and a few other changes to ' +
-			`aws-blocks/index.cdk.ts; see ${UPGRADE_GUIDE_URL}`,
+			`cdk-blocks/index.cdk.ts; see ${UPGRADE_GUIDE_URL}`,
 	);
 }
 
@@ -227,12 +231,12 @@ export function assertBlocksDefaults(
 function checkStackNameAllowsResourceGroups(scope: Construct, stackName: string, groupPrefix: string): void {
 	if (!/^aws/i.test(stackName)) return;
 	cdk.Annotations.of(scope).addError(
-		`Stack name '${stackName}' starts with 'aws'. AWS Blocks names two AWS Resource Groups after the stack ` +
+		`Stack name '${stackName}' starts with 'aws'. AWS CDK Blocks names two AWS Resource Groups after the stack ` +
 			`('${groupPrefix}-resources' and '${groupPrefix}-settings'), and AWS Resource Groups refuses a group name ` +
 			"that starts with 'AWS' in any letter case, so the deploy would fail in CloudFormation. " +
 			'AWS Systems Manager refuses the same prefix for the parameters that blocks name after the stack. ' +
 			"Use a stack name that does not start with 'aws'. In an app made by create-blocks-app, change " +
-			'"stackId" in .blocks/config.json, for example with the prefix \'app-\'.',
+			'"stackId" in .cdk-blocks/config.json, for example with the prefix \'app-\'.',
 	);
 }
 
@@ -241,8 +245,8 @@ export function setupBlocksInfra(scope: Construct, props: BlocksBackendProps, id
 	assertBlocksDefaults(props, 'BlocksBackend');
 
 	// Surface the audit-trail tradeoff at synth when running a durable posture
-	// with access logging off. Non-fatal: warning only.
-	warnIfDurableWithoutAccessLogging(scope, props.defaults);
+	// with access logging off. Non-fatal: info only.
+	infoIfDurableWithoutAccessLogging(scope, props.defaults);
 
 	// ── Shared execution role ───────────────────────────────────────────────
 	// A single IAM role that every Building Block grants to. Provisioned here so
@@ -271,9 +275,15 @@ export function setupBlocksInfra(scope: Construct, props: BlocksBackendProps, id
 				: []),
 		],
 	});
+	// Merge combinable statements before CDK packs any overflow into managed
+	// policies, give those overflow policies content-derived logical IDs so a
+	// deploy adds moved statements before it removes them, and fail synth with a
+	// fix if the role would exceed the managed-policies-per-role quota
+	// (role-policy-packing.ts).
+	enableRolePolicyPacking(executionRole, scope);
 
 	// ── Permissions boundary + IAM report ─────────────────────────────────
-	// Cover every role AWS Blocks creates for this root (blocks-roles.ts — an
+	// Cover every role CDK Blocks creates for this root (blocks-roles.ts — an
 	// aspect, so roles blocks add later are covered too), then apply the opt-in
 	// ceiling (`defaults.permissionsBoundary`) to that set. Unset → no-op,
 	// templates unchanged. The report lists what the shared role accumulated; it is
@@ -431,7 +441,7 @@ export function buildSharedGateway(owner: SharedGatewayOwner, backendModule: obj
  * stamps each non-default one with its own id (`BLOCKS_API_COMPUTE_ID`). The
  * dispatcher (see `apiNamespaceFilterFromEnv`) then refuses, on the default
  * compute, a namespace placed elsewhere — including on the bare
- * `/aws-blocks/api` endpoint — and, on a non-default compute, every namespace
+ * `/cdk-blocks/api` endpoint — and, on a non-default compute, every namespace
  * that isn't its own. Nothing is set when no namespace has its own compute: the
  * default compute serves them all either way.
  *
@@ -459,7 +469,7 @@ export function applyStrictNamespacePlacement(
 		cdk.Annotations.of(defaultCompute).addWarningV2(
 			'blocks:apigateway:bare-endpoint-serves-placed-namespaces',
 			`API namespaces on their own compute (${placed.join(', ')}) can also be called through the bare ` +
-				'/aws-blocks/api endpoint, which runs them on the default compute instead. To serve each namespace ' +
+				'/cdk-blocks/api endpoint, which runs them on the default compute instead. To serve each namespace ' +
 				"only on its own compute, add `strictNamespacePlacement: true` to the stack's `defaults` (keep the " +
 				'preset you already use); the typed clients already call each namespace at its own path. If raw ' +
 				'callers still need the bare endpoint for these namespaces, acknowledge this warning by calling ' +
@@ -478,7 +488,7 @@ export function applyStrictNamespacePlacement(
 	const bytes = Buffer.byteLength(encoded, 'utf8');
 	if (bytes > MAX_API_NAMESPACE_COMPUTES_BYTES) {
 		throw new Error(
-			`[Blocks] strictNamespacePlacement: the ${API_NAMESPACE_COMPUTES_KEY} placement map for ${entries.length} ` +
+			`[AWS CDK Blocks] strictNamespacePlacement: the ${API_NAMESPACE_COMPUTES_KEY} placement map for ${entries.length} ` +
 				`API namespaces is ${bytes} bytes, over the ${MAX_API_NAMESPACE_COMPUTES_BYTES}-byte limit for a value ` +
 				"in each compute's environment (Lambda allows 4 KB for all of them). Place fewer namespaces on their " +
 				'own compute, or give the namespaces and computes shorter ids.',
@@ -502,7 +512,7 @@ export function requireSharedGateway(owner: SharedGatewayOwner, kind: 'BlocksSta
 	if (!owner._sharedGateway) {
 		const noun = kind === 'BlocksStack' ? 'stack' : 'backend';
 		throw new Error(
-			`Blocks ${noun} not fully initialized — access .gateway/.apiUrl after ${kind}.create() resolves.`,
+			`AWS CDK Blocks ${noun} not fully initialized — access .gateway/.apiUrl after ${kind}.create() resolves.`,
 		);
 	}
 	return owner._sharedGateway;
@@ -555,10 +565,10 @@ export function ensureVpcAccessPolicyWhenVpcActive(root: { executionRole: iam.IR
 }
 
 /**
- * Standalone CDK construct that provisions the Blocks backend: a single Lambda
+ * Standalone CDK construct that provisions the CDK Blocks backend: a single Lambda
  * function fronted by one shared API Gateway REST API with RPC + catch-all proxy routing.
  *
- * Use this to embed a Blocks backend into any existing CDK stack. Building Blocks
+ * Use this to embed a CDK Blocks backend into any existing CDK stack. Building Blocks
  * instantiated during the `backendCDKPath` import will automatically attach to
  * this construct's Lambda handler.
  *
@@ -579,7 +589,7 @@ export class BlocksBackend extends Construct implements ApiFrontDoorOwner {
 	 * `globalThis.CURRENT_BLOCKS_STACK.backendModulePath`.
 	 */
 	public readonly backendModulePath: string;
-	/** Shared IAM role assumed by all Blocks compute. Building Blocks grant to this role. */
+	/** Shared IAM role assumed by all CDK Blocks compute. Building Blocks grant to this role. */
 	public readonly executionRole: iam.IRole;
 	/** Infrastructure defaults for Building Blocks created under this backend. */
 	public readonly defaults: BlocksDefaults;
@@ -647,7 +657,7 @@ export class BlocksBackend extends Construct implements ApiFrontDoorOwner {
 	}
 	/**
 	 * The URL clients should send RPC calls to: the CloudFront distribution's URL +
-	 * `/aws-blocks/api` under `apiFrontDoor: 'cloudfront'` (the managed
+	 * `/cdk-blocks/api` under `apiFrontDoor: 'cloudfront'` (the managed
 	 * distribution, or `Hosting`'s when Hosting fronts the API), otherwise
 	 * {@link apiUrl}. A CloudFormation token, resolved at synth — use it wherever a
 	 * deploy-time value works (a `CfnOutput`, Amplify outputs, …).
@@ -665,7 +675,7 @@ export class BlocksBackend extends Construct implements ApiFrontDoorOwner {
 	private requireDefaultCompute(): LambdaShapedCompute {
 		if (!this._defaultCompute) {
 			throw new Error(
-				'Blocks backend not fully initialized — access .gateway/.apiUrl after BlocksBackend.create() resolves.',
+				'AWS CDK Blocks backend not fully initialized — access .gateway/.apiUrl after BlocksBackend.create() resolves.',
 			);
 		}
 		return this._defaultCompute as LambdaShapedCompute;
@@ -764,7 +774,7 @@ export class BlocksBackend extends Construct implements ApiFrontDoorOwner {
 		// Lambda function (the shared gateway's target), and a block reading
 		// `this.compute` in its constructor (during that import) must resolve to
 		// it. The factory is supplied by the umbrella
-		// @aws-blocks/blocks (which injects LambdaCompute) via props, so core never
+		// aws-cdk-blocks (which injects LambdaCompute) via props, so core never
 		// imports the concrete compute class.
 		backend._defaultCompute = props.defaultComputeFactory(backend);
 		// file:// URL (not a raw path) so the cache-busting query works on Windows,
@@ -840,7 +850,7 @@ export class BlocksBackend extends Construct implements ApiFrontDoorOwner {
 			finalizeVpc(backend, options);
 			cdk.Annotations.of(backend).addInfoV2(
 				'blocks:vpc:derived',
-				'A Building Block required a VPC and none was provided, so Blocks created one ' +
+				'A Building Block required a VPC and none was provided, so AWS CDK Blocks created one ' +
 					'(with a NAT gateway, which has an ongoing cost). Pass `defaults.vpc: { network }` to ' +
 					'bring your own. See packages/blocks/VPC.md.',
 			);

@@ -1,18 +1,23 @@
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { Scope, registerSdkIdentifiers, blocksError } from '@aws-blocks/core';
-import { getMockDataDir, assertNotMockInDeployedEnv } from '@aws-blocks/core/bb-utils';
-import type { ScopeParent } from '@aws-blocks/core';
+import { Scope, registerSdkIdentifiers, blocksError } from '@aws-cdk-blocks/core';
+import { getMockDataDir, assertNotMockInDeployedEnv } from '@aws-cdk-blocks/core/bb-utils';
+import type { ScopeParent } from '@aws-cdk-blocks/core';
 import type { StandardSchemaV1 } from '@standard-schema/spec';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { AppSettingErrors } from './errors.js';
 import type { AppSettingOptions, InternalAppSettingOptions } from './types.js';
-import { assertValueWithinSizeLimit, validateAppSettingOptions } from './validation.js';
-import { Logger } from '@aws-blocks/bb-logger';
-import type { ChildLogger } from '@aws-blocks/bb-logger';
+import {
+	assertSecretValueNotEmpty,
+	assertValueWithinSizeLimit,
+	serializeValue,
+	validateAppSettingOptions,
+} from './validation.js';
+import { Logger } from '@aws-cdk-blocks/bb-logger';
+import type { ChildLogger } from '@aws-cdk-blocks/bb-logger';
 import { BB_NAME, BB_VERSION } from './version.js';
 
 // Fail closed if this mock entry loads in a deployed env — see assertNotMockInDeployedEnv.
@@ -84,7 +89,7 @@ export class AppSetting<T = string> extends Scope {
 	 * factory exists so app code uses the same API in dev and deploy.
 	 *
 	 * Note: like any mock secret with no value, `get()` returns a random placeholder
-	 * unless `.bb-data/settings.json` was already seeded for this `fullId`. Local
+	 * unless `.cdk-blocks/local/data/settings.json` was already seeded for this `fullId`. Local
 	 * dev still depends on whatever seeds that value.
 	 */
 	static fromExisting<T = string>(
@@ -138,7 +143,7 @@ export class AppSetting<T = string> extends Scope {
 	/**
 	 * Retrieve the current value.
 	 *
-	 * Returns the stored value from `.bb-data/settings.json`.
+	 * Returns the stored value from `.cdk-blocks/local/data/settings.json`.
 	 *
 	 * @returns The current value.
 	 *
@@ -161,11 +166,12 @@ export class AppSetting<T = string> extends Scope {
 	/**
 	 * Update the value at runtime.
 	 *
-	 * Writes the new value to `.bb-data/settings.json`. When a schema is
+	 * Writes the new value to `.cdk-blocks/local/data/settings.json`. When a schema is
 	 * configured, the value is validated before writing.
 	 *
 	 * @param value - The new value to store.
-	 * @throws {AppSettingErrors.ValidationFailed} If schema validation fails or value exceeds 4 KB.
+	 * @throws {AppSettingErrors.ValidationFailed} If schema validation fails, the value has no JSON representation (e.g. `undefined`, a function, a bigint), or the value exceeds 4 KB.
+	 *   Also if a `secret: true` setting is given an empty string, which `get()` would refuse.
 	 *
 	 * @example
 	 * ```typescript
@@ -175,8 +181,9 @@ export class AppSetting<T = string> extends Scope {
 	 */
 	async put(value: T): Promise<void> {
 		await validateSchema(this.schema, value);
+		assertSecretValueNotEmpty(value, this.isSecret);
 
-		const serialized = JSON.stringify(value);
+		const serialized = serializeValue(value);
 		assertValueWithinSizeLimit(serialized, this.isSecret);
 
 		const settings = readSettings(this);

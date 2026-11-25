@@ -1,10 +1,13 @@
 #!/bin/bash
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+
 # ─────────────────────────────────────────────────────────────────────────────
 # scaffold-amplify-interop.sh
 #
 # Recreates test-apps/amplify-gen2 from scratch:
 # 1. Scaffolds a fresh Amplify Gen 2 project
-# 2. Runs create-blocks-app to integrate Blocks
+# 2. Runs create-blocks-app to integrate CDK Blocks
 # 3. Restores the hand-maintained frontend + Playwright tests from git
 #
 # Usage (from repo root):
@@ -27,7 +30,7 @@ echo "🔨 Building create-blocks-app..."
 cd "$MONOREPO_ROOT"
 npm run build --workspace=packages/create-blocks-app
 
-echo "🔌 Scaffolding Blocks into test app..."
+echo "🔌 Scaffolding AWS CDK Blocks into test app..."
 cd "$TEST_APP"
 node "$MONOREPO_ROOT/packages/create-blocks-app/dist/index.js" --yes .
 

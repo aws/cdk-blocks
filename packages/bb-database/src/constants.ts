@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { createHash } from 'node:crypto';
-import { escapeRegExp, sanitizeConfigKey } from '@aws-blocks/core/bb-utils';
-import { DEFAULT_DB_CONNECTION_NAME, dbConnectionParameterName } from '@aws-blocks/core/db-naming';
+import { escapeRegExp, sanitizeConfigKey } from '@aws-cdk-blocks/core/bb-utils';
+import { DEFAULT_DB_CONNECTION_NAME, dbConnectionParameterName } from '@aws-cdk-blocks/core/db-naming';
 import type { ClusterType } from './types.js';
 
 export const MIGRATION_LAMBDA_TIMEOUT_MINUTES = 10;
@@ -109,12 +109,22 @@ export const CONNECTION_NAME_RULE =
 
 export const DEFAULT_SCHEMA = 'public';
 
-export const DEFAULT_MIGRATIONS_ROOT = './aws-blocks/migrations';
+export const DEFAULT_MIGRATIONS_ROOT = './cdk-blocks/migrations';
 
 const DB_ROLE_PREFIX = 'blocks_app_';
 
 /** Local mode: the role a block's statements run as in PGlite, with the grants the deployed app role gets. */
 export const LOCAL_APP_ROLE = `${DB_ROLE_PREFIX}local`;
+
+/**
+ * The placeholder a migration file writes for the role the app's statements run as. Every occurrence is
+ * replaced before the file runs, with the quoted name: the app role the migration Lambda creates on a cluster
+ * the block provisions (`blocks_app_{cluster}`, {@link sanitizeDbRoleName}), `"blocks_app_local"` in local
+ * mode, and the connection role on an existing database. One file then grants to the app role in every place
+ * it runs: `GRANT authenticated TO ${app_role} WITH INHERIT FALSE, SET TRUE;`.
+ */
+// biome-ignore lint/suspicious/noTemplateCurlyInString: the placeholder a migration file writes, not a template
+export const APP_ROLE_PLACEHOLDER = '${app_role}';
 
 // PostgreSQL identifiers and RDS cluster identifiers share the 63-character limit.
 const PG_NAME_MAX = 63;
@@ -171,6 +181,16 @@ export const quoteIdent = (name: string): string => `"${name.replace(/"/g, '""')
 
 // `public` is a DSQL system entity: it needs no search_path, no CREATE SCHEMA and no schema-level grant.
 export const searchPathFor = (schema: string): string | undefined => (schema === DEFAULT_SCHEMA ? undefined : schema);
+
+/** The name `Database` of `@aws-blocks/bb-data` derived from a full id, for its database and its config keys. */
+export const legacyName = (fullId: string): string => fullId.replace(/[^a-zA-Z0-9]/g, '_');
+
+// The config keys of a `LegacyDatabaseCluster`, in the form the earlier block used. The CDK layer writes them
+// and the Lambda runtime reads them; both sides derive them here.
+export const legacyClusterConfigKey = (
+	clusterFullId: string,
+	suffix: 'CLUSTER_ARN' | 'SECRET_ARN' | 'DATABASE',
+): string => `BLOCKS_${legacyName(clusterFullId)}_${suffix}`;
 
 // The config bucket key the CDK layer writes and the Lambda runtime reads; both sides derive it here.
 export const clusterConfigKey = (clusterFullId: string, suffix: 'ENDPOINT' | 'REGION'): string =>

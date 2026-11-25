@@ -12,7 +12,7 @@ import { forEachBlocksKmsKey, forEachBlocksRole, isAppOwnedRole, markBlocksOwned
  *
  * @internal
  */
-export const SERVICE_PRINCIPAL_TRUST_WARNING_ID = '@aws-blocks/core:serviceRoleTrustWithoutSourceCondition';
+export const SERVICE_PRINCIPAL_TRUST_WARNING_ID = '@aws-cdk-blocks/core:serviceRoleTrustWithoutSourceCondition';
 
 /**
  * Acknowledgement id of the warning reported for an app-owned KMS key whose key
@@ -21,7 +21,7 @@ export const SERVICE_PRINCIPAL_TRUST_WARNING_ID = '@aws-blocks/core:serviceRoleT
  *
  * @internal
  */
-export const KMS_KEY_POLICY_WARNING_ID = '@aws-blocks/core:kmsKeyPolicyWithoutSourceCondition';
+export const KMS_KEY_POLICY_WARNING_ID = '@aws-cdk-blocks/core:kmsKeyPolicyWithoutSourceCondition';
 
 /**
  * Service principals whose trust statements need no source condition: Lambda
@@ -57,8 +57,8 @@ function cloudWatchRoleLogicalId(account: cdk.CfnResource): string | undefined {
  * Whether `service` on `role` is the `apigateway.amazonaws.com` trust of an API
  * Gateway CloudWatch Logs role: a role that an `AWS::ApiGateway::Account` in
  * the same stack names as its `CloudWatchRoleArn`. That covers the stack-level
- * role `ensureApiGatewayAccount` creates (`@aws-blocks/core` and
- * `@aws-blocks/hosting`) and the `cloudWatchRole` a CDK `RestApi` creates by
+ * role `ensureApiGatewayAccount` creates (`@aws-cdk-blocks/core` and
+ * `@aws-cdk-blocks/hosting`) and the `cloudWatchRole` a CDK `RestApi` creates by
  * default. The trust stays unconditioned: API Gateway does not send
  * `aws:SourceAccount` or `aws:SourceArn` when it delivers logs with this role,
  * so either condition stops log delivery. Only that principal on such a role
@@ -192,7 +192,7 @@ function appOwnedTrustWarning(role: cdk.CfnResource, { service, statement }: Unc
 }
 
 /**
- * Fail synth when an IAM role AWS Blocks creates for `root` (the set
+ * Fail synth when an IAM role CDK Blocks creates for `root` (the set
  * {@link forEachBlocksRole} visits) trusts a service principal without an
  * `aws:SourceAccount` or `aws:SourceArn` condition. Lambda execution roles are
  * accepted as they are ({@link UNCONDITIONED_SERVICES}).
@@ -202,8 +202,8 @@ function appOwnedTrustWarning(role: cdk.CfnResource, { service, statement }: Unc
  * `BlocksBackend`, a custom block it writes, and in a `BlocksStack` whatever
  * it adds after `create()`): those get a synth warning instead (id
  * {@link SERVICE_PRINCIPAL_TRUST_WARNING_ID}, which the app can acknowledge),
- * naming the property override that sets the condition. Roles under an AWS
- * Blocks Building Block or a compute, or created by the framework at stack
+ * naming the property override that sets the condition. Roles under a
+ * CDK Blocks Building Block or a compute, or created by the framework at stack
  * scope, still fail synth.
  *
  * Also registers {@link addKmsKeyPolicyCheck}, the same check for the key
@@ -303,7 +303,7 @@ export function scopeProviderWaiterTrust(provider: Construct): void {
 }
 
 /**
- * Service principals that may use an AWS Blocks KMS key without any of the
+ * Service principals that may use a CDK Blocks KMS key without any of the
  * {@link KEY_POLICY_SCOPES}, each with the only actions (lowercased) a statement
  * may grant it to be exempt. Add a principal only with a code comment citing the
  * AWS documentation that says the service sends none of those keys.
@@ -543,7 +543,7 @@ function appOwnedKeyPolicyWarning(key: cdk.CfnResource, grant: UnscopedKeyPolicy
 }
 
 /**
- * Fail synth when a KMS key AWS Blocks creates for `root` (the keys in the
+ * Fail synth when a KMS key CDK Blocks creates for `root` (the keys in the
  * scopes {@link forEachBlocksKmsKey} covers, the same scopes as the role check)
  * lets a service principal use it in an `Allow` key-policy statement scoped by
  * none of the {@link KEY_POLICY_SCOPES}. A key the app creates

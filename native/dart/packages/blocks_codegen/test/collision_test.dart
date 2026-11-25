@@ -1,7 +1,12 @@
+// Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+// SPDX-License-Identifier: Apache-2.0
+
 import 'package:blocks_codegen/src/model.dart';
 import 'package:blocks_codegen/src/builder.dart';
 import 'package:blocks_codegen/src/generator.dart';
 import 'package:test/test.dart';
+
+import 'support/source_matchers.dart';
 
 /// Irreducible collision: even full namespace+method+param qualification
 /// collapses to the same string.
@@ -284,11 +289,11 @@ void main() {
       expect(
         model.warnings.single,
         allOf(
-          contains('`ApiFooBarInput`'),
-          contains('api.foo (param "barInput")'),
-          contains('api.fooBar (param "input")'),
-          contains('ApiFooBarInput2'),
-          contains('--fail-on-collision'),
+          containsSource('`ApiFooBarInput`'),
+          containsSource('api.foo (param "barInput")'),
+          containsSource('api.fooBar (param "input")'),
+          containsSource('ApiFooBarInput2'),
+          containsSource('--fail-on-collision'),
         ),
       );
     });
@@ -301,8 +306,8 @@ void main() {
       expect(
         model.warnings.single,
         allOf(
-          contains('api.get (result: addressContact)'),
-          contains('api.get (result: address.contact)'),
+          containsSource('api.get (result: addressContact)'),
+          containsSource('api.get (result: address.contact)'),
         ),
       );
     });
@@ -400,8 +405,8 @@ void main() {
         CodegenModelBuilder().build(_irreducible()),
       );
       expect(out1, out2);
-      expect(out1, contains('class ApiFooBarInput {'));
-      expect(out1, contains('class ApiFooBarInput2 {'));
+      expect(out1, containsSource('class ApiFooBarInput {'));
+      expect(out1, containsSource('class ApiFooBarInput2 {'));
     });
   });
 
@@ -414,10 +419,10 @@ void main() {
             (e) => e.message,
             'message',
             allOf(
-              contains('`ApiFooBarInput`'),
-              contains('api.foo (param "barInput")'),
-              contains('api.fooBar (param "input")'),
-              contains('disambiguate'),
+              containsSource('`ApiFooBarInput`'),
+              containsSource('api.foo (param "barInput")'),
+              containsSource('api.fooBar (param "input")'),
+              containsSource('disambiguate'),
             ),
           ),
         ),
@@ -528,7 +533,10 @@ void main() {
         ).allMatches(out),
         hasLength(1),
       );
-      expect(out, contains('final ConfirmSignInInputChallenge challenge;'));
+      expect(
+        out,
+        containsSource('final ConfirmSignInInputChallenge challenge;'),
+      );
     });
   });
 
@@ -542,22 +550,31 @@ void main() {
         final out = const DartCodeGenerator().generate(model);
         names.add(_classes(model));
         // The union whose name sorts first keeps the short names.
-        expect(out, contains('class SignUpInput extends BasicSetStateInput {'));
         expect(
           out,
-          contains('class SignOutInput extends BasicSetStateInput {'),
+          containsSource('class SignUpInput extends BasicSetStateInput {'),
         );
         expect(
           out,
-          contains('class CognitoSignUpInput extends CognitoSetStateInput {'),
+          containsSource('class SignOutInput extends BasicSetStateInput {'),
         );
         expect(
           out,
-          contains('class CognitoSignOutInput extends CognitoSetStateInput {'),
+          containsSource(
+            'class CognitoSignUpInput extends CognitoSetStateInput {',
+          ),
         );
         expect(
           out,
-          contains("case 'signUp': return CognitoSignUpInput.fromJson(json);"),
+          containsSource(
+            'class CognitoSignOutInput extends CognitoSetStateInput {',
+          ),
+        );
+        expect(
+          out,
+          containsSource(
+            "case 'signUp': return CognitoSignUpInput.fromJson(json);",
+          ),
         );
         // One compact line per renamed union.
         expect(model.warnings, [
@@ -590,8 +607,8 @@ void main() {
         );
         expect(
           model.warnings,
-          contains(
-            contains(
+          containsSource(
+            containsSource(
               'union CognitoUpdateInput shares Dart arm class names with '
               'another type; generated as SignUpInput -> '
               'CognitoUpdateInputSignUp, SignOutInput -> '
@@ -646,7 +663,7 @@ void main() {
         final out = const DartCodeGenerator().generate(byArm);
         expect(
           out,
-          contains('class CognitoSignUpInput extends XSetStateInput {'),
+          containsSource('class CognitoSignUpInput extends XSetStateInput {'),
         );
       }
     });
@@ -743,8 +760,8 @@ void main() {
             'BbSignOutInput',
           ]),
         );
-        expect(classes, isNot(contains('ZzSignUpInput')));
-        expect(classes, isNot(contains('ZInputSignUp')));
+        expect(classes, isNot(containsSource('ZzSignUpInput')));
+        expect(classes, isNot(containsSource('ZInputSignUp')));
       }
       // When a smaller schema (`AInput`) keeps the short names, `ZInput`'s
       // arms are named after it, never after `zz`, its inline twin.
@@ -778,7 +795,7 @@ void main() {
         classes,
         containsAll(['SignUpInput', 'ZInputSignUp', 'BbSignUpInput']),
       );
-      expect(classes, isNot(contains('ZzSignUpInput')));
+      expect(classes, isNot(containsSource('ZzSignUpInput')));
     });
 
     test('of a named schema win the short name over a method origin', () {
@@ -812,8 +829,11 @@ void main() {
           ),
         ),
       );
-      expect(out, contains('class SignUpInput extends ZInput {'));
-      expect(out, contains('class AaSignUpInput extends AaSetStateInput {'));
+      expect(out, containsSource('class SignUpInput extends ZInput {'));
+      expect(
+        out,
+        containsSource('class AaSignUpInput extends AaSetStateInput {'),
+      );
     });
 
     test('throws with --fail-on-collision', () {
@@ -824,7 +844,7 @@ void main() {
           isA<NamingConflictException>().having(
             (e) => e.message,
             'message',
-            contains('SignUpInput -> CognitoSignUpInput'),
+            containsSource('SignUpInput -> CognitoSignUpInput'),
           ),
         ),
       );

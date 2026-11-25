@@ -3,9 +3,9 @@
 
 import { test, describe } from 'node:test';
 import assert from 'node:assert';
-import { isBlocksError } from '@aws-blocks/core';
-import { AppSettingErrors } from '@aws-blocks/bb-app-setting';
-import type { api as apiType } from 'aws-blocks';
+import { isBlocksError } from '@aws-cdk-blocks/core';
+import { AppSettingErrors } from '@aws-cdk-blocks/bb-app-setting';
+import type { api as apiType } from 'cdk-blocks';
 import { getTestSupport } from './test-support.js';
 
 export function appSettingTests(getApi: () => typeof apiType) {
@@ -77,6 +77,14 @@ export function appSettingTests(getApi: () => typeof apiType) {
       assert.strictEqual(value, 'my-real-api-key');
       // Restore original
       await testSupport.settingPutSecret(secret, original);
+    });
+
+    test('AppSetting - secret setting rejects an empty value and keeps the stored one', async () => {
+      const { testSupport, secret } = await getTestSupport();
+      const before = (await testSupport.settingGetSecret(secret)).value;
+      await assert.rejects(() => testSupport.settingPutSecret(secret, ''), /ValidationFailedException/);
+      const { value } = await testSupport.settingGetSecret(secret);
+      assert.strictEqual(value, before);
     });
   });
 }

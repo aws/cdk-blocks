@@ -1,3 +1,6 @@
+// Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+// SPDX-License-Identifier: Apache-2.0
+
 import 'dart:convert';
 
 import 'package:blocks_runtime/blocks_runtime.dart';
@@ -78,7 +81,11 @@ class _Launcher implements BrowserLauncher {
   final Map<String, String> Function(Uri authorizeUrl) callback;
 
   @override
-  Future<Uri> launch(Uri authorizeUrl, {required String callbackScheme}) async {
+  Future<Uri> launch(
+    Uri authorizeUrl, {
+    required String callbackScheme,
+    Future<void>? cancel,
+  }) async {
     this.authorizeUrl = authorizeUrl;
     this.callbackScheme = callbackScheme;
     return Uri(
@@ -98,9 +105,9 @@ OidcClient _client(
   List<String> providers = const ['google', 'login.gov'],
   TokenStore? tokenStore,
 }) => OidcClient(
-  exchangePath: '/aws-blocks/auth/exchange',
-  refreshPath: '/aws-blocks/auth/exchange/refresh',
-  signOutPath: '/aws-blocks/auth/signout',
+  exchangePath: '/cdk-blocks/auth/exchange',
+  refreshPath: '/cdk-blocks/auth/exchange/refresh',
+  signOutPath: '/cdk-blocks/auth/signout',
   providers: providers,
   providerConfigs: {
     for (final p in providers)
@@ -111,19 +118,19 @@ OidcClient _client(
         kind: 'oidc-builtin',
       ),
   },
-  baseUrl: 'http://localhost:3001/aws-blocks/api',
+  baseUrl: 'http://localhost:3001/cdk-blocks/api',
   tokenStore: tokenStore ?? InMemoryTokenStore(),
   httpClient: httpClient,
 );
 
 void main() {
   group('TypedOidcClient', () {
-    test('signInRelay forwards the provider name and every argument', () async {
+    test('signIn forwards the provider name and every argument', () async {
       final backend = _backend();
       final typed = TypedOidcClient<TestProvider>(_client(backend.client));
       final launcher = _relayLauncher();
 
-      final user = await typed.signInRelay(
+      final user = await typed.signIn(
         TestProvider.loginGov,
         launcher: launcher,
         relayTo: _relayTo,
@@ -133,7 +140,7 @@ void main() {
       // provider: a name that isn't an identifier reaches the wire unchanged.
       expect(
         backend.requests.first.url.path,
-        '/aws-blocks/auth/authorize-params/login.gov',
+        '/cdk-blocks/auth/authorize-params/login.gov',
       );
       expect(_bodyOf(backend.requests.last)['provider'], 'login.gov');
       // relayTo: sent to the backend and used as the callback scheme.
@@ -143,38 +150,41 @@ void main() {
       expect(launcher.authorizeUrl, isNotNull);
     });
 
-    test('signIn forwards the provider name and every argument', () async {
-      final backend = _backend();
-      final typed = TypedOidcClient<TestProvider>(_client(backend.client));
-      // The direct flow checks the state it generated, so echo it back.
-      final launcher = _Launcher(
-        (url) => {'code': 'c', 'state': url.queryParameters['state']!},
-      );
+    test(
+      'signInDirect forwards the provider name and every argument',
+      () async {
+        final backend = _backend();
+        final typed = TypedOidcClient<TestProvider>(_client(backend.client));
+        // The direct flow checks the state it generated, so echo it back.
+        final launcher = _Launcher(
+          (url) => {'code': 'c', 'state': url.queryParameters['state']!},
+        );
 
-      await typed.signIn(
-        TestProvider.loginGov,
-        launcher: launcher,
-        redirectUri: 'myapp://callback',
-      );
+        await typed.signInDirect(
+          TestProvider.loginGov,
+          launcher: launcher,
+          redirectUri: 'myapp://callback',
+        );
 
-      // provider: picks that provider's config, and reaches the exchange.
-      expect(
-        launcher.authorizeUrl!.queryParameters['client_id'],
-        'cid-login.gov',
-      );
-      expect(_bodyOf(backend.requests.single)['provider'], 'login.gov');
-      // redirectUri: the IdP redirect_uri, the callback scheme and the
-      // exchange's callbackUrl.
-      expect(
-        launcher.authorizeUrl!.queryParameters['redirect_uri'],
-        'myapp://callback',
-      );
-      expect(launcher.callbackScheme, 'myapp');
-      expect(
-        _bodyOf(backend.requests.single)['callbackUrl'],
-        'myapp://callback',
-      );
-    });
+        // provider: picks that provider's config, and reaches the exchange.
+        expect(
+          launcher.authorizeUrl!.queryParameters['client_id'],
+          'cid-login.gov',
+        );
+        expect(_bodyOf(backend.requests.single)['provider'], 'login.gov');
+        // redirectUri: the IdP redirect_uri, the callback scheme and the
+        // exchange's callbackUrl.
+        expect(
+          launcher.authorizeUrl!.queryParameters['redirect_uri'],
+          'myapp://callback',
+        );
+        expect(launcher.callbackScheme, 'myapp');
+        expect(
+          _bodyOf(backend.requests.single)['callbackUrl'],
+          'myapp://callback',
+        );
+      },
+    );
 
     test('exchange forwards the provider name and every argument', () async {
       final backend = _backend();
@@ -183,7 +193,7 @@ void main() {
       await typed.exchange(
         code: 'the-code',
         verifier: 'the-verifier',
-        callbackUrl: 'http://localhost:3001/aws-blocks/auth/callback',
+        callbackUrl: 'http://localhost:3001/cdk-blocks/auth/callback',
         provider: TestProvider.google,
         state: 'the-state',
         nonce: 'the-nonce',
@@ -193,11 +203,12 @@ void main() {
       expect(_bodyOf(backend.requests.single), {
         'code': 'the-code',
         'verifier': 'the-verifier',
-        'callbackUrl': 'http://localhost:3001/aws-blocks/auth/callback',
+        'callbackUrl': 'http://localhost:3001/cdk-blocks/auth/callback',
         'provider': 'google',
         'state': 'the-state',
         'nonce': 'the-nonce',
         'iss': 'the-iss',
+        'tokens': false,
       });
     });
 
@@ -232,7 +243,7 @@ void main() {
         _client(_backend().client, providers: const ['google']),
       );
       expect(
-        () => typed.signInRelay(
+        () => typed.signIn(
           TestProvider.github,
           launcher: _relayLauncher(),
           relayTo: _relayTo,
@@ -253,7 +264,7 @@ void main() {
         _client(backend.client),
       );
 
-      await asClient.signInRelay(
+      await asClient.signIn(
         'google',
         launcher: _relayLauncher(),
         relayTo: _relayTo,
@@ -261,7 +272,7 @@ void main() {
       expect(_bodyOf(backend.requests.last)['provider'], 'google');
 
       expect(
-        () => asClient.signInRelay(
+        () => asClient.signIn(
           'nope',
           launcher: _relayLauncher(),
           relayTo: _relayTo,
@@ -275,8 +286,8 @@ void main() {
         '__blocks': 'oidc/client',
         'providers': ['google'],
         'providerConfigs': <String, dynamic>{},
-        'exchangePath': '/aws-blocks/auth/exchange',
-        'signOutPath': '/aws-blocks/auth/signout',
+        'exchangePath': '/cdk-blocks/auth/exchange',
+        'signOutPath': '/cdk-blocks/auth/signout',
       };
       final typed = TypedOidcClient<TestProvider>(
         OidcClient.fromJson(
@@ -286,8 +297,8 @@ void main() {
         ),
       );
       expect(typed.providers, ['google']);
-      expect(typed.exchangePath, '/aws-blocks/auth/exchange');
-      expect(typed.signOutPath, '/aws-blocks/auth/signout');
+      expect(typed.exchangePath, '/cdk-blocks/auth/exchange');
+      expect(typed.signOutPath, '/cdk-blocks/auth/signout');
     });
   });
 
@@ -344,7 +355,7 @@ void main() {
               _client(backend.client, providers: const ['google']),
             );
         await expectLater(
-          () => widened.signInRelay(
+          () => widened.signIn(
             const _Other('okta'),
             launcher: _relayLauncher(),
             relayTo: _relayTo,
@@ -356,12 +367,12 @@ void main() {
     );
   });
 
-  group('OidcClient.signIn', () {
+  group('OidcClient.signInDirect', () {
     test('throws OidcUnknownProviderException for a provider it does not '
         'list, rather than failing a null check', () {
       final client = _client(_backend().client, providers: const ['google']);
       expect(
-        () => client.signIn(
+        () => client.signInDirect(
           'github',
           launcher: _relayLauncher(),
           redirectUri: 'myapp://callback',
@@ -379,9 +390,9 @@ void main() {
     test('throws OidcUnknownProviderException for a listed provider with no '
         'config', () {
       final client = OidcClient(
-        exchangePath: '/aws-blocks/auth/exchange',
-        refreshPath: '/aws-blocks/auth/exchange/refresh',
-        signOutPath: '/aws-blocks/auth/signout',
+        exchangePath: '/cdk-blocks/auth/exchange',
+        refreshPath: '/cdk-blocks/auth/exchange/refresh',
+        signOutPath: '/cdk-blocks/auth/signout',
         providers: const ['google'],
         providerConfigs: const {},
         baseUrl: 'http://localhost:3001',
@@ -389,7 +400,7 @@ void main() {
         httpClient: _backend().client,
       );
       expect(
-        () => client.signIn(
+        () => client.signInDirect(
           'google',
           launcher: _relayLauncher(),
           redirectUri: 'myapp://callback',

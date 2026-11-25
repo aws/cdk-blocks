@@ -22,7 +22,7 @@ registry version via npm workspace resolution.
 ## Making changes
 
 Edit files in \`vendor/${shortName}/src/\` directly. Changes take effect
-immediately when using \`tsx\` (the default Blocks dev server and CDK synth).
+immediately when using \`tsx\` (the default AWS CDK Blocks dev server and CDK synth).
 
 ## Updating from upstream
 
@@ -37,8 +37,7 @@ npx -y -p ${packageName}@latest node -e "console.log(require('path').dirname(req
 To re-vendorize (overwrites local changes):
 
 \`\`\`bash
-rm -rf vendor/${shortName}
-npm run vendorize ${packageName}
+npm run vendorize ${packageName} -- --force
 \`\`\`
 
 ## Reverting vendorization

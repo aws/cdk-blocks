@@ -1,9 +1,9 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { api } from 'aws-blocks';
-import { injectTheme } from '@aws-blocks/blocks/theme';
-import { StatusMessage, type StatusMessageHandle } from '@aws-blocks/blocks/ui';
+import { api } from 'cdk-blocks';
+import { injectTheme } from 'aws-cdk-blocks/theme';
+import { StatusMessage, type StatusMessageHandle } from 'aws-cdk-blocks/ui';
 
 injectTheme();
 
@@ -33,7 +33,7 @@ export function ClientGreeting() {
     if (!name.trim()) return;
     setLoading(true);
     try {
-      // Blocks client auto-discovers the API URL from config.json
+      // CDK Blocks client auto-discovers the API URL from config.json
       const result = await api.greet(name);
       setGreeting(result);
       status.current?.set('idle');

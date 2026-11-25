@@ -1,3 +1,6 @@
+// Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+// SPDX-License-Identifier: Apache-2.0
+
 import assert from 'node:assert';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 import { App, Stack } from 'aws-cdk-lib';
@@ -236,7 +239,7 @@ void describe('Standalone CDK usage (standalone CDK)', () => {
 			assert.match(JSON.stringify(deployments[mutable!].Properties), /max-age=0.*must-revalidate/);
     });
 
-    void it('splits HTML into separate deployment with no-cache when immutablePaths absent', () => {
+    void it('splits HTML into separate deployment that always revalidates when immutablePaths absent', () => {
       const stack = createStack();
       new HostingConstruct(stack, 'Hosting', {
         manifest: makeSpaManifest(),
@@ -247,8 +250,9 @@ void describe('Standalone CDK usage (standalone CDK)', () => {
       const ids = Object.keys(deployments);
       const htmlDeploy = ids.find((id) => id.includes('AssetDeploymentHtml'));
       assert.ok(htmlDeploy, 'AssetDeploymentHtml present');
-      // HTML files get no-cache so browsers always revalidate on redeploy.
-			assert.match(JSON.stringify(deployments[htmlDeploy!].Properties), /no-cache.*must-revalidate/);
+      // HTML files revalidate on every request (browser and CloudFront), and
+      // carry no `no-store` so the edge can answer conditional requests with 304.
+			assert.match(JSON.stringify(deployments[htmlDeploy!].Properties), /"max-age=0, must-revalidate"/);
       // Non-HTML gets mutable cache (s-maxage for CDN, max-age=0 for browser).
       const otherDeploy = ids.find((id) => id.includes('AssetDeploymentOther'));
       assert.ok(otherDeploy, 'AssetDeploymentOther present');

@@ -1,3 +1,6 @@
+// Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+// SPDX-License-Identifier: Apache-2.0
+
 import 'dart:convert';
 
 import 'package:blocks_runtime/blocks_runtime.dart';
@@ -28,8 +31,8 @@ void main() {
         '__blocks': 'oidc/client',
         'providers': ['google'],
         'providerConfigs': <String, dynamic>{},
-        'exchangePath': '/aws-blocks/auth/exchange',
-        'signOutPath': '/aws-blocks/auth/signout',
+        'exchangePath': '/cdk-blocks/auth/exchange',
+        'signOutPath': '/cdk-blocks/auth/signout',
       },
       baseUrl: 'https://example.com',
       tokenStore: InMemoryTokenStore(),

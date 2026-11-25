@@ -135,7 +135,7 @@ jobs:
 
           # gen-block-docs.mjs regenerates packages/blocks/docs/ from sibling READMEs
           # (docs/ is gitignored, built at publish time). We compare the packed
-          # @aws-blocks/blocks tarball at THIS PR's head against the PR base branch —
+          # aws-cdk-blocks tarball at THIS PR's head against the PR base branch —
           # like-for-like (same algo, same build state), so only a change introduced by
           # THIS PR trips the check. A PR that doesn't alter what ships needs no bump.
           # The base pack falls back to the pre-rename sync-block-docs.mjs so this job works
@@ -171,20 +171,20 @@ jobs:
 
           # Relies on npm's reproducible packing (fixed mtimes); head & base pack on the same runner, so identical content ⇒ identical tarball hash.
           if [ "$HEAD_INTEGRITY" = "$BASE_INTEGRITY" ]; then
-            echo "✅ @aws-blocks/blocks packaged content is unchanged vs the base branch — no version bump required."
+            echo "✅ aws-cdk-blocks packaged content is unchanged vs the base branch — no version bump required."
             exit 0
           fi
 
-          # Content changed vs base — require a changeset that bumps @aws-blocks/blocks.
-          CHANGESET_BUMPS=$(find .changeset -name '*.md' ! -name 'README.md' -exec grep -l '"@aws-blocks/blocks"' {} \; || true)
+          # Content changed vs base — require a changeset that bumps aws-cdk-blocks.
+          CHANGESET_BUMPS=$(find .changeset -name '*.md' ! -name 'README.md' -exec grep -l '"aws-cdk-blocks"' {} \; || true)
 
           if [ -n "$CHANGESET_BUMPS" ]; then
-            echo "✅ Packaged content changed and a changeset already bumps @aws-blocks/blocks:"
+            echo "✅ Packaged content changed and a changeset already bumps aws-cdk-blocks:"
             echo "$CHANGESET_BUMPS"
             exit 0
           fi
 
-          echo "❌ This PR changes @aws-blocks/blocks packaged content (e.g. synced docs from sibling READMEs) vs the base branch, but no changeset bumps it. Add \"@aws-blocks/blocks\": patch to a changeset."
+          echo "❌ This PR changes aws-cdk-blocks packaged content (e.g. synced docs from sibling READMEs) vs the base branch, but no changeset bumps it. Add \"aws-cdk-blocks\": patch to a changeset."
           exit 1
 
   # Mirrors the Release job's install (publish-packages.yml): no dependency
@@ -232,7 +232,7 @@ jobs:
           node-version-file: '.nvmrc'
           cache: npm
 
-      # Pin a fixed Blocks CLI telemetry installation ID for CI e2e runs so this
+      # Pin a fixed CDK Blocks CLI telemetry installation ID for CI e2e runs so this
       # traffic is consistent and identifiable (and can be excluded from product
       # usage metrics).
       - uses: ./.github/actions/seed-telemetry-id
@@ -245,6 +245,15 @@ jobs:
 
       - name: Lint deps (blocking)
         run: npm run lint:deps
+
+      # Every tracked source file under packages/, native/ and scripts/ carries
+      # the Apache-2.0 license header (exclusions listed in the script). The
+      # checker's header detection, insertion and exclusions are tested first.
+      - name: Test the license-header check
+        run: node --test scripts/check-license-headers.test.mjs
+
+      - name: Check license headers
+        run: npm run check:headers
 
       - name: Build
         run: npm run build
@@ -268,6 +277,29 @@ jobs:
       # call assertNotMockInDeployedEnv at the top of its mock entry.
       - name: Check runtime mock-guard coverage
         run: npm run check:runtime-guard
+
+      # The hidden `.cdk-blocks` folder is reached by separate join() calls across
+      # five packages, shell steps that seed the installation id, and the
+      # templates' tsconfig includes. One left on the old name still builds, lints
+      # and passes its unit tests, so the guard is unit-tested first and then run.
+      - name: Test the hidden-folder guard
+        run: node --test scripts/dot-folder-guard.test.mjs
+
+      - name: Check no reference to the old hidden folder remains
+        run: npm run check:dot-folder
+
+      # `.gitignore` negates test-apps/**/.cdk-blocks/** so each test app's
+      # committed config.json stays tracked. Asserted in a throwaway fixture, not
+      # also un-ignores the Building Block data now nested under it, which the
+      # flat `.bb-data/` rule used to keep out.
+      - name: Check the consolidated data directory stays git-ignored
+        run: npm run check:data-ignored
+
+      # The four mistakes this rename made more than once: a multi-segment path
+      # compared against a single path segment, a LEGACY constant holding the new
+      # name, and a reflow merging one documented command into the next.
+      - name: Check the rename traps
+        run: npm run check:rename-traps
 
       # The guard decides whether unattributed traffic can ship, so it is unit-tested
       # first. A regression shows up here instead of as a wrong verdict below.
@@ -308,7 +340,7 @@ jobs:
       # No value is interpolated unescaped into a RegExp, a shell command, a
       # workflow run: script, generated Kotlin/Swift/Dart source or HTML.
       - name: Check injection sink guards
-        run: node --test scripts/sink-guards/regex.test.mjs scripts/sink-guards/shell.test.mjs scripts/sink-guards/workflows.test.mjs scripts/sink-guards/codegen.test.mjs scripts/sink-guards/html.test.mjs
+        run: node --test scripts/sink-guards/allowlist.test.mjs scripts/sink-guards/regex.test.mjs scripts/sink-guards/shell.test.mjs scripts/sink-guards/workflows.test.mjs scripts/sink-guards/codegen.test.mjs scripts/sink-guards/html.test.mjs
 
       # Deletes the stacks a cancelled or crashed E2E job leaves behind.
       - name: Test the E2E teardown
@@ -348,10 +380,11 @@ jobs:
       - name: Test the stack cleanup's listing failures
         run: node --test scripts/ci/rest-api-quota.test.mjs scripts/ci/cleanup-listings.test.mjs scripts/ci/sweep-cognito-pools.test.mjs
 
-      # The Windows E2E driver's teardown failure reporting and the stack tag
-      # cleanup-stacks.yml needs to reclaim a stack it leaks.
+      # The Windows E2E driver's teardown failure reporting, the stack tag
+      # cleanup-stacks.yml needs to reclaim a stack it leaks, and the template
+      # driver's check that an untouched scaffold synthesizes without warnings.
       - name: Test the CI template driver helpers
-        run: node --test scripts/ci/_proc.test.mjs scripts/ci/_scaffold-tag.test.mjs
+        run: node --test scripts/ci/_proc.test.mjs scripts/ci/_scaffold-tag.test.mjs scripts/ci/template-synth-warnings.test.mjs
 
       # .puppeteerrc.cjs skips Puppeteer's browser download on GitHub Actions,
       # but only for installs under the repo's own node_modules.
@@ -416,7 +449,7 @@ jobs:
           node-version-file: '.nvmrc'
           cache: npm
 
-      # Pin a fixed Blocks CLI telemetry installation ID for CI e2e runs so this
+      # Pin a fixed CDK Blocks CLI telemetry installation ID for CI e2e runs so this
       # traffic is consistent and identifiable (and can be excluded from product
       # usage metrics).
       - uses: ./.github/actions/seed-telemetry-id
@@ -457,19 +490,19 @@ jobs:
           SHARDS: ${{ strategy.job-total }}
         run: |
           set -euo pipefail
-          # The probe is in @aws-blocks/core, which runs in one shard only. A
+          # The probe is in @aws-cdk-blocks/core, which runs in one shard only. A
           # tree where no shard runs it fails here instead of passing.
           owner=0
           for i in $(seq 1 "$SHARDS"); do
             workspaces=$(node scripts/ci/unit-test-shard.mjs "$i" "$SHARDS")
-            if grep -qx '@aws-blocks/core' <<<"$workspaces"; then owner=$i; fi
+            if grep -qx '@aws-cdk-blocks/core' <<<"$workspaces"; then owner=$i; fi
           done
           if [ "$owner" = 0 ]; then
-            echo "::error::no unit test shard runs @aws-blocks/core, so the real-CDK stream-routing probe would not run."
+            echo "::error::no unit test shard runs @aws-cdk-blocks/core, so the real-CDK stream-routing probe would not run."
             exit 1
           fi
           if [ "$owner" != "$SHARD" ]; then
-            echo "@aws-blocks/core runs in shard $owner; that shard checks the probe."
+            echo "@aws-cdk-blocks/core runs in shard $owner; that shard checks the probe."
             exit 0
           fi
           marker='${{ runner.temp }}/cdk-routing-probe.marker'
@@ -494,7 +527,7 @@ jobs:
           node-version-file: '.nvmrc'
           cache: npm
 
-      # Pin a fixed Blocks CLI telemetry installation ID for CI e2e runs so this
+      # Pin a fixed CDK Blocks CLI telemetry installation ID for CI e2e runs so this
       # traffic is consistent and identifiable (and can be excluded from product
       # usage metrics).
       - uses: ./.github/actions/seed-telemetry-id
@@ -565,7 +598,7 @@ jobs:
           node-version-file: '.nvmrc'
           cache: npm
 
-      # Pin a fixed Blocks CLI telemetry installation ID for CI e2e runs so this
+      # Pin a fixed CDK Blocks CLI telemetry installation ID for CI e2e runs so this
       # traffic is consistent and identifiable (and can be excluded from product
       # usage metrics).
       - uses: ./.github/actions/seed-telemetry-id
@@ -578,7 +611,7 @@ jobs:
           name: dist-registry
           path: dist-registry/
 
-      - name: Template E2E Tests
+      - name: Template E2E and docs task upgrade
         run: node scripts/ci/templates-e2e.mjs --skip-publish
 
   # Same local template suite as e2e-templates, on Windows — the OS where
@@ -609,7 +642,7 @@ jobs:
           node-version-file: '.nvmrc'
           cache: npm
 
-      # Pin a fixed Blocks CLI telemetry installation ID for CI e2e runs so this
+      # Pin a fixed CDK Blocks CLI telemetry installation ID for CI e2e runs so this
       # traffic is consistent and identifiable (and can be excluded from product
       # usage metrics).
       - uses: ./.github/actions/seed-telemetry-id
@@ -622,7 +655,7 @@ jobs:
           name: dist-registry
           path: dist-registry/
 
-      - name: Template E2E Tests (Windows)
+      - name: Template E2E and docs task upgrade (Windows)
         run: node scripts/ci/templates-e2e.mjs --skip-publish
 
   e2e-sandbox:
@@ -685,7 +718,7 @@ jobs:
           node-version-file: '.nvmrc'
           cache: npm
 
-      # Pin a fixed Blocks CLI telemetry installation ID for CI e2e runs so this
+      # Pin a fixed CDK Blocks CLI telemetry installation ID for CI e2e runs so this
       # traffic is consistent and identifiable (and can be excluded from product
       # usage metrics).
       - uses: ./.github/actions/seed-telemetry-id
@@ -722,7 +755,7 @@ jobs:
       # cancelled job 5 minutes after the cancel, so the two steps get 3 minutes
       # together.
       - name: Configure AWS credentials for teardown
-        if: always() && hashFiles('test-apps/comprehensive/.blocks-sandbox/sandbox-id.txt') != ''
+        if: always() && hashFiles('test-apps/comprehensive/.cdk-blocks-sandbox/sandbox-id.txt') != ''
         timeout-minutes: 1
         uses: ./.github/actions/e2e-aws-credentials
         with:
@@ -731,7 +764,7 @@ jobs:
 
       - name: Tear down leftover stacks
         id: teardown
-        if: always() && hashFiles('test-apps/comprehensive/.blocks-sandbox/sandbox-id.txt') != ''
+        if: always() && hashFiles('test-apps/comprehensive/.cdk-blocks-sandbox/sandbox-id.txt') != ''
         timeout-minutes: 2
         env:
           JOB_STATUS: ${{ job.status }}
@@ -786,7 +819,7 @@ jobs:
           node-version-file: '.nvmrc'
           cache: npm
 
-      # Pin a fixed Blocks CLI telemetry installation ID for CI e2e runs so this
+      # Pin a fixed CDK Blocks CLI telemetry installation ID for CI e2e runs so this
       # traffic is consistent and identifiable (and can be excluded from product
       # usage metrics).
       - uses: ./.github/actions/seed-telemetry-id
@@ -891,7 +924,7 @@ jobs:
           node-version-file: '.nvmrc'
           cache: npm
 
-      # Pin a fixed Blocks CLI telemetry installation ID for CI e2e runs so this
+      # Pin a fixed CDK Blocks CLI telemetry installation ID for CI e2e runs so this
       # traffic is consistent and identifiable (and can be excluded from product
       # usage metrics).
       - uses: ./.github/actions/seed-telemetry-id
@@ -980,7 +1013,7 @@ jobs:
       # minutes together. Fresh credentials, since the first session can expire
       # before a long or timed-out job gets here.
       - name: Configure AWS credentials for teardown
-        if: always() && hashFiles('test-apps/compute-smoke/.blocks-sandbox/sandbox-id.txt') != ''
+        if: always() && hashFiles('test-apps/compute-smoke/.cdk-blocks-sandbox/sandbox-id.txt') != ''
         timeout-minutes: 1
         uses: ./.github/actions/e2e-aws-credentials
         with:
@@ -989,7 +1022,7 @@ jobs:
 
       - name: Tear down leftover stacks
         id: teardown
-        if: always() && hashFiles('test-apps/compute-smoke/.blocks-sandbox/sandbox-id.txt') != ''
+        if: always() && hashFiles('test-apps/compute-smoke/.cdk-blocks-sandbox/sandbox-id.txt') != ''
         timeout-minutes: 2
         env:
           JOB_STATUS: ${{ job.status }}
@@ -1053,7 +1086,7 @@ jobs:
           node-version-file: '.nvmrc'
           cache: npm
 
-      # Pin a fixed Blocks CLI telemetry installation ID for CI e2e runs so this
+      # Pin a fixed CDK Blocks CLI telemetry installation ID for CI e2e runs so this
       # traffic is consistent and identifiable (and can be excluded from product
       # usage metrics).
       - uses: ./.github/actions/seed-telemetry-id
@@ -1089,7 +1122,7 @@ jobs:
       # GitHub force-stops a cancelled job 5 minutes after the cancel, so the two
       # steps get 3 minutes together.
       - name: Configure AWS credentials for teardown
-        if: always() && hashFiles('test-apps/comprehensive/.blocks-sandbox/sandbox-id.txt') != ''
+        if: always() && hashFiles('test-apps/comprehensive/.cdk-blocks-sandbox/sandbox-id.txt') != ''
         timeout-minutes: 1
         uses: ./.github/actions/e2e-aws-credentials
         with:
@@ -1098,7 +1131,7 @@ jobs:
 
       - name: Tear down leftover stacks
         id: teardown
-        if: always() && hashFiles('test-apps/comprehensive/.blocks-sandbox/sandbox-id.txt') != ''
+        if: always() && hashFiles('test-apps/comprehensive/.cdk-blocks-sandbox/sandbox-id.txt') != ''
         timeout-minutes: 2
         env:
           JOB_STATUS: ${{ job.status }}
@@ -1141,7 +1174,7 @@ jobs:
           node-version-file: '.nvmrc'
           cache: npm
 
-      # Pin a fixed Blocks CLI telemetry installation ID for CI e2e runs so this
+      # Pin a fixed CDK Blocks CLI telemetry installation ID for CI e2e runs so this
       # traffic is consistent and identifiable (and can be excluded from product
       # usage metrics).
       - uses: ./.github/actions/seed-telemetry-id
@@ -1313,7 +1346,7 @@ jobs:
           node-version-file: '.nvmrc'
           cache: npm
 
-      # Pin a fixed Blocks CLI telemetry installation ID for CI e2e runs so this
+      # Pin a fixed CDK Blocks CLI telemetry installation ID for CI e2e runs so this
       # traffic is consistent and identifiable (and can be excluded from product
       # usage metrics).
       - uses: ./.github/actions/seed-telemetry-id
@@ -1376,7 +1409,7 @@ jobs:
         if: ${{ !cancelled() && steps.e2e.outcome != 'skipped' }}
         run: |
           cd ${{ matrix.app-dir }}
-          npx tsx test/sandbox-destroy.ts aws-blocks/index.cdk.ts
+          npx tsx test/sandbox-destroy.ts cdk-blocks/index.cdk.ts
 
       # e2e-cleanup.mjs first stops what earlier steps left running (after a
       # cancel, their cdk holds the cdk.out lock), and reports a failed destroy
@@ -1386,7 +1419,7 @@ jobs:
         if: always() && steps.aws-creds.outcome == 'success' && steps.destroy.outcome != 'success'
         run: |
           cd ${{ matrix.app-dir }}
-          node "$GITHUB_WORKSPACE/scripts/ci/e2e-cleanup.mjs" -- npx tsx test/sandbox-destroy.ts aws-blocks/index.cdk.ts
+          node "$GITHUB_WORKSPACE/scripts/ci/e2e-cleanup.mjs" -- npx tsx test/sandbox-destroy.ts cdk-blocks/index.cdk.ts
 
   e2e-telemetry:
     name: Telemetry E2E
@@ -1431,8 +1464,8 @@ jobs:
       - name: Seed fixed e2e telemetry installation ID
         shell: bash
         run: |
-          mkdir -p "$HOME/.blocks/telemetry"
-          printf '%s' '00000000-0000-0000-0000-000000000e2e' > "$HOME/.blocks/telemetry/installation-id"
+          mkdir -p "$HOME/.cdk-blocks/telemetry"
+          printf '%s' '00000000-0000-0000-0000-000000000e2e' > "$HOME/.cdk-blocks/telemetry/installation-id"
 
       - name: Telemetry E2E Tests
         run: npm run test:telemetry
@@ -1445,8 +1478,8 @@ jobs:
         if: always() && steps.aws-creds.outcome == 'success'
         run: |
           cd test-apps/telemetry
-          node "$GITHUB_WORKSPACE/scripts/ci/e2e-cleanup.mjs" -- npx tsx aws-blocks/scripts/sandbox-destroy.ts
-          node "$GITHUB_WORKSPACE/scripts/ci/e2e-cleanup.mjs" -- npx tsx aws-blocks/scripts/destroy.ts
+          node "$GITHUB_WORKSPACE/scripts/ci/e2e-cleanup.mjs" -- npx tsx cdk-blocks/scripts/sandbox-destroy.ts
+          node "$GITHUB_WORKSPACE/scripts/ci/e2e-cleanup.mjs" -- npx tsx cdk-blocks/scripts/destroy.ts
 
   # Waits for the stack deletes that E2E Production starts in its last step
   # but no longer waits for, and for any stack the E2E Sandbox or E2E Compute

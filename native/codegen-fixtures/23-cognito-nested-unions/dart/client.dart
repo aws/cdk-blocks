@@ -1,24 +1,69 @@
 // GENERATED CODE — DO NOT MODIFY BY HAND
 // Generator: blocks-codegen
 // Source: test v1.0.0
-// Requires blocks_runtime 0.2.0 or later.
+// Requires blocks_runtime 1.0.0 or later.
 // ignore_for_file: constant_identifier_names
+// dart format width=80
 
 import 'package:blocks_runtime/blocks_runtime.dart';
-export 'package:blocks_runtime/blocks_runtime.dart' show BlocksClient, BlocksRpcException, SessionStore, InMemorySessionStore;
+export 'package:blocks_runtime/blocks_runtime.dart'
+    show
+        ApiException,
+        BlocksClient,
+        BlocksException,
+        ClientClosedException,
+        InMemorySessionStore,
+        SessionStore,
+        TransportException,
+        isBlocksError;
 
 // --- Models ---
 
-enum CodeDeliveryDetailsDeliveryMedium {
-  SMS,
-  EMAIL,
-  PHONE_NUMBER
-;
+sealed class CodeDeliveryDetailsDeliveryMedium {
+  static const SMS = CodeDeliveryDetailsDeliveryMediumKnown.SMS;
+  static const EMAIL = CodeDeliveryDetailsDeliveryMediumKnown.EMAIL;
+  static const PHONE_NUMBER =
+      CodeDeliveryDetailsDeliveryMediumKnown.PHONE_NUMBER;
+  static const values = CodeDeliveryDetailsDeliveryMediumKnown.values;
+  static final Map<String, CodeDeliveryDetailsDeliveryMediumKnown> _byJson =
+      CodeDeliveryDetailsDeliveryMediumKnown.values.asNameMap();
 
-  String toJson() => name;
-  static CodeDeliveryDetailsDeliveryMedium fromJson(String json) => values.byName(json);
+  String toJson();
+  static CodeDeliveryDetailsDeliveryMedium fromJson(String json) =>
+      _byJson[json] ?? CodeDeliveryDetailsDeliveryMediumUnknown(json);
 }
 
+enum CodeDeliveryDetailsDeliveryMediumKnown
+    implements CodeDeliveryDetailsDeliveryMedium {
+  SMS,
+  EMAIL,
+  PHONE_NUMBER;
+
+  @override
+  String toJson() => name;
+}
+
+final class CodeDeliveryDetailsDeliveryMediumUnknown
+    implements CodeDeliveryDetailsDeliveryMedium {
+  final String value;
+
+  const CodeDeliveryDetailsDeliveryMediumUnknown(this.value);
+
+  @override
+  String toJson() => value;
+
+  @override
+  bool operator ==(Object other) =>
+      other is CodeDeliveryDetailsDeliveryMediumUnknown && value == other.value;
+
+  @override
+  int get hashCode => value.hashCode;
+
+  @override
+  String toString() =>
+      'CodeDeliveryDetailsDeliveryMediumUnknown'
+      '($value)';
+}
 
 class CodeDeliveryDetails {
   final String destination;
@@ -34,7 +79,9 @@ class CodeDeliveryDetails {
   factory CodeDeliveryDetails.fromJson(Map<String, dynamic> json) {
     return CodeDeliveryDetails(
       destination: json['destination'] as String,
-      deliveryMedium: CodeDeliveryDetailsDeliveryMedium.fromJson(json['deliveryMedium'] as String),
+      deliveryMedium: CodeDeliveryDetailsDeliveryMedium.fromJson(
+        json['deliveryMedium'] as String,
+      ),
       attributeName: json['attributeName'] as String,
     );
   }
@@ -59,28 +106,91 @@ class CodeDeliveryDetails {
   int get hashCode => Object.hash(destination, deliveryMedium, attributeName);
 
   @override
-  String toString() => 'CodeDeliveryDetails(destination: $destination, deliveryMedium: $deliveryMedium, attributeName: $attributeName)';
+  String toString() =>
+      'CodeDeliveryDetails(destination: $destination, deliveryMedium: $deliveryMedium, attributeName: $attributeName)';
 }
 
+sealed class AuthenticatedUserGroups {
+  static const users = AuthenticatedUserGroupsKnown.users;
+  static const admins = AuthenticatedUserGroupsKnown.admins;
+  static const values = AuthenticatedUserGroupsKnown.values;
+  static final Map<String, AuthenticatedUserGroupsKnown> _byJson =
+      AuthenticatedUserGroupsKnown.values.asNameMap();
 
-enum AuthenticatedUserGroups {
-  admins,
-  users
-;
+  String toJson();
+  static AuthenticatedUserGroups fromJson(String json) =>
+      _byJson[json] ?? AuthenticatedUserGroupsUnknown(json);
+}
 
+enum AuthenticatedUserGroupsKnown implements AuthenticatedUserGroups {
+  users,
+  admins;
+
+  @override
   String toJson() => name;
-  static AuthenticatedUserGroups fromJson(String json) => values.byName(json);
 }
 
+final class AuthenticatedUserGroupsUnknown implements AuthenticatedUserGroups {
+  final String value;
 
-enum AuthenticatedUserSignInProvider {
-  password
-;
+  const AuthenticatedUserGroupsUnknown(this.value);
 
+  @override
+  String toJson() => value;
+
+  @override
+  bool operator ==(Object other) =>
+      other is AuthenticatedUserGroupsUnknown && value == other.value;
+
+  @override
+  int get hashCode => value.hashCode;
+
+  @override
+  String toString() =>
+      'AuthenticatedUserGroupsUnknown'
+      '($value)';
+}
+
+sealed class AuthenticatedUserSignInProvider {
+  static const password = AuthenticatedUserSignInProviderKnown.password;
+  static const values = AuthenticatedUserSignInProviderKnown.values;
+  static final Map<String, AuthenticatedUserSignInProviderKnown> _byJson =
+      AuthenticatedUserSignInProviderKnown.values.asNameMap();
+
+  String toJson();
+  static AuthenticatedUserSignInProvider fromJson(String json) =>
+      _byJson[json] ?? AuthenticatedUserSignInProviderUnknown(json);
+}
+
+enum AuthenticatedUserSignInProviderKnown
+    implements AuthenticatedUserSignInProvider {
+  password;
+
+  @override
   String toJson() => name;
-  static AuthenticatedUserSignInProvider fromJson(String json) => values.byName(json);
 }
 
+final class AuthenticatedUserSignInProviderUnknown
+    implements AuthenticatedUserSignInProvider {
+  final String value;
+
+  const AuthenticatedUserSignInProviderUnknown(this.value);
+
+  @override
+  String toJson() => value;
+
+  @override
+  bool operator ==(Object other) =>
+      other is AuthenticatedUserSignInProviderUnknown && value == other.value;
+
+  @override
+  int get hashCode => value.hashCode;
+
+  @override
+  String toString() =>
+      'AuthenticatedUserSignInProviderUnknown'
+      '($value)';
+}
 
 class AuthenticatedUser {
   final String userSub;
@@ -106,11 +216,23 @@ class AuthenticatedUser {
   factory AuthenticatedUser.fromJson(Map<String, dynamic> json) {
     return AuthenticatedUser(
       userSub: json['userSub'] as String,
-      groups: (json['groups'] as List<dynamic>).map((e) => AuthenticatedUserGroups.fromJson(e as String)).toList(),
-      attributes: (json['attributes'] as Map<String, dynamic>).map((k, v) => MapEntry(k, v as String?)),
-      signInProvider: AuthenticatedUserSignInProvider.fromJson(json['signInProvider'] as String),
-      claims: (json['claims'] as Map<String, dynamic>?)?.map((k, v) => MapEntry(k, v as dynamic)),
-      federatedIdentity: json['federatedIdentity'] != null ? FederatedIdentity.fromJson(json['federatedIdentity'] as Map<String, dynamic>) : null,
+      groups: (json['groups'] as List<dynamic>)
+          .map((e) => AuthenticatedUserGroups.fromJson(e as String))
+          .toList(),
+      attributes: (json['attributes'] as Map<String, dynamic>).map(
+        (k, v) => MapEntry(k, v as String?),
+      ),
+      signInProvider: AuthenticatedUserSignInProvider.fromJson(
+        json['signInProvider'] as String,
+      ),
+      claims: (json['claims'] as Map<String, dynamic>?)?.map(
+        (k, v) => MapEntry(k, v as dynamic),
+      ),
+      federatedIdentity: json['federatedIdentity'] != null
+          ? FederatedIdentity.fromJson(
+              json['federatedIdentity'] as Map<String, dynamic>,
+            )
+          : null,
       userId: json['userId'] as String,
       username: json['username'] as String,
     );
@@ -123,7 +245,8 @@ class AuthenticatedUser {
       'attributes': attributes,
       'signInProvider': signInProvider.toJson(),
       if (claims != null) 'claims': claims,
-      if (federatedIdentity != null) 'federatedIdentity': federatedIdentity?.toJson(),
+      if (federatedIdentity != null)
+        'federatedIdentity': federatedIdentity?.toJson(),
       'userId': userId,
       'username': username,
     };
@@ -143,21 +266,27 @@ class AuthenticatedUser {
           username == other.username;
 
   @override
-  int get hashCode => Object.hash(userSub, blocksDeepHash(groups), blocksDeepHash(attributes), signInProvider, blocksDeepHash(claims), federatedIdentity, userId, username);
+  int get hashCode => Object.hash(
+    userSub,
+    blocksDeepHash(groups),
+    blocksDeepHash(attributes),
+    signInProvider,
+    blocksDeepHash(claims),
+    federatedIdentity,
+    userId,
+    username,
+  );
 
   @override
-  String toString() => 'AuthenticatedUser(userSub: $userSub, groups: $groups, attributes: $attributes, signInProvider: $signInProvider, claims: $claims, federatedIdentity: $federatedIdentity, userId: $userId, username: $username)';
+  String toString() =>
+      'AuthenticatedUser(userSub: $userSub, groups: $groups, attributes: $attributes, signInProvider: $signInProvider, claims: $claims, federatedIdentity: $federatedIdentity, userId: $userId, username: $username)';
 }
-
 
 class FederatedIdentity {
   final String providerId;
   final String sub;
 
-  const FederatedIdentity({
-    required this.providerId,
-    required this.sub,
-  });
+  const FederatedIdentity({required this.providerId, required this.sub});
 
   factory FederatedIdentity.fromJson(Map<String, dynamic> json) {
     return FederatedIdentity(
@@ -167,10 +296,7 @@ class FederatedIdentity {
   }
 
   Map<String, dynamic> toJson() {
-    return {
-      'providerId': providerId,
-      'sub': sub,
-    };
+    return {'providerId': providerId, 'sub': sub};
   }
 
   @override
@@ -187,66 +313,290 @@ class FederatedIdentity {
   String toString() => 'FederatedIdentity(providerId: $providerId, sub: $sub)';
 }
 
+sealed class CONTINUE_SIGN_IN_WITH_MFA_SELECTIONContinueSignInCognitoConfirmSignInResultNextStepAllowedMFATypes {
+  static const SMS =
+      CONTINUE_SIGN_IN_WITH_MFA_SELECTIONContinueSignInCognitoConfirmSignInResultNextStepAllowedMFATypesKnown
+          .SMS;
+  static const TOTP =
+      CONTINUE_SIGN_IN_WITH_MFA_SELECTIONContinueSignInCognitoConfirmSignInResultNextStepAllowedMFATypesKnown
+          .TOTP;
+  static const EMAIL =
+      CONTINUE_SIGN_IN_WITH_MFA_SELECTIONContinueSignInCognitoConfirmSignInResultNextStepAllowedMFATypesKnown
+          .EMAIL;
+  static const values =
+      CONTINUE_SIGN_IN_WITH_MFA_SELECTIONContinueSignInCognitoConfirmSignInResultNextStepAllowedMFATypesKnown
+          .values;
+  static final Map<
+    String,
+    CONTINUE_SIGN_IN_WITH_MFA_SELECTIONContinueSignInCognitoConfirmSignInResultNextStepAllowedMFATypesKnown
+  >
+  _byJson =
+      CONTINUE_SIGN_IN_WITH_MFA_SELECTIONContinueSignInCognitoConfirmSignInResultNextStepAllowedMFATypesKnown
+          .values
+          .asNameMap();
 
-enum CONTINUE_SIGN_IN_WITH_MFA_SELECTIONContinueSignInCognitoConfirmSignInResultNextStepAllowedMFATypes {
+  String toJson();
+  static CONTINUE_SIGN_IN_WITH_MFA_SELECTIONContinueSignInCognitoConfirmSignInResultNextStepAllowedMFATypes
+  fromJson(String json) =>
+      _byJson[json] ??
+      CONTINUE_SIGN_IN_WITH_MFA_SELECTIONContinueSignInCognitoConfirmSignInResultNextStepAllowedMFATypesUnknown(
+        json,
+      );
+}
+
+enum CONTINUE_SIGN_IN_WITH_MFA_SELECTIONContinueSignInCognitoConfirmSignInResultNextStepAllowedMFATypesKnown
+    implements
+        CONTINUE_SIGN_IN_WITH_MFA_SELECTIONContinueSignInCognitoConfirmSignInResultNextStepAllowedMFATypes {
   SMS,
   TOTP,
-  EMAIL
-;
+  EMAIL;
 
+  @override
   String toJson() => name;
-  static CONTINUE_SIGN_IN_WITH_MFA_SELECTIONContinueSignInCognitoConfirmSignInResultNextStepAllowedMFATypes fromJson(String json) => values.byName(json);
 }
 
+final class CONTINUE_SIGN_IN_WITH_MFA_SELECTIONContinueSignInCognitoConfirmSignInResultNextStepAllowedMFATypesUnknown
+    implements
+        CONTINUE_SIGN_IN_WITH_MFA_SELECTIONContinueSignInCognitoConfirmSignInResultNextStepAllowedMFATypes {
+  final String value;
 
-enum CONTINUE_SIGN_IN_WITH_MFA_SETUP_SELECTIONContinueSignInCognitoConfirmSignInResultNextStepAllowedMFATypes {
+  const CONTINUE_SIGN_IN_WITH_MFA_SELECTIONContinueSignInCognitoConfirmSignInResultNextStepAllowedMFATypesUnknown(
+    this.value,
+  );
+
+  @override
+  String toJson() => value;
+
+  @override
+  bool operator ==(Object other) =>
+      other
+          is CONTINUE_SIGN_IN_WITH_MFA_SELECTIONContinueSignInCognitoConfirmSignInResultNextStepAllowedMFATypesUnknown &&
+      value == other.value;
+
+  @override
+  int get hashCode => value.hashCode;
+
+  @override
+  String toString() =>
+      'CONTINUE_SIGN_IN_WITH_MFA_SELECTIONContinueSignInCognitoConfirmSignInResultNextStepAllowedMFATypesUnknown'
+      '($value)';
+}
+
+sealed class CONTINUE_SIGN_IN_WITH_MFA_SETUP_SELECTIONContinueSignInCognitoConfirmSignInResultNextStepAllowedMFATypes {
+  static const TOTP =
+      CONTINUE_SIGN_IN_WITH_MFA_SETUP_SELECTIONContinueSignInCognitoConfirmSignInResultNextStepAllowedMFATypesKnown
+          .TOTP;
+  static const EMAIL =
+      CONTINUE_SIGN_IN_WITH_MFA_SETUP_SELECTIONContinueSignInCognitoConfirmSignInResultNextStepAllowedMFATypesKnown
+          .EMAIL;
+  static const values =
+      CONTINUE_SIGN_IN_WITH_MFA_SETUP_SELECTIONContinueSignInCognitoConfirmSignInResultNextStepAllowedMFATypesKnown
+          .values;
+  static final Map<
+    String,
+    CONTINUE_SIGN_IN_WITH_MFA_SETUP_SELECTIONContinueSignInCognitoConfirmSignInResultNextStepAllowedMFATypesKnown
+  >
+  _byJson =
+      CONTINUE_SIGN_IN_WITH_MFA_SETUP_SELECTIONContinueSignInCognitoConfirmSignInResultNextStepAllowedMFATypesKnown
+          .values
+          .asNameMap();
+
+  String toJson();
+  static CONTINUE_SIGN_IN_WITH_MFA_SETUP_SELECTIONContinueSignInCognitoConfirmSignInResultNextStepAllowedMFATypes
+  fromJson(String json) =>
+      _byJson[json] ??
+      CONTINUE_SIGN_IN_WITH_MFA_SETUP_SELECTIONContinueSignInCognitoConfirmSignInResultNextStepAllowedMFATypesUnknown(
+        json,
+      );
+}
+
+enum CONTINUE_SIGN_IN_WITH_MFA_SETUP_SELECTIONContinueSignInCognitoConfirmSignInResultNextStepAllowedMFATypesKnown
+    implements
+        CONTINUE_SIGN_IN_WITH_MFA_SETUP_SELECTIONContinueSignInCognitoConfirmSignInResultNextStepAllowedMFATypes {
   TOTP,
-  EMAIL
-;
+  EMAIL;
 
+  @override
   String toJson() => name;
-  static CONTINUE_SIGN_IN_WITH_MFA_SETUP_SELECTIONContinueSignInCognitoConfirmSignInResultNextStepAllowedMFATypes fromJson(String json) => values.byName(json);
 }
 
+final class CONTINUE_SIGN_IN_WITH_MFA_SETUP_SELECTIONContinueSignInCognitoConfirmSignInResultNextStepAllowedMFATypesUnknown
+    implements
+        CONTINUE_SIGN_IN_WITH_MFA_SETUP_SELECTIONContinueSignInCognitoConfirmSignInResultNextStepAllowedMFATypes {
+  final String value;
 
-enum CONTINUE_SIGN_IN_WITH_FIRST_FACTOR_SELECTIONContinueSignInCognitoConfirmSignInResultNextStepAvailableChallenges {
+  const CONTINUE_SIGN_IN_WITH_MFA_SETUP_SELECTIONContinueSignInCognitoConfirmSignInResultNextStepAllowedMFATypesUnknown(
+    this.value,
+  );
+
+  @override
+  String toJson() => value;
+
+  @override
+  bool operator ==(Object other) =>
+      other
+          is CONTINUE_SIGN_IN_WITH_MFA_SETUP_SELECTIONContinueSignInCognitoConfirmSignInResultNextStepAllowedMFATypesUnknown &&
+      value == other.value;
+
+  @override
+  int get hashCode => value.hashCode;
+
+  @override
+  String toString() =>
+      'CONTINUE_SIGN_IN_WITH_MFA_SETUP_SELECTIONContinueSignInCognitoConfirmSignInResultNextStepAllowedMFATypesUnknown'
+      '($value)';
+}
+
+sealed class CONTINUE_SIGN_IN_WITH_FIRST_FACTOR_SELECTIONContinueSignInCognitoConfirmSignInResultNextStepAvailableChallenges {
+  static const PASSWORD =
+      CONTINUE_SIGN_IN_WITH_FIRST_FACTOR_SELECTIONContinueSignInCognitoConfirmSignInResultNextStepAvailableChallengesKnown
+          .PASSWORD;
+  static const EMAIL_OTP =
+      CONTINUE_SIGN_IN_WITH_FIRST_FACTOR_SELECTIONContinueSignInCognitoConfirmSignInResultNextStepAvailableChallengesKnown
+          .EMAIL_OTP;
+  static const SMS_OTP =
+      CONTINUE_SIGN_IN_WITH_FIRST_FACTOR_SELECTIONContinueSignInCognitoConfirmSignInResultNextStepAvailableChallengesKnown
+          .SMS_OTP;
+  static const WEB_AUTHN =
+      CONTINUE_SIGN_IN_WITH_FIRST_FACTOR_SELECTIONContinueSignInCognitoConfirmSignInResultNextStepAvailableChallengesKnown
+          .WEB_AUTHN;
+  static const values =
+      CONTINUE_SIGN_IN_WITH_FIRST_FACTOR_SELECTIONContinueSignInCognitoConfirmSignInResultNextStepAvailableChallengesKnown
+          .values;
+  static final Map<
+    String,
+    CONTINUE_SIGN_IN_WITH_FIRST_FACTOR_SELECTIONContinueSignInCognitoConfirmSignInResultNextStepAvailableChallengesKnown
+  >
+  _byJson =
+      CONTINUE_SIGN_IN_WITH_FIRST_FACTOR_SELECTIONContinueSignInCognitoConfirmSignInResultNextStepAvailableChallengesKnown
+          .values
+          .asNameMap();
+
+  String toJson();
+  static CONTINUE_SIGN_IN_WITH_FIRST_FACTOR_SELECTIONContinueSignInCognitoConfirmSignInResultNextStepAvailableChallenges
+  fromJson(String json) =>
+      _byJson[json] ??
+      CONTINUE_SIGN_IN_WITH_FIRST_FACTOR_SELECTIONContinueSignInCognitoConfirmSignInResultNextStepAvailableChallengesUnknown(
+        json,
+      );
+}
+
+enum CONTINUE_SIGN_IN_WITH_FIRST_FACTOR_SELECTIONContinueSignInCognitoConfirmSignInResultNextStepAvailableChallengesKnown
+    implements
+        CONTINUE_SIGN_IN_WITH_FIRST_FACTOR_SELECTIONContinueSignInCognitoConfirmSignInResultNextStepAvailableChallenges {
   PASSWORD,
   EMAIL_OTP,
   SMS_OTP,
-  WEB_AUTHN
-;
+  WEB_AUTHN;
 
+  @override
   String toJson() => name;
-  static CONTINUE_SIGN_IN_WITH_FIRST_FACTOR_SELECTIONContinueSignInCognitoConfirmSignInResultNextStepAvailableChallenges fromJson(String json) => values.byName(json);
 }
 
+final class CONTINUE_SIGN_IN_WITH_FIRST_FACTOR_SELECTIONContinueSignInCognitoConfirmSignInResultNextStepAvailableChallengesUnknown
+    implements
+        CONTINUE_SIGN_IN_WITH_FIRST_FACTOR_SELECTIONContinueSignInCognitoConfirmSignInResultNextStepAvailableChallenges {
+  final String value;
+
+  const CONTINUE_SIGN_IN_WITH_FIRST_FACTOR_SELECTIONContinueSignInCognitoConfirmSignInResultNextStepAvailableChallengesUnknown(
+    this.value,
+  );
+
+  @override
+  String toJson() => value;
+
+  @override
+  bool operator ==(Object other) =>
+      other
+          is CONTINUE_SIGN_IN_WITH_FIRST_FACTOR_SELECTIONContinueSignInCognitoConfirmSignInResultNextStepAvailableChallengesUnknown &&
+      value == other.value;
+
+  @override
+  int get hashCode => value.hashCode;
+
+  @override
+  String toString() =>
+      'CONTINUE_SIGN_IN_WITH_FIRST_FACTOR_SELECTIONContinueSignInCognitoConfirmSignInResultNextStepAvailableChallengesUnknown'
+      '($value)';
+}
 
 sealed class ContinueSignInCognitoConfirmSignInResultNextStep {
   const ContinueSignInCognitoConfirmSignInResultNextStep();
   Map<String, dynamic> toJson();
-  static ContinueSignInCognitoConfirmSignInResultNextStep fromJson(Map<String, dynamic> json) {
+  static ContinueSignInCognitoConfirmSignInResultNextStep fromJson(
+    Map<String, dynamic> json,
+  ) {
     switch (json['name'] as String) {
-      case 'CONFIRM_SIGN_IN_WITH_SMS_CODE': return CONFIRM_SIGN_IN_WITH_SMS_CODEContinueSignInCognitoConfirmSignInResultNextStep.fromJson(json);
-      case 'CONFIRM_SIGN_IN_WITH_TOTP_CODE': return CONFIRM_SIGN_IN_WITH_TOTP_CODEContinueSignInCognitoConfirmSignInResultNextStep.fromJson(json);
-      case 'CONFIRM_SIGN_IN_WITH_EMAIL_CODE': return CONFIRM_SIGN_IN_WITH_EMAIL_CODEContinueSignInCognitoConfirmSignInResultNextStep.fromJson(json);
-      case 'CONTINUE_SIGN_IN_WITH_MFA_SELECTION': return CONTINUE_SIGN_IN_WITH_MFA_SELECTIONContinueSignInCognitoConfirmSignInResultNextStep.fromJson(json);
-      case 'CONTINUE_SIGN_IN_WITH_MFA_SETUP_SELECTION': return CONTINUE_SIGN_IN_WITH_MFA_SETUP_SELECTIONContinueSignInCognitoConfirmSignInResultNextStep.fromJson(json);
-      case 'CONTINUE_SIGN_IN_WITH_TOTP_SETUP': return CONTINUE_SIGN_IN_WITH_TOTP_SETUPContinueSignInCognitoConfirmSignInResultNextStep.fromJson(json);
-      case 'CONTINUE_SIGN_IN_WITH_EMAIL_SETUP': return CONTINUE_SIGN_IN_WITH_EMAIL_SETUPContinueSignInCognitoConfirmSignInResultNextStep.fromJson(json);
-      case 'CONFIRM_SIGN_IN_WITH_NEW_PASSWORD_REQUIRED': return CONFIRM_SIGN_IN_WITH_NEW_PASSWORD_REQUIREDContinueSignInCognitoConfirmSignInResultNextStep.fromJson(json);
-      case 'CONTINUE_SIGN_IN_WITH_FIRST_FACTOR_SELECTION': return CONTINUE_SIGN_IN_WITH_FIRST_FACTOR_SELECTIONContinueSignInCognitoConfirmSignInResultNextStep.fromJson(json);
-      case 'CONFIRM_SIGN_IN_WITH_PASSWORD': return CONFIRM_SIGN_IN_WITH_PASSWORDContinueSignInCognitoConfirmSignInResultNextStep.fromJson(json);
-      case 'CONFIRM_SIGN_IN_WITH_FIRST_FACTOR_EMAIL_OTP': return CONFIRM_SIGN_IN_WITH_FIRST_FACTOR_EMAIL_OTPContinueSignInCognitoConfirmSignInResultNextStep.fromJson(json);
-      case 'CONFIRM_SIGN_IN_WITH_FIRST_FACTOR_SMS_OTP': return CONFIRM_SIGN_IN_WITH_FIRST_FACTOR_SMS_OTPContinueSignInCognitoConfirmSignInResultNextStep.fromJson(json);
-      case 'CONFIRM_SIGN_IN_WITH_WEB_AUTHN': return CONFIRM_SIGN_IN_WITH_WEB_AUTHNContinueSignInCognitoConfirmSignInResultNextStep.fromJson(json);
-      case 'RESET_PASSWORD': return RESET_PASSWORDContinueSignInCognitoConfirmSignInResultNextStep.fromJson(json);
-      case 'CONFIRM_SIGN_UP': return CONFIRM_SIGN_UPContinueSignInCognitoConfirmSignInResultNextStep.fromJson(json);
-      default: throw ArgumentError('Unknown name: ${json['name']}');
+      case 'CONFIRM_SIGN_IN_WITH_SMS_CODE':
+        return CONFIRM_SIGN_IN_WITH_SMS_CODEContinueSignInCognitoConfirmSignInResultNextStep.fromJson(
+          json,
+        );
+      case 'CONFIRM_SIGN_IN_WITH_TOTP_CODE':
+        return CONFIRM_SIGN_IN_WITH_TOTP_CODEContinueSignInCognitoConfirmSignInResultNextStep.fromJson(
+          json,
+        );
+      case 'CONFIRM_SIGN_IN_WITH_EMAIL_CODE':
+        return CONFIRM_SIGN_IN_WITH_EMAIL_CODEContinueSignInCognitoConfirmSignInResultNextStep.fromJson(
+          json,
+        );
+      case 'CONTINUE_SIGN_IN_WITH_MFA_SELECTION':
+        return CONTINUE_SIGN_IN_WITH_MFA_SELECTIONContinueSignInCognitoConfirmSignInResultNextStep.fromJson(
+          json,
+        );
+      case 'CONTINUE_SIGN_IN_WITH_MFA_SETUP_SELECTION':
+        return CONTINUE_SIGN_IN_WITH_MFA_SETUP_SELECTIONContinueSignInCognitoConfirmSignInResultNextStep.fromJson(
+          json,
+        );
+      case 'CONTINUE_SIGN_IN_WITH_TOTP_SETUP':
+        return CONTINUE_SIGN_IN_WITH_TOTP_SETUPContinueSignInCognitoConfirmSignInResultNextStep.fromJson(
+          json,
+        );
+      case 'CONTINUE_SIGN_IN_WITH_EMAIL_SETUP':
+        return CONTINUE_SIGN_IN_WITH_EMAIL_SETUPContinueSignInCognitoConfirmSignInResultNextStep.fromJson(
+          json,
+        );
+      case 'CONFIRM_SIGN_IN_WITH_NEW_PASSWORD_REQUIRED':
+        return CONFIRM_SIGN_IN_WITH_NEW_PASSWORD_REQUIREDContinueSignInCognitoConfirmSignInResultNextStep.fromJson(
+          json,
+        );
+      case 'CONTINUE_SIGN_IN_WITH_FIRST_FACTOR_SELECTION':
+        return CONTINUE_SIGN_IN_WITH_FIRST_FACTOR_SELECTIONContinueSignInCognitoConfirmSignInResultNextStep.fromJson(
+          json,
+        );
+      case 'CONFIRM_SIGN_IN_WITH_PASSWORD':
+        return CONFIRM_SIGN_IN_WITH_PASSWORDContinueSignInCognitoConfirmSignInResultNextStep.fromJson(
+          json,
+        );
+      case 'CONFIRM_SIGN_IN_WITH_FIRST_FACTOR_EMAIL_OTP':
+        return CONFIRM_SIGN_IN_WITH_FIRST_FACTOR_EMAIL_OTPContinueSignInCognitoConfirmSignInResultNextStep.fromJson(
+          json,
+        );
+      case 'CONFIRM_SIGN_IN_WITH_FIRST_FACTOR_SMS_OTP':
+        return CONFIRM_SIGN_IN_WITH_FIRST_FACTOR_SMS_OTPContinueSignInCognitoConfirmSignInResultNextStep.fromJson(
+          json,
+        );
+      case 'CONFIRM_SIGN_IN_WITH_WEB_AUTHN':
+        return CONFIRM_SIGN_IN_WITH_WEB_AUTHNContinueSignInCognitoConfirmSignInResultNextStep.fromJson(
+          json,
+        );
+      case 'RESET_PASSWORD':
+        return RESET_PASSWORDContinueSignInCognitoConfirmSignInResultNextStep.fromJson(
+          json,
+        );
+      case 'CONFIRM_SIGN_UP':
+        return CONFIRM_SIGN_UPContinueSignInCognitoConfirmSignInResultNextStep.fromJson(
+          json,
+        );
+      default:
+        return ContinueSignInCognitoConfirmSignInResultNextStepUnknown(
+          _blocksFrozenObject(json),
+        );
     }
   }
 }
 
-class CONFIRM_SIGN_IN_WITH_SMS_CODEContinueSignInCognitoConfirmSignInResultNextStep extends ContinueSignInCognitoConfirmSignInResultNextStep {
+class CONFIRM_SIGN_IN_WITH_SMS_CODEContinueSignInCognitoConfirmSignInResultNextStep
+    extends ContinueSignInCognitoConfirmSignInResultNextStep {
   final String session;
   final CodeDeliveryDetails codeDeliveryDetails;
 
@@ -255,10 +605,14 @@ class CONFIRM_SIGN_IN_WITH_SMS_CODEContinueSignInCognitoConfirmSignInResultNextS
     required this.codeDeliveryDetails,
   });
 
-  factory CONFIRM_SIGN_IN_WITH_SMS_CODEContinueSignInCognitoConfirmSignInResultNextStep.fromJson(Map<String, dynamic> json) {
+  factory CONFIRM_SIGN_IN_WITH_SMS_CODEContinueSignInCognitoConfirmSignInResultNextStep.fromJson(
+    Map<String, dynamic> json,
+  ) {
     return CONFIRM_SIGN_IN_WITH_SMS_CODEContinueSignInCognitoConfirmSignInResultNextStep(
       session: json['session'] as String,
-      codeDeliveryDetails: CodeDeliveryDetails.fromJson(json['codeDeliveryDetails'] as Map<String, dynamic>),
+      codeDeliveryDetails: CodeDeliveryDetails.fromJson(
+        json['codeDeliveryDetails'] as Map<String, dynamic>,
+      ),
     );
   }
 
@@ -274,7 +628,8 @@ class CONFIRM_SIGN_IN_WITH_SMS_CODEContinueSignInCognitoConfirmSignInResultNextS
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
-      other is CONFIRM_SIGN_IN_WITH_SMS_CODEContinueSignInCognitoConfirmSignInResultNextStep &&
+      other
+              is CONFIRM_SIGN_IN_WITH_SMS_CODEContinueSignInCognitoConfirmSignInResultNextStep &&
           session == other.session &&
           codeDeliveryDetails == other.codeDeliveryDetails;
 
@@ -282,17 +637,21 @@ class CONFIRM_SIGN_IN_WITH_SMS_CODEContinueSignInCognitoConfirmSignInResultNextS
   int get hashCode => Object.hash(session, codeDeliveryDetails);
 
   @override
-  String toString() => 'CONFIRM_SIGN_IN_WITH_SMS_CODEContinueSignInCognitoConfirmSignInResultNextStep(session: $session, codeDeliveryDetails: $codeDeliveryDetails)';
+  String toString() =>
+      'CONFIRM_SIGN_IN_WITH_SMS_CODEContinueSignInCognitoConfirmSignInResultNextStep(session: $session, codeDeliveryDetails: $codeDeliveryDetails)';
 }
 
-class CONFIRM_SIGN_IN_WITH_TOTP_CODEContinueSignInCognitoConfirmSignInResultNextStep extends ContinueSignInCognitoConfirmSignInResultNextStep {
+class CONFIRM_SIGN_IN_WITH_TOTP_CODEContinueSignInCognitoConfirmSignInResultNextStep
+    extends ContinueSignInCognitoConfirmSignInResultNextStep {
   final String session;
 
   const CONFIRM_SIGN_IN_WITH_TOTP_CODEContinueSignInCognitoConfirmSignInResultNextStep({
     required this.session,
   });
 
-  factory CONFIRM_SIGN_IN_WITH_TOTP_CODEContinueSignInCognitoConfirmSignInResultNextStep.fromJson(Map<String, dynamic> json) {
+  factory CONFIRM_SIGN_IN_WITH_TOTP_CODEContinueSignInCognitoConfirmSignInResultNextStep.fromJson(
+    Map<String, dynamic> json,
+  ) {
     return CONFIRM_SIGN_IN_WITH_TOTP_CODEContinueSignInCognitoConfirmSignInResultNextStep(
       session: json['session'] as String,
     );
@@ -300,26 +659,26 @@ class CONFIRM_SIGN_IN_WITH_TOTP_CODEContinueSignInCognitoConfirmSignInResultNext
 
   @override
   Map<String, dynamic> toJson() {
-    return {
-      'name': 'CONFIRM_SIGN_IN_WITH_TOTP_CODE',
-      'session': session,
-    };
+    return {'name': 'CONFIRM_SIGN_IN_WITH_TOTP_CODE', 'session': session};
   }
 
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
-      other is CONFIRM_SIGN_IN_WITH_TOTP_CODEContinueSignInCognitoConfirmSignInResultNextStep &&
+      other
+              is CONFIRM_SIGN_IN_WITH_TOTP_CODEContinueSignInCognitoConfirmSignInResultNextStep &&
           session == other.session;
 
   @override
   int get hashCode => session.hashCode;
 
   @override
-  String toString() => 'CONFIRM_SIGN_IN_WITH_TOTP_CODEContinueSignInCognitoConfirmSignInResultNextStep(session: $session)';
+  String toString() =>
+      'CONFIRM_SIGN_IN_WITH_TOTP_CODEContinueSignInCognitoConfirmSignInResultNextStep(session: $session)';
 }
 
-class CONFIRM_SIGN_IN_WITH_EMAIL_CODEContinueSignInCognitoConfirmSignInResultNextStep extends ContinueSignInCognitoConfirmSignInResultNextStep {
+class CONFIRM_SIGN_IN_WITH_EMAIL_CODEContinueSignInCognitoConfirmSignInResultNextStep
+    extends ContinueSignInCognitoConfirmSignInResultNextStep {
   final String session;
   final CodeDeliveryDetails codeDeliveryDetails;
 
@@ -328,10 +687,14 @@ class CONFIRM_SIGN_IN_WITH_EMAIL_CODEContinueSignInCognitoConfirmSignInResultNex
     required this.codeDeliveryDetails,
   });
 
-  factory CONFIRM_SIGN_IN_WITH_EMAIL_CODEContinueSignInCognitoConfirmSignInResultNextStep.fromJson(Map<String, dynamic> json) {
+  factory CONFIRM_SIGN_IN_WITH_EMAIL_CODEContinueSignInCognitoConfirmSignInResultNextStep.fromJson(
+    Map<String, dynamic> json,
+  ) {
     return CONFIRM_SIGN_IN_WITH_EMAIL_CODEContinueSignInCognitoConfirmSignInResultNextStep(
       session: json['session'] as String,
-      codeDeliveryDetails: CodeDeliveryDetails.fromJson(json['codeDeliveryDetails'] as Map<String, dynamic>),
+      codeDeliveryDetails: CodeDeliveryDetails.fromJson(
+        json['codeDeliveryDetails'] as Map<String, dynamic>,
+      ),
     );
   }
 
@@ -347,7 +710,8 @@ class CONFIRM_SIGN_IN_WITH_EMAIL_CODEContinueSignInCognitoConfirmSignInResultNex
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
-      other is CONFIRM_SIGN_IN_WITH_EMAIL_CODEContinueSignInCognitoConfirmSignInResultNextStep &&
+      other
+              is CONFIRM_SIGN_IN_WITH_EMAIL_CODEContinueSignInCognitoConfirmSignInResultNextStep &&
           session == other.session &&
           codeDeliveryDetails == other.codeDeliveryDetails;
 
@@ -355,22 +719,36 @@ class CONFIRM_SIGN_IN_WITH_EMAIL_CODEContinueSignInCognitoConfirmSignInResultNex
   int get hashCode => Object.hash(session, codeDeliveryDetails);
 
   @override
-  String toString() => 'CONFIRM_SIGN_IN_WITH_EMAIL_CODEContinueSignInCognitoConfirmSignInResultNextStep(session: $session, codeDeliveryDetails: $codeDeliveryDetails)';
+  String toString() =>
+      'CONFIRM_SIGN_IN_WITH_EMAIL_CODEContinueSignInCognitoConfirmSignInResultNextStep(session: $session, codeDeliveryDetails: $codeDeliveryDetails)';
 }
 
-class CONTINUE_SIGN_IN_WITH_MFA_SELECTIONContinueSignInCognitoConfirmSignInResultNextStep extends ContinueSignInCognitoConfirmSignInResultNextStep {
+class CONTINUE_SIGN_IN_WITH_MFA_SELECTIONContinueSignInCognitoConfirmSignInResultNextStep
+    extends ContinueSignInCognitoConfirmSignInResultNextStep {
   final String session;
-  final List<CONTINUE_SIGN_IN_WITH_MFA_SELECTIONContinueSignInCognitoConfirmSignInResultNextStepAllowedMFATypes> allowedMFATypes;
+  final List<
+    CONTINUE_SIGN_IN_WITH_MFA_SELECTIONContinueSignInCognitoConfirmSignInResultNextStepAllowedMFATypes
+  >
+  allowedMFATypes;
 
   const CONTINUE_SIGN_IN_WITH_MFA_SELECTIONContinueSignInCognitoConfirmSignInResultNextStep({
     required this.session,
     required this.allowedMFATypes,
   });
 
-  factory CONTINUE_SIGN_IN_WITH_MFA_SELECTIONContinueSignInCognitoConfirmSignInResultNextStep.fromJson(Map<String, dynamic> json) {
+  factory CONTINUE_SIGN_IN_WITH_MFA_SELECTIONContinueSignInCognitoConfirmSignInResultNextStep.fromJson(
+    Map<String, dynamic> json,
+  ) {
     return CONTINUE_SIGN_IN_WITH_MFA_SELECTIONContinueSignInCognitoConfirmSignInResultNextStep(
       session: json['session'] as String,
-      allowedMFATypes: (json['allowedMFATypes'] as List<dynamic>).map((e) => CONTINUE_SIGN_IN_WITH_MFA_SELECTIONContinueSignInCognitoConfirmSignInResultNextStepAllowedMFATypes.fromJson(e as String)).toList(),
+      allowedMFATypes: (json['allowedMFATypes'] as List<dynamic>)
+          .map(
+            (e) =>
+                CONTINUE_SIGN_IN_WITH_MFA_SELECTIONContinueSignInCognitoConfirmSignInResultNextStepAllowedMFATypes.fromJson(
+                  e as String,
+                ),
+          )
+          .toList(),
     );
   }
 
@@ -386,7 +764,8 @@ class CONTINUE_SIGN_IN_WITH_MFA_SELECTIONContinueSignInCognitoConfirmSignInResul
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
-      other is CONTINUE_SIGN_IN_WITH_MFA_SELECTIONContinueSignInCognitoConfirmSignInResultNextStep &&
+      other
+              is CONTINUE_SIGN_IN_WITH_MFA_SELECTIONContinueSignInCognitoConfirmSignInResultNextStep &&
           session == other.session &&
           blocksDeepEquals(allowedMFATypes, other.allowedMFATypes);
 
@@ -394,22 +773,36 @@ class CONTINUE_SIGN_IN_WITH_MFA_SELECTIONContinueSignInCognitoConfirmSignInResul
   int get hashCode => Object.hash(session, blocksDeepHash(allowedMFATypes));
 
   @override
-  String toString() => 'CONTINUE_SIGN_IN_WITH_MFA_SELECTIONContinueSignInCognitoConfirmSignInResultNextStep(session: $session, allowedMFATypes: $allowedMFATypes)';
+  String toString() =>
+      'CONTINUE_SIGN_IN_WITH_MFA_SELECTIONContinueSignInCognitoConfirmSignInResultNextStep(session: $session, allowedMFATypes: $allowedMFATypes)';
 }
 
-class CONTINUE_SIGN_IN_WITH_MFA_SETUP_SELECTIONContinueSignInCognitoConfirmSignInResultNextStep extends ContinueSignInCognitoConfirmSignInResultNextStep {
+class CONTINUE_SIGN_IN_WITH_MFA_SETUP_SELECTIONContinueSignInCognitoConfirmSignInResultNextStep
+    extends ContinueSignInCognitoConfirmSignInResultNextStep {
   final String session;
-  final List<CONTINUE_SIGN_IN_WITH_MFA_SETUP_SELECTIONContinueSignInCognitoConfirmSignInResultNextStepAllowedMFATypes> allowedMFATypes;
+  final List<
+    CONTINUE_SIGN_IN_WITH_MFA_SETUP_SELECTIONContinueSignInCognitoConfirmSignInResultNextStepAllowedMFATypes
+  >
+  allowedMFATypes;
 
   const CONTINUE_SIGN_IN_WITH_MFA_SETUP_SELECTIONContinueSignInCognitoConfirmSignInResultNextStep({
     required this.session,
     required this.allowedMFATypes,
   });
 
-  factory CONTINUE_SIGN_IN_WITH_MFA_SETUP_SELECTIONContinueSignInCognitoConfirmSignInResultNextStep.fromJson(Map<String, dynamic> json) {
+  factory CONTINUE_SIGN_IN_WITH_MFA_SETUP_SELECTIONContinueSignInCognitoConfirmSignInResultNextStep.fromJson(
+    Map<String, dynamic> json,
+  ) {
     return CONTINUE_SIGN_IN_WITH_MFA_SETUP_SELECTIONContinueSignInCognitoConfirmSignInResultNextStep(
       session: json['session'] as String,
-      allowedMFATypes: (json['allowedMFATypes'] as List<dynamic>).map((e) => CONTINUE_SIGN_IN_WITH_MFA_SETUP_SELECTIONContinueSignInCognitoConfirmSignInResultNextStepAllowedMFATypes.fromJson(e as String)).toList(),
+      allowedMFATypes: (json['allowedMFATypes'] as List<dynamic>)
+          .map(
+            (e) =>
+                CONTINUE_SIGN_IN_WITH_MFA_SETUP_SELECTIONContinueSignInCognitoConfirmSignInResultNextStepAllowedMFATypes.fromJson(
+                  e as String,
+                ),
+          )
+          .toList(),
     );
   }
 
@@ -425,7 +818,8 @@ class CONTINUE_SIGN_IN_WITH_MFA_SETUP_SELECTIONContinueSignInCognitoConfirmSignI
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
-      other is CONTINUE_SIGN_IN_WITH_MFA_SETUP_SELECTIONContinueSignInCognitoConfirmSignInResultNextStep &&
+      other
+              is CONTINUE_SIGN_IN_WITH_MFA_SETUP_SELECTIONContinueSignInCognitoConfirmSignInResultNextStep &&
           session == other.session &&
           blocksDeepEquals(allowedMFATypes, other.allowedMFATypes);
 
@@ -433,10 +827,12 @@ class CONTINUE_SIGN_IN_WITH_MFA_SETUP_SELECTIONContinueSignInCognitoConfirmSignI
   int get hashCode => Object.hash(session, blocksDeepHash(allowedMFATypes));
 
   @override
-  String toString() => 'CONTINUE_SIGN_IN_WITH_MFA_SETUP_SELECTIONContinueSignInCognitoConfirmSignInResultNextStep(session: $session, allowedMFATypes: $allowedMFATypes)';
+  String toString() =>
+      'CONTINUE_SIGN_IN_WITH_MFA_SETUP_SELECTIONContinueSignInCognitoConfirmSignInResultNextStep(session: $session, allowedMFATypes: $allowedMFATypes)';
 }
 
-class CONTINUE_SIGN_IN_WITH_TOTP_SETUPContinueSignInCognitoConfirmSignInResultNextStep extends ContinueSignInCognitoConfirmSignInResultNextStep {
+class CONTINUE_SIGN_IN_WITH_TOTP_SETUPContinueSignInCognitoConfirmSignInResultNextStep
+    extends ContinueSignInCognitoConfirmSignInResultNextStep {
   final String session;
   final String sharedSecret;
 
@@ -445,7 +841,9 @@ class CONTINUE_SIGN_IN_WITH_TOTP_SETUPContinueSignInCognitoConfirmSignInResultNe
     required this.sharedSecret,
   });
 
-  factory CONTINUE_SIGN_IN_WITH_TOTP_SETUPContinueSignInCognitoConfirmSignInResultNextStep.fromJson(Map<String, dynamic> json) {
+  factory CONTINUE_SIGN_IN_WITH_TOTP_SETUPContinueSignInCognitoConfirmSignInResultNextStep.fromJson(
+    Map<String, dynamic> json,
+  ) {
     return CONTINUE_SIGN_IN_WITH_TOTP_SETUPContinueSignInCognitoConfirmSignInResultNextStep(
       session: json['session'] as String,
       sharedSecret: json['sharedSecret'] as String,
@@ -464,7 +862,8 @@ class CONTINUE_SIGN_IN_WITH_TOTP_SETUPContinueSignInCognitoConfirmSignInResultNe
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
-      other is CONTINUE_SIGN_IN_WITH_TOTP_SETUPContinueSignInCognitoConfirmSignInResultNextStep &&
+      other
+              is CONTINUE_SIGN_IN_WITH_TOTP_SETUPContinueSignInCognitoConfirmSignInResultNextStep &&
           session == other.session &&
           sharedSecret == other.sharedSecret;
 
@@ -472,17 +871,21 @@ class CONTINUE_SIGN_IN_WITH_TOTP_SETUPContinueSignInCognitoConfirmSignInResultNe
   int get hashCode => Object.hash(session, sharedSecret);
 
   @override
-  String toString() => 'CONTINUE_SIGN_IN_WITH_TOTP_SETUPContinueSignInCognitoConfirmSignInResultNextStep(session: $session, sharedSecret: $sharedSecret)';
+  String toString() =>
+      'CONTINUE_SIGN_IN_WITH_TOTP_SETUPContinueSignInCognitoConfirmSignInResultNextStep(session: $session, sharedSecret: $sharedSecret)';
 }
 
-class CONTINUE_SIGN_IN_WITH_EMAIL_SETUPContinueSignInCognitoConfirmSignInResultNextStep extends ContinueSignInCognitoConfirmSignInResultNextStep {
+class CONTINUE_SIGN_IN_WITH_EMAIL_SETUPContinueSignInCognitoConfirmSignInResultNextStep
+    extends ContinueSignInCognitoConfirmSignInResultNextStep {
   final String session;
 
   const CONTINUE_SIGN_IN_WITH_EMAIL_SETUPContinueSignInCognitoConfirmSignInResultNextStep({
     required this.session,
   });
 
-  factory CONTINUE_SIGN_IN_WITH_EMAIL_SETUPContinueSignInCognitoConfirmSignInResultNextStep.fromJson(Map<String, dynamic> json) {
+  factory CONTINUE_SIGN_IN_WITH_EMAIL_SETUPContinueSignInCognitoConfirmSignInResultNextStep.fromJson(
+    Map<String, dynamic> json,
+  ) {
     return CONTINUE_SIGN_IN_WITH_EMAIL_SETUPContinueSignInCognitoConfirmSignInResultNextStep(
       session: json['session'] as String,
     );
@@ -490,26 +893,26 @@ class CONTINUE_SIGN_IN_WITH_EMAIL_SETUPContinueSignInCognitoConfirmSignInResultN
 
   @override
   Map<String, dynamic> toJson() {
-    return {
-      'name': 'CONTINUE_SIGN_IN_WITH_EMAIL_SETUP',
-      'session': session,
-    };
+    return {'name': 'CONTINUE_SIGN_IN_WITH_EMAIL_SETUP', 'session': session};
   }
 
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
-      other is CONTINUE_SIGN_IN_WITH_EMAIL_SETUPContinueSignInCognitoConfirmSignInResultNextStep &&
+      other
+              is CONTINUE_SIGN_IN_WITH_EMAIL_SETUPContinueSignInCognitoConfirmSignInResultNextStep &&
           session == other.session;
 
   @override
   int get hashCode => session.hashCode;
 
   @override
-  String toString() => 'CONTINUE_SIGN_IN_WITH_EMAIL_SETUPContinueSignInCognitoConfirmSignInResultNextStep(session: $session)';
+  String toString() =>
+      'CONTINUE_SIGN_IN_WITH_EMAIL_SETUPContinueSignInCognitoConfirmSignInResultNextStep(session: $session)';
 }
 
-class CONFIRM_SIGN_IN_WITH_NEW_PASSWORD_REQUIREDContinueSignInCognitoConfirmSignInResultNextStep extends ContinueSignInCognitoConfirmSignInResultNextStep {
+class CONFIRM_SIGN_IN_WITH_NEW_PASSWORD_REQUIREDContinueSignInCognitoConfirmSignInResultNextStep
+    extends ContinueSignInCognitoConfirmSignInResultNextStep {
   final String session;
   final List<String>? requiredAttributes;
 
@@ -518,10 +921,13 @@ class CONFIRM_SIGN_IN_WITH_NEW_PASSWORD_REQUIREDContinueSignInCognitoConfirmSign
     this.requiredAttributes,
   });
 
-  factory CONFIRM_SIGN_IN_WITH_NEW_PASSWORD_REQUIREDContinueSignInCognitoConfirmSignInResultNextStep.fromJson(Map<String, dynamic> json) {
+  factory CONFIRM_SIGN_IN_WITH_NEW_PASSWORD_REQUIREDContinueSignInCognitoConfirmSignInResultNextStep.fromJson(
+    Map<String, dynamic> json,
+  ) {
     return CONFIRM_SIGN_IN_WITH_NEW_PASSWORD_REQUIREDContinueSignInCognitoConfirmSignInResultNextStep(
       session: json['session'] as String,
-      requiredAttributes: (json['requiredAttributes'] as List<dynamic>?)?.cast<String>(),
+      requiredAttributes: (json['requiredAttributes'] as List<dynamic>?)
+          ?.cast<String>(),
     );
   }
 
@@ -537,7 +943,8 @@ class CONFIRM_SIGN_IN_WITH_NEW_PASSWORD_REQUIREDContinueSignInCognitoConfirmSign
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
-      other is CONFIRM_SIGN_IN_WITH_NEW_PASSWORD_REQUIREDContinueSignInCognitoConfirmSignInResultNextStep &&
+      other
+              is CONFIRM_SIGN_IN_WITH_NEW_PASSWORD_REQUIREDContinueSignInCognitoConfirmSignInResultNextStep &&
           session == other.session &&
           blocksDeepEquals(requiredAttributes, other.requiredAttributes);
 
@@ -545,22 +952,36 @@ class CONFIRM_SIGN_IN_WITH_NEW_PASSWORD_REQUIREDContinueSignInCognitoConfirmSign
   int get hashCode => Object.hash(session, blocksDeepHash(requiredAttributes));
 
   @override
-  String toString() => 'CONFIRM_SIGN_IN_WITH_NEW_PASSWORD_REQUIREDContinueSignInCognitoConfirmSignInResultNextStep(session: $session, requiredAttributes: $requiredAttributes)';
+  String toString() =>
+      'CONFIRM_SIGN_IN_WITH_NEW_PASSWORD_REQUIREDContinueSignInCognitoConfirmSignInResultNextStep(session: $session, requiredAttributes: $requiredAttributes)';
 }
 
-class CONTINUE_SIGN_IN_WITH_FIRST_FACTOR_SELECTIONContinueSignInCognitoConfirmSignInResultNextStep extends ContinueSignInCognitoConfirmSignInResultNextStep {
+class CONTINUE_SIGN_IN_WITH_FIRST_FACTOR_SELECTIONContinueSignInCognitoConfirmSignInResultNextStep
+    extends ContinueSignInCognitoConfirmSignInResultNextStep {
   final String session;
-  final List<CONTINUE_SIGN_IN_WITH_FIRST_FACTOR_SELECTIONContinueSignInCognitoConfirmSignInResultNextStepAvailableChallenges> availableChallenges;
+  final List<
+    CONTINUE_SIGN_IN_WITH_FIRST_FACTOR_SELECTIONContinueSignInCognitoConfirmSignInResultNextStepAvailableChallenges
+  >
+  availableChallenges;
 
   const CONTINUE_SIGN_IN_WITH_FIRST_FACTOR_SELECTIONContinueSignInCognitoConfirmSignInResultNextStep({
     required this.session,
     required this.availableChallenges,
   });
 
-  factory CONTINUE_SIGN_IN_WITH_FIRST_FACTOR_SELECTIONContinueSignInCognitoConfirmSignInResultNextStep.fromJson(Map<String, dynamic> json) {
+  factory CONTINUE_SIGN_IN_WITH_FIRST_FACTOR_SELECTIONContinueSignInCognitoConfirmSignInResultNextStep.fromJson(
+    Map<String, dynamic> json,
+  ) {
     return CONTINUE_SIGN_IN_WITH_FIRST_FACTOR_SELECTIONContinueSignInCognitoConfirmSignInResultNextStep(
       session: json['session'] as String,
-      availableChallenges: (json['availableChallenges'] as List<dynamic>).map((e) => CONTINUE_SIGN_IN_WITH_FIRST_FACTOR_SELECTIONContinueSignInCognitoConfirmSignInResultNextStepAvailableChallenges.fromJson(e as String)).toList(),
+      availableChallenges: (json['availableChallenges'] as List<dynamic>)
+          .map(
+            (e) =>
+                CONTINUE_SIGN_IN_WITH_FIRST_FACTOR_SELECTIONContinueSignInCognitoConfirmSignInResultNextStepAvailableChallenges.fromJson(
+                  e as String,
+                ),
+          )
+          .toList(),
     );
   }
 
@@ -569,14 +990,17 @@ class CONTINUE_SIGN_IN_WITH_FIRST_FACTOR_SELECTIONContinueSignInCognitoConfirmSi
     return {
       'name': 'CONTINUE_SIGN_IN_WITH_FIRST_FACTOR_SELECTION',
       'session': session,
-      'availableChallenges': availableChallenges.map((e) => e.toJson()).toList(),
+      'availableChallenges': availableChallenges
+          .map((e) => e.toJson())
+          .toList(),
     };
   }
 
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
-      other is CONTINUE_SIGN_IN_WITH_FIRST_FACTOR_SELECTIONContinueSignInCognitoConfirmSignInResultNextStep &&
+      other
+              is CONTINUE_SIGN_IN_WITH_FIRST_FACTOR_SELECTIONContinueSignInCognitoConfirmSignInResultNextStep &&
           session == other.session &&
           blocksDeepEquals(availableChallenges, other.availableChallenges);
 
@@ -584,17 +1008,21 @@ class CONTINUE_SIGN_IN_WITH_FIRST_FACTOR_SELECTIONContinueSignInCognitoConfirmSi
   int get hashCode => Object.hash(session, blocksDeepHash(availableChallenges));
 
   @override
-  String toString() => 'CONTINUE_SIGN_IN_WITH_FIRST_FACTOR_SELECTIONContinueSignInCognitoConfirmSignInResultNextStep(session: $session, availableChallenges: $availableChallenges)';
+  String toString() =>
+      'CONTINUE_SIGN_IN_WITH_FIRST_FACTOR_SELECTIONContinueSignInCognitoConfirmSignInResultNextStep(session: $session, availableChallenges: $availableChallenges)';
 }
 
-class CONFIRM_SIGN_IN_WITH_PASSWORDContinueSignInCognitoConfirmSignInResultNextStep extends ContinueSignInCognitoConfirmSignInResultNextStep {
+class CONFIRM_SIGN_IN_WITH_PASSWORDContinueSignInCognitoConfirmSignInResultNextStep
+    extends ContinueSignInCognitoConfirmSignInResultNextStep {
   final String session;
 
   const CONFIRM_SIGN_IN_WITH_PASSWORDContinueSignInCognitoConfirmSignInResultNextStep({
     required this.session,
   });
 
-  factory CONFIRM_SIGN_IN_WITH_PASSWORDContinueSignInCognitoConfirmSignInResultNextStep.fromJson(Map<String, dynamic> json) {
+  factory CONFIRM_SIGN_IN_WITH_PASSWORDContinueSignInCognitoConfirmSignInResultNextStep.fromJson(
+    Map<String, dynamic> json,
+  ) {
     return CONFIRM_SIGN_IN_WITH_PASSWORDContinueSignInCognitoConfirmSignInResultNextStep(
       session: json['session'] as String,
     );
@@ -602,26 +1030,26 @@ class CONFIRM_SIGN_IN_WITH_PASSWORDContinueSignInCognitoConfirmSignInResultNextS
 
   @override
   Map<String, dynamic> toJson() {
-    return {
-      'name': 'CONFIRM_SIGN_IN_WITH_PASSWORD',
-      'session': session,
-    };
+    return {'name': 'CONFIRM_SIGN_IN_WITH_PASSWORD', 'session': session};
   }
 
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
-      other is CONFIRM_SIGN_IN_WITH_PASSWORDContinueSignInCognitoConfirmSignInResultNextStep &&
+      other
+              is CONFIRM_SIGN_IN_WITH_PASSWORDContinueSignInCognitoConfirmSignInResultNextStep &&
           session == other.session;
 
   @override
   int get hashCode => session.hashCode;
 
   @override
-  String toString() => 'CONFIRM_SIGN_IN_WITH_PASSWORDContinueSignInCognitoConfirmSignInResultNextStep(session: $session)';
+  String toString() =>
+      'CONFIRM_SIGN_IN_WITH_PASSWORDContinueSignInCognitoConfirmSignInResultNextStep(session: $session)';
 }
 
-class CONFIRM_SIGN_IN_WITH_FIRST_FACTOR_EMAIL_OTPContinueSignInCognitoConfirmSignInResultNextStep extends ContinueSignInCognitoConfirmSignInResultNextStep {
+class CONFIRM_SIGN_IN_WITH_FIRST_FACTOR_EMAIL_OTPContinueSignInCognitoConfirmSignInResultNextStep
+    extends ContinueSignInCognitoConfirmSignInResultNextStep {
   final String session;
   final CodeDeliveryDetails codeDeliveryDetails;
 
@@ -630,10 +1058,14 @@ class CONFIRM_SIGN_IN_WITH_FIRST_FACTOR_EMAIL_OTPContinueSignInCognitoConfirmSig
     required this.codeDeliveryDetails,
   });
 
-  factory CONFIRM_SIGN_IN_WITH_FIRST_FACTOR_EMAIL_OTPContinueSignInCognitoConfirmSignInResultNextStep.fromJson(Map<String, dynamic> json) {
+  factory CONFIRM_SIGN_IN_WITH_FIRST_FACTOR_EMAIL_OTPContinueSignInCognitoConfirmSignInResultNextStep.fromJson(
+    Map<String, dynamic> json,
+  ) {
     return CONFIRM_SIGN_IN_WITH_FIRST_FACTOR_EMAIL_OTPContinueSignInCognitoConfirmSignInResultNextStep(
       session: json['session'] as String,
-      codeDeliveryDetails: CodeDeliveryDetails.fromJson(json['codeDeliveryDetails'] as Map<String, dynamic>),
+      codeDeliveryDetails: CodeDeliveryDetails.fromJson(
+        json['codeDeliveryDetails'] as Map<String, dynamic>,
+      ),
     );
   }
 
@@ -649,7 +1081,8 @@ class CONFIRM_SIGN_IN_WITH_FIRST_FACTOR_EMAIL_OTPContinueSignInCognitoConfirmSig
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
-      other is CONFIRM_SIGN_IN_WITH_FIRST_FACTOR_EMAIL_OTPContinueSignInCognitoConfirmSignInResultNextStep &&
+      other
+              is CONFIRM_SIGN_IN_WITH_FIRST_FACTOR_EMAIL_OTPContinueSignInCognitoConfirmSignInResultNextStep &&
           session == other.session &&
           codeDeliveryDetails == other.codeDeliveryDetails;
 
@@ -657,10 +1090,12 @@ class CONFIRM_SIGN_IN_WITH_FIRST_FACTOR_EMAIL_OTPContinueSignInCognitoConfirmSig
   int get hashCode => Object.hash(session, codeDeliveryDetails);
 
   @override
-  String toString() => 'CONFIRM_SIGN_IN_WITH_FIRST_FACTOR_EMAIL_OTPContinueSignInCognitoConfirmSignInResultNextStep(session: $session, codeDeliveryDetails: $codeDeliveryDetails)';
+  String toString() =>
+      'CONFIRM_SIGN_IN_WITH_FIRST_FACTOR_EMAIL_OTPContinueSignInCognitoConfirmSignInResultNextStep(session: $session, codeDeliveryDetails: $codeDeliveryDetails)';
 }
 
-class CONFIRM_SIGN_IN_WITH_FIRST_FACTOR_SMS_OTPContinueSignInCognitoConfirmSignInResultNextStep extends ContinueSignInCognitoConfirmSignInResultNextStep {
+class CONFIRM_SIGN_IN_WITH_FIRST_FACTOR_SMS_OTPContinueSignInCognitoConfirmSignInResultNextStep
+    extends ContinueSignInCognitoConfirmSignInResultNextStep {
   final String session;
   final CodeDeliveryDetails codeDeliveryDetails;
 
@@ -669,10 +1104,14 @@ class CONFIRM_SIGN_IN_WITH_FIRST_FACTOR_SMS_OTPContinueSignInCognitoConfirmSignI
     required this.codeDeliveryDetails,
   });
 
-  factory CONFIRM_SIGN_IN_WITH_FIRST_FACTOR_SMS_OTPContinueSignInCognitoConfirmSignInResultNextStep.fromJson(Map<String, dynamic> json) {
+  factory CONFIRM_SIGN_IN_WITH_FIRST_FACTOR_SMS_OTPContinueSignInCognitoConfirmSignInResultNextStep.fromJson(
+    Map<String, dynamic> json,
+  ) {
     return CONFIRM_SIGN_IN_WITH_FIRST_FACTOR_SMS_OTPContinueSignInCognitoConfirmSignInResultNextStep(
       session: json['session'] as String,
-      codeDeliveryDetails: CodeDeliveryDetails.fromJson(json['codeDeliveryDetails'] as Map<String, dynamic>),
+      codeDeliveryDetails: CodeDeliveryDetails.fromJson(
+        json['codeDeliveryDetails'] as Map<String, dynamic>,
+      ),
     );
   }
 
@@ -688,7 +1127,8 @@ class CONFIRM_SIGN_IN_WITH_FIRST_FACTOR_SMS_OTPContinueSignInCognitoConfirmSignI
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
-      other is CONFIRM_SIGN_IN_WITH_FIRST_FACTOR_SMS_OTPContinueSignInCognitoConfirmSignInResultNextStep &&
+      other
+              is CONFIRM_SIGN_IN_WITH_FIRST_FACTOR_SMS_OTPContinueSignInCognitoConfirmSignInResultNextStep &&
           session == other.session &&
           codeDeliveryDetails == other.codeDeliveryDetails;
 
@@ -696,10 +1136,12 @@ class CONFIRM_SIGN_IN_WITH_FIRST_FACTOR_SMS_OTPContinueSignInCognitoConfirmSignI
   int get hashCode => Object.hash(session, codeDeliveryDetails);
 
   @override
-  String toString() => 'CONFIRM_SIGN_IN_WITH_FIRST_FACTOR_SMS_OTPContinueSignInCognitoConfirmSignInResultNextStep(session: $session, codeDeliveryDetails: $codeDeliveryDetails)';
+  String toString() =>
+      'CONFIRM_SIGN_IN_WITH_FIRST_FACTOR_SMS_OTPContinueSignInCognitoConfirmSignInResultNextStep(session: $session, codeDeliveryDetails: $codeDeliveryDetails)';
 }
 
-class CONFIRM_SIGN_IN_WITH_WEB_AUTHNContinueSignInCognitoConfirmSignInResultNextStep extends ContinueSignInCognitoConfirmSignInResultNextStep {
+class CONFIRM_SIGN_IN_WITH_WEB_AUTHNContinueSignInCognitoConfirmSignInResultNextStep
+    extends ContinueSignInCognitoConfirmSignInResultNextStep {
   final String session;
   final String credentialRequestOptions;
 
@@ -708,7 +1150,9 @@ class CONFIRM_SIGN_IN_WITH_WEB_AUTHNContinueSignInCognitoConfirmSignInResultNext
     required this.credentialRequestOptions,
   });
 
-  factory CONFIRM_SIGN_IN_WITH_WEB_AUTHNContinueSignInCognitoConfirmSignInResultNextStep.fromJson(Map<String, dynamic> json) {
+  factory CONFIRM_SIGN_IN_WITH_WEB_AUTHNContinueSignInCognitoConfirmSignInResultNextStep.fromJson(
+    Map<String, dynamic> json,
+  ) {
     return CONFIRM_SIGN_IN_WITH_WEB_AUTHNContinueSignInCognitoConfirmSignInResultNextStep(
       session: json['session'] as String,
       credentialRequestOptions: json['credentialRequestOptions'] as String,
@@ -727,7 +1171,8 @@ class CONFIRM_SIGN_IN_WITH_WEB_AUTHNContinueSignInCognitoConfirmSignInResultNext
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
-      other is CONFIRM_SIGN_IN_WITH_WEB_AUTHNContinueSignInCognitoConfirmSignInResultNextStep &&
+      other
+              is CONFIRM_SIGN_IN_WITH_WEB_AUTHNContinueSignInCognitoConfirmSignInResultNextStep &&
           session == other.session &&
           credentialRequestOptions == other.credentialRequestOptions;
 
@@ -735,23 +1180,23 @@ class CONFIRM_SIGN_IN_WITH_WEB_AUTHNContinueSignInCognitoConfirmSignInResultNext
   int get hashCode => Object.hash(session, credentialRequestOptions);
 
   @override
-  String toString() => 'CONFIRM_SIGN_IN_WITH_WEB_AUTHNContinueSignInCognitoConfirmSignInResultNextStep(session: $session, credentialRequestOptions: $credentialRequestOptions)';
+  String toString() =>
+      'CONFIRM_SIGN_IN_WITH_WEB_AUTHNContinueSignInCognitoConfirmSignInResultNextStep(session: $session, credentialRequestOptions: $credentialRequestOptions)';
 }
 
-class RESET_PASSWORDContinueSignInCognitoConfirmSignInResultNextStep extends ContinueSignInCognitoConfirmSignInResultNextStep {
-
+class RESET_PASSWORDContinueSignInCognitoConfirmSignInResultNextStep
+    extends ContinueSignInCognitoConfirmSignInResultNextStep {
   const RESET_PASSWORDContinueSignInCognitoConfirmSignInResultNextStep();
 
-  factory RESET_PASSWORDContinueSignInCognitoConfirmSignInResultNextStep.fromJson(Map<String, dynamic> json) {
-    return RESET_PASSWORDContinueSignInCognitoConfirmSignInResultNextStep(
-    );
+  factory RESET_PASSWORDContinueSignInCognitoConfirmSignInResultNextStep.fromJson(
+    Map<String, dynamic> json,
+  ) {
+    return RESET_PASSWORDContinueSignInCognitoConfirmSignInResultNextStep();
   }
 
   @override
   Map<String, dynamic> toJson() {
-    return {
-      'name': 'RESET_PASSWORD',
-    };
+    return {'name': 'RESET_PASSWORD'};
   }
 
   @override
@@ -763,19 +1208,27 @@ class RESET_PASSWORDContinueSignInCognitoConfirmSignInResultNextStep extends Con
   int get hashCode => runtimeType.hashCode;
 
   @override
-  String toString() => 'RESET_PASSWORDContinueSignInCognitoConfirmSignInResultNextStep()';
+  String toString() =>
+      'RESET_PASSWORDContinueSignInCognitoConfirmSignInResultNextStep()';
 }
 
-class CONFIRM_SIGN_UPContinueSignInCognitoConfirmSignInResultNextStep extends ContinueSignInCognitoConfirmSignInResultNextStep {
+class CONFIRM_SIGN_UPContinueSignInCognitoConfirmSignInResultNextStep
+    extends ContinueSignInCognitoConfirmSignInResultNextStep {
   final CodeDeliveryDetails? codeDeliveryDetails;
 
   const CONFIRM_SIGN_UPContinueSignInCognitoConfirmSignInResultNextStep({
     this.codeDeliveryDetails,
   });
 
-  factory CONFIRM_SIGN_UPContinueSignInCognitoConfirmSignInResultNextStep.fromJson(Map<String, dynamic> json) {
+  factory CONFIRM_SIGN_UPContinueSignInCognitoConfirmSignInResultNextStep.fromJson(
+    Map<String, dynamic> json,
+  ) {
     return CONFIRM_SIGN_UPContinueSignInCognitoConfirmSignInResultNextStep(
-      codeDeliveryDetails: json['codeDeliveryDetails'] != null ? CodeDeliveryDetails.fromJson(json['codeDeliveryDetails'] as Map<String, dynamic>) : null,
+      codeDeliveryDetails: json['codeDeliveryDetails'] != null
+          ? CodeDeliveryDetails.fromJson(
+              json['codeDeliveryDetails'] as Map<String, dynamic>,
+            )
+          : null,
     );
   }
 
@@ -783,7 +1236,8 @@ class CONFIRM_SIGN_UPContinueSignInCognitoConfirmSignInResultNextStep extends Co
   Map<String, dynamic> toJson() {
     return {
       'name': 'CONFIRM_SIGN_UP',
-      if (codeDeliveryDetails != null) 'codeDeliveryDetails': codeDeliveryDetails?.toJson(),
+      if (codeDeliveryDetails != null)
+        'codeDeliveryDetails': codeDeliveryDetails?.toJson(),
     };
   }
 
@@ -797,70 +1251,319 @@ class CONFIRM_SIGN_UPContinueSignInCognitoConfirmSignInResultNextStep extends Co
   int get hashCode => codeDeliveryDetails.hashCode;
 
   @override
-  String toString() => 'CONFIRM_SIGN_UPContinueSignInCognitoConfirmSignInResultNextStep(codeDeliveryDetails: $codeDeliveryDetails)';
+  String toString() =>
+      'CONFIRM_SIGN_UPContinueSignInCognitoConfirmSignInResultNextStep(codeDeliveryDetails: $codeDeliveryDetails)';
 }
 
+final class ContinueSignInCognitoConfirmSignInResultNextStepUnknown
+    extends ContinueSignInCognitoConfirmSignInResultNextStep {
+  final Map<String, dynamic> json;
 
+  const ContinueSignInCognitoConfirmSignInResultNextStepUnknown(this.json);
 
-enum CONTINUE_SIGN_IN_WITH_MFA_SELECTIONContinueSignInCognitoSignInResultNextStepAllowedMFATypes {
+  String get discriminator => json['name'] as String;
+
+  @override
+  Map<String, dynamic> toJson() => Map.of(json);
+
+  @override
+  bool operator ==(Object other) =>
+      other is ContinueSignInCognitoConfirmSignInResultNextStepUnknown &&
+      blocksDeepEquals(json, other.json);
+
+  @override
+  int get hashCode => blocksDeepHash(json);
+
+  @override
+  String toString() =>
+      'ContinueSignInCognitoConfirmSignInResultNextStepUnknown'
+      '($json)';
+}
+
+sealed class CONTINUE_SIGN_IN_WITH_MFA_SELECTIONContinueSignInCognitoSignInResultNextStepAllowedMFATypes {
+  static const SMS =
+      CONTINUE_SIGN_IN_WITH_MFA_SELECTIONContinueSignInCognitoSignInResultNextStepAllowedMFATypesKnown
+          .SMS;
+  static const TOTP =
+      CONTINUE_SIGN_IN_WITH_MFA_SELECTIONContinueSignInCognitoSignInResultNextStepAllowedMFATypesKnown
+          .TOTP;
+  static const EMAIL =
+      CONTINUE_SIGN_IN_WITH_MFA_SELECTIONContinueSignInCognitoSignInResultNextStepAllowedMFATypesKnown
+          .EMAIL;
+  static const values =
+      CONTINUE_SIGN_IN_WITH_MFA_SELECTIONContinueSignInCognitoSignInResultNextStepAllowedMFATypesKnown
+          .values;
+  static final Map<
+    String,
+    CONTINUE_SIGN_IN_WITH_MFA_SELECTIONContinueSignInCognitoSignInResultNextStepAllowedMFATypesKnown
+  >
+  _byJson =
+      CONTINUE_SIGN_IN_WITH_MFA_SELECTIONContinueSignInCognitoSignInResultNextStepAllowedMFATypesKnown
+          .values
+          .asNameMap();
+
+  String toJson();
+  static CONTINUE_SIGN_IN_WITH_MFA_SELECTIONContinueSignInCognitoSignInResultNextStepAllowedMFATypes
+  fromJson(String json) =>
+      _byJson[json] ??
+      CONTINUE_SIGN_IN_WITH_MFA_SELECTIONContinueSignInCognitoSignInResultNextStepAllowedMFATypesUnknown(
+        json,
+      );
+}
+
+enum CONTINUE_SIGN_IN_WITH_MFA_SELECTIONContinueSignInCognitoSignInResultNextStepAllowedMFATypesKnown
+    implements
+        CONTINUE_SIGN_IN_WITH_MFA_SELECTIONContinueSignInCognitoSignInResultNextStepAllowedMFATypes {
   SMS,
   TOTP,
-  EMAIL
-;
+  EMAIL;
 
+  @override
   String toJson() => name;
-  static CONTINUE_SIGN_IN_WITH_MFA_SELECTIONContinueSignInCognitoSignInResultNextStepAllowedMFATypes fromJson(String json) => values.byName(json);
 }
 
+final class CONTINUE_SIGN_IN_WITH_MFA_SELECTIONContinueSignInCognitoSignInResultNextStepAllowedMFATypesUnknown
+    implements
+        CONTINUE_SIGN_IN_WITH_MFA_SELECTIONContinueSignInCognitoSignInResultNextStepAllowedMFATypes {
+  final String value;
 
-enum CONTINUE_SIGN_IN_WITH_MFA_SETUP_SELECTIONContinueSignInCognitoSignInResultNextStepAllowedMFATypes {
+  const CONTINUE_SIGN_IN_WITH_MFA_SELECTIONContinueSignInCognitoSignInResultNextStepAllowedMFATypesUnknown(
+    this.value,
+  );
+
+  @override
+  String toJson() => value;
+
+  @override
+  bool operator ==(Object other) =>
+      other
+          is CONTINUE_SIGN_IN_WITH_MFA_SELECTIONContinueSignInCognitoSignInResultNextStepAllowedMFATypesUnknown &&
+      value == other.value;
+
+  @override
+  int get hashCode => value.hashCode;
+
+  @override
+  String toString() =>
+      'CONTINUE_SIGN_IN_WITH_MFA_SELECTIONContinueSignInCognitoSignInResultNextStepAllowedMFATypesUnknown'
+      '($value)';
+}
+
+sealed class CONTINUE_SIGN_IN_WITH_MFA_SETUP_SELECTIONContinueSignInCognitoSignInResultNextStepAllowedMFATypes {
+  static const TOTP =
+      CONTINUE_SIGN_IN_WITH_MFA_SETUP_SELECTIONContinueSignInCognitoSignInResultNextStepAllowedMFATypesKnown
+          .TOTP;
+  static const EMAIL =
+      CONTINUE_SIGN_IN_WITH_MFA_SETUP_SELECTIONContinueSignInCognitoSignInResultNextStepAllowedMFATypesKnown
+          .EMAIL;
+  static const values =
+      CONTINUE_SIGN_IN_WITH_MFA_SETUP_SELECTIONContinueSignInCognitoSignInResultNextStepAllowedMFATypesKnown
+          .values;
+  static final Map<
+    String,
+    CONTINUE_SIGN_IN_WITH_MFA_SETUP_SELECTIONContinueSignInCognitoSignInResultNextStepAllowedMFATypesKnown
+  >
+  _byJson =
+      CONTINUE_SIGN_IN_WITH_MFA_SETUP_SELECTIONContinueSignInCognitoSignInResultNextStepAllowedMFATypesKnown
+          .values
+          .asNameMap();
+
+  String toJson();
+  static CONTINUE_SIGN_IN_WITH_MFA_SETUP_SELECTIONContinueSignInCognitoSignInResultNextStepAllowedMFATypes
+  fromJson(String json) =>
+      _byJson[json] ??
+      CONTINUE_SIGN_IN_WITH_MFA_SETUP_SELECTIONContinueSignInCognitoSignInResultNextStepAllowedMFATypesUnknown(
+        json,
+      );
+}
+
+enum CONTINUE_SIGN_IN_WITH_MFA_SETUP_SELECTIONContinueSignInCognitoSignInResultNextStepAllowedMFATypesKnown
+    implements
+        CONTINUE_SIGN_IN_WITH_MFA_SETUP_SELECTIONContinueSignInCognitoSignInResultNextStepAllowedMFATypes {
   TOTP,
-  EMAIL
-;
+  EMAIL;
 
+  @override
   String toJson() => name;
-  static CONTINUE_SIGN_IN_WITH_MFA_SETUP_SELECTIONContinueSignInCognitoSignInResultNextStepAllowedMFATypes fromJson(String json) => values.byName(json);
 }
 
+final class CONTINUE_SIGN_IN_WITH_MFA_SETUP_SELECTIONContinueSignInCognitoSignInResultNextStepAllowedMFATypesUnknown
+    implements
+        CONTINUE_SIGN_IN_WITH_MFA_SETUP_SELECTIONContinueSignInCognitoSignInResultNextStepAllowedMFATypes {
+  final String value;
 
-enum CONTINUE_SIGN_IN_WITH_FIRST_FACTOR_SELECTIONContinueSignInCognitoSignInResultNextStepAvailableChallenges {
+  const CONTINUE_SIGN_IN_WITH_MFA_SETUP_SELECTIONContinueSignInCognitoSignInResultNextStepAllowedMFATypesUnknown(
+    this.value,
+  );
+
+  @override
+  String toJson() => value;
+
+  @override
+  bool operator ==(Object other) =>
+      other
+          is CONTINUE_SIGN_IN_WITH_MFA_SETUP_SELECTIONContinueSignInCognitoSignInResultNextStepAllowedMFATypesUnknown &&
+      value == other.value;
+
+  @override
+  int get hashCode => value.hashCode;
+
+  @override
+  String toString() =>
+      'CONTINUE_SIGN_IN_WITH_MFA_SETUP_SELECTIONContinueSignInCognitoSignInResultNextStepAllowedMFATypesUnknown'
+      '($value)';
+}
+
+sealed class CONTINUE_SIGN_IN_WITH_FIRST_FACTOR_SELECTIONContinueSignInCognitoSignInResultNextStepAvailableChallenges {
+  static const PASSWORD =
+      CONTINUE_SIGN_IN_WITH_FIRST_FACTOR_SELECTIONContinueSignInCognitoSignInResultNextStepAvailableChallengesKnown
+          .PASSWORD;
+  static const EMAIL_OTP =
+      CONTINUE_SIGN_IN_WITH_FIRST_FACTOR_SELECTIONContinueSignInCognitoSignInResultNextStepAvailableChallengesKnown
+          .EMAIL_OTP;
+  static const SMS_OTP =
+      CONTINUE_SIGN_IN_WITH_FIRST_FACTOR_SELECTIONContinueSignInCognitoSignInResultNextStepAvailableChallengesKnown
+          .SMS_OTP;
+  static const WEB_AUTHN =
+      CONTINUE_SIGN_IN_WITH_FIRST_FACTOR_SELECTIONContinueSignInCognitoSignInResultNextStepAvailableChallengesKnown
+          .WEB_AUTHN;
+  static const values =
+      CONTINUE_SIGN_IN_WITH_FIRST_FACTOR_SELECTIONContinueSignInCognitoSignInResultNextStepAvailableChallengesKnown
+          .values;
+  static final Map<
+    String,
+    CONTINUE_SIGN_IN_WITH_FIRST_FACTOR_SELECTIONContinueSignInCognitoSignInResultNextStepAvailableChallengesKnown
+  >
+  _byJson =
+      CONTINUE_SIGN_IN_WITH_FIRST_FACTOR_SELECTIONContinueSignInCognitoSignInResultNextStepAvailableChallengesKnown
+          .values
+          .asNameMap();
+
+  String toJson();
+  static CONTINUE_SIGN_IN_WITH_FIRST_FACTOR_SELECTIONContinueSignInCognitoSignInResultNextStepAvailableChallenges
+  fromJson(String json) =>
+      _byJson[json] ??
+      CONTINUE_SIGN_IN_WITH_FIRST_FACTOR_SELECTIONContinueSignInCognitoSignInResultNextStepAvailableChallengesUnknown(
+        json,
+      );
+}
+
+enum CONTINUE_SIGN_IN_WITH_FIRST_FACTOR_SELECTIONContinueSignInCognitoSignInResultNextStepAvailableChallengesKnown
+    implements
+        CONTINUE_SIGN_IN_WITH_FIRST_FACTOR_SELECTIONContinueSignInCognitoSignInResultNextStepAvailableChallenges {
   PASSWORD,
   EMAIL_OTP,
   SMS_OTP,
-  WEB_AUTHN
-;
+  WEB_AUTHN;
 
+  @override
   String toJson() => name;
-  static CONTINUE_SIGN_IN_WITH_FIRST_FACTOR_SELECTIONContinueSignInCognitoSignInResultNextStepAvailableChallenges fromJson(String json) => values.byName(json);
 }
 
+final class CONTINUE_SIGN_IN_WITH_FIRST_FACTOR_SELECTIONContinueSignInCognitoSignInResultNextStepAvailableChallengesUnknown
+    implements
+        CONTINUE_SIGN_IN_WITH_FIRST_FACTOR_SELECTIONContinueSignInCognitoSignInResultNextStepAvailableChallenges {
+  final String value;
+
+  const CONTINUE_SIGN_IN_WITH_FIRST_FACTOR_SELECTIONContinueSignInCognitoSignInResultNextStepAvailableChallengesUnknown(
+    this.value,
+  );
+
+  @override
+  String toJson() => value;
+
+  @override
+  bool operator ==(Object other) =>
+      other
+          is CONTINUE_SIGN_IN_WITH_FIRST_FACTOR_SELECTIONContinueSignInCognitoSignInResultNextStepAvailableChallengesUnknown &&
+      value == other.value;
+
+  @override
+  int get hashCode => value.hashCode;
+
+  @override
+  String toString() =>
+      'CONTINUE_SIGN_IN_WITH_FIRST_FACTOR_SELECTIONContinueSignInCognitoSignInResultNextStepAvailableChallengesUnknown'
+      '($value)';
+}
 
 sealed class ContinueSignInCognitoSignInResultNextStep {
   const ContinueSignInCognitoSignInResultNextStep();
   Map<String, dynamic> toJson();
-  static ContinueSignInCognitoSignInResultNextStep fromJson(Map<String, dynamic> json) {
+  static ContinueSignInCognitoSignInResultNextStep fromJson(
+    Map<String, dynamic> json,
+  ) {
     switch (json['name'] as String) {
-      case 'CONFIRM_SIGN_IN_WITH_SMS_CODE': return CONFIRM_SIGN_IN_WITH_SMS_CODEContinueSignInCognitoSignInResultNextStep.fromJson(json);
-      case 'CONFIRM_SIGN_IN_WITH_TOTP_CODE': return CONFIRM_SIGN_IN_WITH_TOTP_CODEContinueSignInCognitoSignInResultNextStep.fromJson(json);
-      case 'CONFIRM_SIGN_IN_WITH_EMAIL_CODE': return CONFIRM_SIGN_IN_WITH_EMAIL_CODEContinueSignInCognitoSignInResultNextStep.fromJson(json);
-      case 'CONTINUE_SIGN_IN_WITH_MFA_SELECTION': return CONTINUE_SIGN_IN_WITH_MFA_SELECTIONContinueSignInCognitoSignInResultNextStep.fromJson(json);
-      case 'CONTINUE_SIGN_IN_WITH_MFA_SETUP_SELECTION': return CONTINUE_SIGN_IN_WITH_MFA_SETUP_SELECTIONContinueSignInCognitoSignInResultNextStep.fromJson(json);
-      case 'CONTINUE_SIGN_IN_WITH_TOTP_SETUP': return CONTINUE_SIGN_IN_WITH_TOTP_SETUPContinueSignInCognitoSignInResultNextStep.fromJson(json);
-      case 'CONTINUE_SIGN_IN_WITH_EMAIL_SETUP': return CONTINUE_SIGN_IN_WITH_EMAIL_SETUPContinueSignInCognitoSignInResultNextStep.fromJson(json);
-      case 'CONFIRM_SIGN_IN_WITH_NEW_PASSWORD_REQUIRED': return CONFIRM_SIGN_IN_WITH_NEW_PASSWORD_REQUIREDContinueSignInCognitoSignInResultNextStep.fromJson(json);
-      case 'CONTINUE_SIGN_IN_WITH_FIRST_FACTOR_SELECTION': return CONTINUE_SIGN_IN_WITH_FIRST_FACTOR_SELECTIONContinueSignInCognitoSignInResultNextStep.fromJson(json);
-      case 'CONFIRM_SIGN_IN_WITH_PASSWORD': return CONFIRM_SIGN_IN_WITH_PASSWORDContinueSignInCognitoSignInResultNextStep.fromJson(json);
-      case 'CONFIRM_SIGN_IN_WITH_FIRST_FACTOR_EMAIL_OTP': return CONFIRM_SIGN_IN_WITH_FIRST_FACTOR_EMAIL_OTPContinueSignInCognitoSignInResultNextStep.fromJson(json);
-      case 'CONFIRM_SIGN_IN_WITH_FIRST_FACTOR_SMS_OTP': return CONFIRM_SIGN_IN_WITH_FIRST_FACTOR_SMS_OTPContinueSignInCognitoSignInResultNextStep.fromJson(json);
-      case 'CONFIRM_SIGN_IN_WITH_WEB_AUTHN': return CONFIRM_SIGN_IN_WITH_WEB_AUTHNContinueSignInCognitoSignInResultNextStep.fromJson(json);
-      case 'RESET_PASSWORD': return RESET_PASSWORDContinueSignInCognitoSignInResultNextStep.fromJson(json);
-      case 'CONFIRM_SIGN_UP': return CONFIRM_SIGN_UPContinueSignInCognitoSignInResultNextStep.fromJson(json);
-      default: throw ArgumentError('Unknown name: ${json['name']}');
+      case 'CONFIRM_SIGN_IN_WITH_SMS_CODE':
+        return CONFIRM_SIGN_IN_WITH_SMS_CODEContinueSignInCognitoSignInResultNextStep.fromJson(
+          json,
+        );
+      case 'CONFIRM_SIGN_IN_WITH_TOTP_CODE':
+        return CONFIRM_SIGN_IN_WITH_TOTP_CODEContinueSignInCognitoSignInResultNextStep.fromJson(
+          json,
+        );
+      case 'CONFIRM_SIGN_IN_WITH_EMAIL_CODE':
+        return CONFIRM_SIGN_IN_WITH_EMAIL_CODEContinueSignInCognitoSignInResultNextStep.fromJson(
+          json,
+        );
+      case 'CONTINUE_SIGN_IN_WITH_MFA_SELECTION':
+        return CONTINUE_SIGN_IN_WITH_MFA_SELECTIONContinueSignInCognitoSignInResultNextStep.fromJson(
+          json,
+        );
+      case 'CONTINUE_SIGN_IN_WITH_MFA_SETUP_SELECTION':
+        return CONTINUE_SIGN_IN_WITH_MFA_SETUP_SELECTIONContinueSignInCognitoSignInResultNextStep.fromJson(
+          json,
+        );
+      case 'CONTINUE_SIGN_IN_WITH_TOTP_SETUP':
+        return CONTINUE_SIGN_IN_WITH_TOTP_SETUPContinueSignInCognitoSignInResultNextStep.fromJson(
+          json,
+        );
+      case 'CONTINUE_SIGN_IN_WITH_EMAIL_SETUP':
+        return CONTINUE_SIGN_IN_WITH_EMAIL_SETUPContinueSignInCognitoSignInResultNextStep.fromJson(
+          json,
+        );
+      case 'CONFIRM_SIGN_IN_WITH_NEW_PASSWORD_REQUIRED':
+        return CONFIRM_SIGN_IN_WITH_NEW_PASSWORD_REQUIREDContinueSignInCognitoSignInResultNextStep.fromJson(
+          json,
+        );
+      case 'CONTINUE_SIGN_IN_WITH_FIRST_FACTOR_SELECTION':
+        return CONTINUE_SIGN_IN_WITH_FIRST_FACTOR_SELECTIONContinueSignInCognitoSignInResultNextStep.fromJson(
+          json,
+        );
+      case 'CONFIRM_SIGN_IN_WITH_PASSWORD':
+        return CONFIRM_SIGN_IN_WITH_PASSWORDContinueSignInCognitoSignInResultNextStep.fromJson(
+          json,
+        );
+      case 'CONFIRM_SIGN_IN_WITH_FIRST_FACTOR_EMAIL_OTP':
+        return CONFIRM_SIGN_IN_WITH_FIRST_FACTOR_EMAIL_OTPContinueSignInCognitoSignInResultNextStep.fromJson(
+          json,
+        );
+      case 'CONFIRM_SIGN_IN_WITH_FIRST_FACTOR_SMS_OTP':
+        return CONFIRM_SIGN_IN_WITH_FIRST_FACTOR_SMS_OTPContinueSignInCognitoSignInResultNextStep.fromJson(
+          json,
+        );
+      case 'CONFIRM_SIGN_IN_WITH_WEB_AUTHN':
+        return CONFIRM_SIGN_IN_WITH_WEB_AUTHNContinueSignInCognitoSignInResultNextStep.fromJson(
+          json,
+        );
+      case 'RESET_PASSWORD':
+        return RESET_PASSWORDContinueSignInCognitoSignInResultNextStep.fromJson(
+          json,
+        );
+      case 'CONFIRM_SIGN_UP':
+        return CONFIRM_SIGN_UPContinueSignInCognitoSignInResultNextStep.fromJson(
+          json,
+        );
+      default:
+        return ContinueSignInCognitoSignInResultNextStepUnknown(
+          _blocksFrozenObject(json),
+        );
     }
   }
 }
 
-class CONFIRM_SIGN_IN_WITH_SMS_CODEContinueSignInCognitoSignInResultNextStep extends ContinueSignInCognitoSignInResultNextStep {
+class CONFIRM_SIGN_IN_WITH_SMS_CODEContinueSignInCognitoSignInResultNextStep
+    extends ContinueSignInCognitoSignInResultNextStep {
   final String session;
   final CodeDeliveryDetails codeDeliveryDetails;
 
@@ -869,10 +1572,14 @@ class CONFIRM_SIGN_IN_WITH_SMS_CODEContinueSignInCognitoSignInResultNextStep ext
     required this.codeDeliveryDetails,
   });
 
-  factory CONFIRM_SIGN_IN_WITH_SMS_CODEContinueSignInCognitoSignInResultNextStep.fromJson(Map<String, dynamic> json) {
+  factory CONFIRM_SIGN_IN_WITH_SMS_CODEContinueSignInCognitoSignInResultNextStep.fromJson(
+    Map<String, dynamic> json,
+  ) {
     return CONFIRM_SIGN_IN_WITH_SMS_CODEContinueSignInCognitoSignInResultNextStep(
       session: json['session'] as String,
-      codeDeliveryDetails: CodeDeliveryDetails.fromJson(json['codeDeliveryDetails'] as Map<String, dynamic>),
+      codeDeliveryDetails: CodeDeliveryDetails.fromJson(
+        json['codeDeliveryDetails'] as Map<String, dynamic>,
+      ),
     );
   }
 
@@ -896,17 +1603,21 @@ class CONFIRM_SIGN_IN_WITH_SMS_CODEContinueSignInCognitoSignInResultNextStep ext
   int get hashCode => Object.hash(session, codeDeliveryDetails);
 
   @override
-  String toString() => 'CONFIRM_SIGN_IN_WITH_SMS_CODEContinueSignInCognitoSignInResultNextStep(session: $session, codeDeliveryDetails: $codeDeliveryDetails)';
+  String toString() =>
+      'CONFIRM_SIGN_IN_WITH_SMS_CODEContinueSignInCognitoSignInResultNextStep(session: $session, codeDeliveryDetails: $codeDeliveryDetails)';
 }
 
-class CONFIRM_SIGN_IN_WITH_TOTP_CODEContinueSignInCognitoSignInResultNextStep extends ContinueSignInCognitoSignInResultNextStep {
+class CONFIRM_SIGN_IN_WITH_TOTP_CODEContinueSignInCognitoSignInResultNextStep
+    extends ContinueSignInCognitoSignInResultNextStep {
   final String session;
 
   const CONFIRM_SIGN_IN_WITH_TOTP_CODEContinueSignInCognitoSignInResultNextStep({
     required this.session,
   });
 
-  factory CONFIRM_SIGN_IN_WITH_TOTP_CODEContinueSignInCognitoSignInResultNextStep.fromJson(Map<String, dynamic> json) {
+  factory CONFIRM_SIGN_IN_WITH_TOTP_CODEContinueSignInCognitoSignInResultNextStep.fromJson(
+    Map<String, dynamic> json,
+  ) {
     return CONFIRM_SIGN_IN_WITH_TOTP_CODEContinueSignInCognitoSignInResultNextStep(
       session: json['session'] as String,
     );
@@ -914,26 +1625,26 @@ class CONFIRM_SIGN_IN_WITH_TOTP_CODEContinueSignInCognitoSignInResultNextStep ex
 
   @override
   Map<String, dynamic> toJson() {
-    return {
-      'name': 'CONFIRM_SIGN_IN_WITH_TOTP_CODE',
-      'session': session,
-    };
+    return {'name': 'CONFIRM_SIGN_IN_WITH_TOTP_CODE', 'session': session};
   }
 
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
-      other is CONFIRM_SIGN_IN_WITH_TOTP_CODEContinueSignInCognitoSignInResultNextStep &&
+      other
+              is CONFIRM_SIGN_IN_WITH_TOTP_CODEContinueSignInCognitoSignInResultNextStep &&
           session == other.session;
 
   @override
   int get hashCode => session.hashCode;
 
   @override
-  String toString() => 'CONFIRM_SIGN_IN_WITH_TOTP_CODEContinueSignInCognitoSignInResultNextStep(session: $session)';
+  String toString() =>
+      'CONFIRM_SIGN_IN_WITH_TOTP_CODEContinueSignInCognitoSignInResultNextStep(session: $session)';
 }
 
-class CONFIRM_SIGN_IN_WITH_EMAIL_CODEContinueSignInCognitoSignInResultNextStep extends ContinueSignInCognitoSignInResultNextStep {
+class CONFIRM_SIGN_IN_WITH_EMAIL_CODEContinueSignInCognitoSignInResultNextStep
+    extends ContinueSignInCognitoSignInResultNextStep {
   final String session;
   final CodeDeliveryDetails codeDeliveryDetails;
 
@@ -942,10 +1653,14 @@ class CONFIRM_SIGN_IN_WITH_EMAIL_CODEContinueSignInCognitoSignInResultNextStep e
     required this.codeDeliveryDetails,
   });
 
-  factory CONFIRM_SIGN_IN_WITH_EMAIL_CODEContinueSignInCognitoSignInResultNextStep.fromJson(Map<String, dynamic> json) {
+  factory CONFIRM_SIGN_IN_WITH_EMAIL_CODEContinueSignInCognitoSignInResultNextStep.fromJson(
+    Map<String, dynamic> json,
+  ) {
     return CONFIRM_SIGN_IN_WITH_EMAIL_CODEContinueSignInCognitoSignInResultNextStep(
       session: json['session'] as String,
-      codeDeliveryDetails: CodeDeliveryDetails.fromJson(json['codeDeliveryDetails'] as Map<String, dynamic>),
+      codeDeliveryDetails: CodeDeliveryDetails.fromJson(
+        json['codeDeliveryDetails'] as Map<String, dynamic>,
+      ),
     );
   }
 
@@ -961,7 +1676,8 @@ class CONFIRM_SIGN_IN_WITH_EMAIL_CODEContinueSignInCognitoSignInResultNextStep e
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
-      other is CONFIRM_SIGN_IN_WITH_EMAIL_CODEContinueSignInCognitoSignInResultNextStep &&
+      other
+              is CONFIRM_SIGN_IN_WITH_EMAIL_CODEContinueSignInCognitoSignInResultNextStep &&
           session == other.session &&
           codeDeliveryDetails == other.codeDeliveryDetails;
 
@@ -969,22 +1685,36 @@ class CONFIRM_SIGN_IN_WITH_EMAIL_CODEContinueSignInCognitoSignInResultNextStep e
   int get hashCode => Object.hash(session, codeDeliveryDetails);
 
   @override
-  String toString() => 'CONFIRM_SIGN_IN_WITH_EMAIL_CODEContinueSignInCognitoSignInResultNextStep(session: $session, codeDeliveryDetails: $codeDeliveryDetails)';
+  String toString() =>
+      'CONFIRM_SIGN_IN_WITH_EMAIL_CODEContinueSignInCognitoSignInResultNextStep(session: $session, codeDeliveryDetails: $codeDeliveryDetails)';
 }
 
-class CONTINUE_SIGN_IN_WITH_MFA_SELECTIONContinueSignInCognitoSignInResultNextStep extends ContinueSignInCognitoSignInResultNextStep {
+class CONTINUE_SIGN_IN_WITH_MFA_SELECTIONContinueSignInCognitoSignInResultNextStep
+    extends ContinueSignInCognitoSignInResultNextStep {
   final String session;
-  final List<CONTINUE_SIGN_IN_WITH_MFA_SELECTIONContinueSignInCognitoSignInResultNextStepAllowedMFATypes> allowedMFATypes;
+  final List<
+    CONTINUE_SIGN_IN_WITH_MFA_SELECTIONContinueSignInCognitoSignInResultNextStepAllowedMFATypes
+  >
+  allowedMFATypes;
 
   const CONTINUE_SIGN_IN_WITH_MFA_SELECTIONContinueSignInCognitoSignInResultNextStep({
     required this.session,
     required this.allowedMFATypes,
   });
 
-  factory CONTINUE_SIGN_IN_WITH_MFA_SELECTIONContinueSignInCognitoSignInResultNextStep.fromJson(Map<String, dynamic> json) {
+  factory CONTINUE_SIGN_IN_WITH_MFA_SELECTIONContinueSignInCognitoSignInResultNextStep.fromJson(
+    Map<String, dynamic> json,
+  ) {
     return CONTINUE_SIGN_IN_WITH_MFA_SELECTIONContinueSignInCognitoSignInResultNextStep(
       session: json['session'] as String,
-      allowedMFATypes: (json['allowedMFATypes'] as List<dynamic>).map((e) => CONTINUE_SIGN_IN_WITH_MFA_SELECTIONContinueSignInCognitoSignInResultNextStepAllowedMFATypes.fromJson(e as String)).toList(),
+      allowedMFATypes: (json['allowedMFATypes'] as List<dynamic>)
+          .map(
+            (e) =>
+                CONTINUE_SIGN_IN_WITH_MFA_SELECTIONContinueSignInCognitoSignInResultNextStepAllowedMFATypes.fromJson(
+                  e as String,
+                ),
+          )
+          .toList(),
     );
   }
 
@@ -1000,7 +1730,8 @@ class CONTINUE_SIGN_IN_WITH_MFA_SELECTIONContinueSignInCognitoSignInResultNextSt
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
-      other is CONTINUE_SIGN_IN_WITH_MFA_SELECTIONContinueSignInCognitoSignInResultNextStep &&
+      other
+              is CONTINUE_SIGN_IN_WITH_MFA_SELECTIONContinueSignInCognitoSignInResultNextStep &&
           session == other.session &&
           blocksDeepEquals(allowedMFATypes, other.allowedMFATypes);
 
@@ -1008,22 +1739,36 @@ class CONTINUE_SIGN_IN_WITH_MFA_SELECTIONContinueSignInCognitoSignInResultNextSt
   int get hashCode => Object.hash(session, blocksDeepHash(allowedMFATypes));
 
   @override
-  String toString() => 'CONTINUE_SIGN_IN_WITH_MFA_SELECTIONContinueSignInCognitoSignInResultNextStep(session: $session, allowedMFATypes: $allowedMFATypes)';
+  String toString() =>
+      'CONTINUE_SIGN_IN_WITH_MFA_SELECTIONContinueSignInCognitoSignInResultNextStep(session: $session, allowedMFATypes: $allowedMFATypes)';
 }
 
-class CONTINUE_SIGN_IN_WITH_MFA_SETUP_SELECTIONContinueSignInCognitoSignInResultNextStep extends ContinueSignInCognitoSignInResultNextStep {
+class CONTINUE_SIGN_IN_WITH_MFA_SETUP_SELECTIONContinueSignInCognitoSignInResultNextStep
+    extends ContinueSignInCognitoSignInResultNextStep {
   final String session;
-  final List<CONTINUE_SIGN_IN_WITH_MFA_SETUP_SELECTIONContinueSignInCognitoSignInResultNextStepAllowedMFATypes> allowedMFATypes;
+  final List<
+    CONTINUE_SIGN_IN_WITH_MFA_SETUP_SELECTIONContinueSignInCognitoSignInResultNextStepAllowedMFATypes
+  >
+  allowedMFATypes;
 
   const CONTINUE_SIGN_IN_WITH_MFA_SETUP_SELECTIONContinueSignInCognitoSignInResultNextStep({
     required this.session,
     required this.allowedMFATypes,
   });
 
-  factory CONTINUE_SIGN_IN_WITH_MFA_SETUP_SELECTIONContinueSignInCognitoSignInResultNextStep.fromJson(Map<String, dynamic> json) {
+  factory CONTINUE_SIGN_IN_WITH_MFA_SETUP_SELECTIONContinueSignInCognitoSignInResultNextStep.fromJson(
+    Map<String, dynamic> json,
+  ) {
     return CONTINUE_SIGN_IN_WITH_MFA_SETUP_SELECTIONContinueSignInCognitoSignInResultNextStep(
       session: json['session'] as String,
-      allowedMFATypes: (json['allowedMFATypes'] as List<dynamic>).map((e) => CONTINUE_SIGN_IN_WITH_MFA_SETUP_SELECTIONContinueSignInCognitoSignInResultNextStepAllowedMFATypes.fromJson(e as String)).toList(),
+      allowedMFATypes: (json['allowedMFATypes'] as List<dynamic>)
+          .map(
+            (e) =>
+                CONTINUE_SIGN_IN_WITH_MFA_SETUP_SELECTIONContinueSignInCognitoSignInResultNextStepAllowedMFATypes.fromJson(
+                  e as String,
+                ),
+          )
+          .toList(),
     );
   }
 
@@ -1039,7 +1784,8 @@ class CONTINUE_SIGN_IN_WITH_MFA_SETUP_SELECTIONContinueSignInCognitoSignInResult
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
-      other is CONTINUE_SIGN_IN_WITH_MFA_SETUP_SELECTIONContinueSignInCognitoSignInResultNextStep &&
+      other
+              is CONTINUE_SIGN_IN_WITH_MFA_SETUP_SELECTIONContinueSignInCognitoSignInResultNextStep &&
           session == other.session &&
           blocksDeepEquals(allowedMFATypes, other.allowedMFATypes);
 
@@ -1047,10 +1793,12 @@ class CONTINUE_SIGN_IN_WITH_MFA_SETUP_SELECTIONContinueSignInCognitoSignInResult
   int get hashCode => Object.hash(session, blocksDeepHash(allowedMFATypes));
 
   @override
-  String toString() => 'CONTINUE_SIGN_IN_WITH_MFA_SETUP_SELECTIONContinueSignInCognitoSignInResultNextStep(session: $session, allowedMFATypes: $allowedMFATypes)';
+  String toString() =>
+      'CONTINUE_SIGN_IN_WITH_MFA_SETUP_SELECTIONContinueSignInCognitoSignInResultNextStep(session: $session, allowedMFATypes: $allowedMFATypes)';
 }
 
-class CONTINUE_SIGN_IN_WITH_TOTP_SETUPContinueSignInCognitoSignInResultNextStep extends ContinueSignInCognitoSignInResultNextStep {
+class CONTINUE_SIGN_IN_WITH_TOTP_SETUPContinueSignInCognitoSignInResultNextStep
+    extends ContinueSignInCognitoSignInResultNextStep {
   final String session;
   final String sharedSecret;
 
@@ -1059,7 +1807,9 @@ class CONTINUE_SIGN_IN_WITH_TOTP_SETUPContinueSignInCognitoSignInResultNextStep 
     required this.sharedSecret,
   });
 
-  factory CONTINUE_SIGN_IN_WITH_TOTP_SETUPContinueSignInCognitoSignInResultNextStep.fromJson(Map<String, dynamic> json) {
+  factory CONTINUE_SIGN_IN_WITH_TOTP_SETUPContinueSignInCognitoSignInResultNextStep.fromJson(
+    Map<String, dynamic> json,
+  ) {
     return CONTINUE_SIGN_IN_WITH_TOTP_SETUPContinueSignInCognitoSignInResultNextStep(
       session: json['session'] as String,
       sharedSecret: json['sharedSecret'] as String,
@@ -1078,7 +1828,8 @@ class CONTINUE_SIGN_IN_WITH_TOTP_SETUPContinueSignInCognitoSignInResultNextStep 
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
-      other is CONTINUE_SIGN_IN_WITH_TOTP_SETUPContinueSignInCognitoSignInResultNextStep &&
+      other
+              is CONTINUE_SIGN_IN_WITH_TOTP_SETUPContinueSignInCognitoSignInResultNextStep &&
           session == other.session &&
           sharedSecret == other.sharedSecret;
 
@@ -1086,17 +1837,21 @@ class CONTINUE_SIGN_IN_WITH_TOTP_SETUPContinueSignInCognitoSignInResultNextStep 
   int get hashCode => Object.hash(session, sharedSecret);
 
   @override
-  String toString() => 'CONTINUE_SIGN_IN_WITH_TOTP_SETUPContinueSignInCognitoSignInResultNextStep(session: $session, sharedSecret: $sharedSecret)';
+  String toString() =>
+      'CONTINUE_SIGN_IN_WITH_TOTP_SETUPContinueSignInCognitoSignInResultNextStep(session: $session, sharedSecret: $sharedSecret)';
 }
 
-class CONTINUE_SIGN_IN_WITH_EMAIL_SETUPContinueSignInCognitoSignInResultNextStep extends ContinueSignInCognitoSignInResultNextStep {
+class CONTINUE_SIGN_IN_WITH_EMAIL_SETUPContinueSignInCognitoSignInResultNextStep
+    extends ContinueSignInCognitoSignInResultNextStep {
   final String session;
 
   const CONTINUE_SIGN_IN_WITH_EMAIL_SETUPContinueSignInCognitoSignInResultNextStep({
     required this.session,
   });
 
-  factory CONTINUE_SIGN_IN_WITH_EMAIL_SETUPContinueSignInCognitoSignInResultNextStep.fromJson(Map<String, dynamic> json) {
+  factory CONTINUE_SIGN_IN_WITH_EMAIL_SETUPContinueSignInCognitoSignInResultNextStep.fromJson(
+    Map<String, dynamic> json,
+  ) {
     return CONTINUE_SIGN_IN_WITH_EMAIL_SETUPContinueSignInCognitoSignInResultNextStep(
       session: json['session'] as String,
     );
@@ -1104,26 +1859,26 @@ class CONTINUE_SIGN_IN_WITH_EMAIL_SETUPContinueSignInCognitoSignInResultNextStep
 
   @override
   Map<String, dynamic> toJson() {
-    return {
-      'name': 'CONTINUE_SIGN_IN_WITH_EMAIL_SETUP',
-      'session': session,
-    };
+    return {'name': 'CONTINUE_SIGN_IN_WITH_EMAIL_SETUP', 'session': session};
   }
 
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
-      other is CONTINUE_SIGN_IN_WITH_EMAIL_SETUPContinueSignInCognitoSignInResultNextStep &&
+      other
+              is CONTINUE_SIGN_IN_WITH_EMAIL_SETUPContinueSignInCognitoSignInResultNextStep &&
           session == other.session;
 
   @override
   int get hashCode => session.hashCode;
 
   @override
-  String toString() => 'CONTINUE_SIGN_IN_WITH_EMAIL_SETUPContinueSignInCognitoSignInResultNextStep(session: $session)';
+  String toString() =>
+      'CONTINUE_SIGN_IN_WITH_EMAIL_SETUPContinueSignInCognitoSignInResultNextStep(session: $session)';
 }
 
-class CONFIRM_SIGN_IN_WITH_NEW_PASSWORD_REQUIREDContinueSignInCognitoSignInResultNextStep extends ContinueSignInCognitoSignInResultNextStep {
+class CONFIRM_SIGN_IN_WITH_NEW_PASSWORD_REQUIREDContinueSignInCognitoSignInResultNextStep
+    extends ContinueSignInCognitoSignInResultNextStep {
   final String session;
   final List<String>? requiredAttributes;
 
@@ -1132,10 +1887,13 @@ class CONFIRM_SIGN_IN_WITH_NEW_PASSWORD_REQUIREDContinueSignInCognitoSignInResul
     this.requiredAttributes,
   });
 
-  factory CONFIRM_SIGN_IN_WITH_NEW_PASSWORD_REQUIREDContinueSignInCognitoSignInResultNextStep.fromJson(Map<String, dynamic> json) {
+  factory CONFIRM_SIGN_IN_WITH_NEW_PASSWORD_REQUIREDContinueSignInCognitoSignInResultNextStep.fromJson(
+    Map<String, dynamic> json,
+  ) {
     return CONFIRM_SIGN_IN_WITH_NEW_PASSWORD_REQUIREDContinueSignInCognitoSignInResultNextStep(
       session: json['session'] as String,
-      requiredAttributes: (json['requiredAttributes'] as List<dynamic>?)?.cast<String>(),
+      requiredAttributes: (json['requiredAttributes'] as List<dynamic>?)
+          ?.cast<String>(),
     );
   }
 
@@ -1151,7 +1909,8 @@ class CONFIRM_SIGN_IN_WITH_NEW_PASSWORD_REQUIREDContinueSignInCognitoSignInResul
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
-      other is CONFIRM_SIGN_IN_WITH_NEW_PASSWORD_REQUIREDContinueSignInCognitoSignInResultNextStep &&
+      other
+              is CONFIRM_SIGN_IN_WITH_NEW_PASSWORD_REQUIREDContinueSignInCognitoSignInResultNextStep &&
           session == other.session &&
           blocksDeepEquals(requiredAttributes, other.requiredAttributes);
 
@@ -1159,22 +1918,36 @@ class CONFIRM_SIGN_IN_WITH_NEW_PASSWORD_REQUIREDContinueSignInCognitoSignInResul
   int get hashCode => Object.hash(session, blocksDeepHash(requiredAttributes));
 
   @override
-  String toString() => 'CONFIRM_SIGN_IN_WITH_NEW_PASSWORD_REQUIREDContinueSignInCognitoSignInResultNextStep(session: $session, requiredAttributes: $requiredAttributes)';
+  String toString() =>
+      'CONFIRM_SIGN_IN_WITH_NEW_PASSWORD_REQUIREDContinueSignInCognitoSignInResultNextStep(session: $session, requiredAttributes: $requiredAttributes)';
 }
 
-class CONTINUE_SIGN_IN_WITH_FIRST_FACTOR_SELECTIONContinueSignInCognitoSignInResultNextStep extends ContinueSignInCognitoSignInResultNextStep {
+class CONTINUE_SIGN_IN_WITH_FIRST_FACTOR_SELECTIONContinueSignInCognitoSignInResultNextStep
+    extends ContinueSignInCognitoSignInResultNextStep {
   final String session;
-  final List<CONTINUE_SIGN_IN_WITH_FIRST_FACTOR_SELECTIONContinueSignInCognitoSignInResultNextStepAvailableChallenges> availableChallenges;
+  final List<
+    CONTINUE_SIGN_IN_WITH_FIRST_FACTOR_SELECTIONContinueSignInCognitoSignInResultNextStepAvailableChallenges
+  >
+  availableChallenges;
 
   const CONTINUE_SIGN_IN_WITH_FIRST_FACTOR_SELECTIONContinueSignInCognitoSignInResultNextStep({
     required this.session,
     required this.availableChallenges,
   });
 
-  factory CONTINUE_SIGN_IN_WITH_FIRST_FACTOR_SELECTIONContinueSignInCognitoSignInResultNextStep.fromJson(Map<String, dynamic> json) {
+  factory CONTINUE_SIGN_IN_WITH_FIRST_FACTOR_SELECTIONContinueSignInCognitoSignInResultNextStep.fromJson(
+    Map<String, dynamic> json,
+  ) {
     return CONTINUE_SIGN_IN_WITH_FIRST_FACTOR_SELECTIONContinueSignInCognitoSignInResultNextStep(
       session: json['session'] as String,
-      availableChallenges: (json['availableChallenges'] as List<dynamic>).map((e) => CONTINUE_SIGN_IN_WITH_FIRST_FACTOR_SELECTIONContinueSignInCognitoSignInResultNextStepAvailableChallenges.fromJson(e as String)).toList(),
+      availableChallenges: (json['availableChallenges'] as List<dynamic>)
+          .map(
+            (e) =>
+                CONTINUE_SIGN_IN_WITH_FIRST_FACTOR_SELECTIONContinueSignInCognitoSignInResultNextStepAvailableChallenges.fromJson(
+                  e as String,
+                ),
+          )
+          .toList(),
     );
   }
 
@@ -1183,14 +1956,17 @@ class CONTINUE_SIGN_IN_WITH_FIRST_FACTOR_SELECTIONContinueSignInCognitoSignInRes
     return {
       'name': 'CONTINUE_SIGN_IN_WITH_FIRST_FACTOR_SELECTION',
       'session': session,
-      'availableChallenges': availableChallenges.map((e) => e.toJson()).toList(),
+      'availableChallenges': availableChallenges
+          .map((e) => e.toJson())
+          .toList(),
     };
   }
 
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
-      other is CONTINUE_SIGN_IN_WITH_FIRST_FACTOR_SELECTIONContinueSignInCognitoSignInResultNextStep &&
+      other
+              is CONTINUE_SIGN_IN_WITH_FIRST_FACTOR_SELECTIONContinueSignInCognitoSignInResultNextStep &&
           session == other.session &&
           blocksDeepEquals(availableChallenges, other.availableChallenges);
 
@@ -1198,17 +1974,21 @@ class CONTINUE_SIGN_IN_WITH_FIRST_FACTOR_SELECTIONContinueSignInCognitoSignInRes
   int get hashCode => Object.hash(session, blocksDeepHash(availableChallenges));
 
   @override
-  String toString() => 'CONTINUE_SIGN_IN_WITH_FIRST_FACTOR_SELECTIONContinueSignInCognitoSignInResultNextStep(session: $session, availableChallenges: $availableChallenges)';
+  String toString() =>
+      'CONTINUE_SIGN_IN_WITH_FIRST_FACTOR_SELECTIONContinueSignInCognitoSignInResultNextStep(session: $session, availableChallenges: $availableChallenges)';
 }
 
-class CONFIRM_SIGN_IN_WITH_PASSWORDContinueSignInCognitoSignInResultNextStep extends ContinueSignInCognitoSignInResultNextStep {
+class CONFIRM_SIGN_IN_WITH_PASSWORDContinueSignInCognitoSignInResultNextStep
+    extends ContinueSignInCognitoSignInResultNextStep {
   final String session;
 
   const CONFIRM_SIGN_IN_WITH_PASSWORDContinueSignInCognitoSignInResultNextStep({
     required this.session,
   });
 
-  factory CONFIRM_SIGN_IN_WITH_PASSWORDContinueSignInCognitoSignInResultNextStep.fromJson(Map<String, dynamic> json) {
+  factory CONFIRM_SIGN_IN_WITH_PASSWORDContinueSignInCognitoSignInResultNextStep.fromJson(
+    Map<String, dynamic> json,
+  ) {
     return CONFIRM_SIGN_IN_WITH_PASSWORDContinueSignInCognitoSignInResultNextStep(
       session: json['session'] as String,
     );
@@ -1216,10 +1996,7 @@ class CONFIRM_SIGN_IN_WITH_PASSWORDContinueSignInCognitoSignInResultNextStep ext
 
   @override
   Map<String, dynamic> toJson() {
-    return {
-      'name': 'CONFIRM_SIGN_IN_WITH_PASSWORD',
-      'session': session,
-    };
+    return {'name': 'CONFIRM_SIGN_IN_WITH_PASSWORD', 'session': session};
   }
 
   @override
@@ -1232,10 +2009,12 @@ class CONFIRM_SIGN_IN_WITH_PASSWORDContinueSignInCognitoSignInResultNextStep ext
   int get hashCode => session.hashCode;
 
   @override
-  String toString() => 'CONFIRM_SIGN_IN_WITH_PASSWORDContinueSignInCognitoSignInResultNextStep(session: $session)';
+  String toString() =>
+      'CONFIRM_SIGN_IN_WITH_PASSWORDContinueSignInCognitoSignInResultNextStep(session: $session)';
 }
 
-class CONFIRM_SIGN_IN_WITH_FIRST_FACTOR_EMAIL_OTPContinueSignInCognitoSignInResultNextStep extends ContinueSignInCognitoSignInResultNextStep {
+class CONFIRM_SIGN_IN_WITH_FIRST_FACTOR_EMAIL_OTPContinueSignInCognitoSignInResultNextStep
+    extends ContinueSignInCognitoSignInResultNextStep {
   final String session;
   final CodeDeliveryDetails codeDeliveryDetails;
 
@@ -1244,10 +2023,14 @@ class CONFIRM_SIGN_IN_WITH_FIRST_FACTOR_EMAIL_OTPContinueSignInCognitoSignInResu
     required this.codeDeliveryDetails,
   });
 
-  factory CONFIRM_SIGN_IN_WITH_FIRST_FACTOR_EMAIL_OTPContinueSignInCognitoSignInResultNextStep.fromJson(Map<String, dynamic> json) {
+  factory CONFIRM_SIGN_IN_WITH_FIRST_FACTOR_EMAIL_OTPContinueSignInCognitoSignInResultNextStep.fromJson(
+    Map<String, dynamic> json,
+  ) {
     return CONFIRM_SIGN_IN_WITH_FIRST_FACTOR_EMAIL_OTPContinueSignInCognitoSignInResultNextStep(
       session: json['session'] as String,
-      codeDeliveryDetails: CodeDeliveryDetails.fromJson(json['codeDeliveryDetails'] as Map<String, dynamic>),
+      codeDeliveryDetails: CodeDeliveryDetails.fromJson(
+        json['codeDeliveryDetails'] as Map<String, dynamic>,
+      ),
     );
   }
 
@@ -1263,7 +2046,8 @@ class CONFIRM_SIGN_IN_WITH_FIRST_FACTOR_EMAIL_OTPContinueSignInCognitoSignInResu
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
-      other is CONFIRM_SIGN_IN_WITH_FIRST_FACTOR_EMAIL_OTPContinueSignInCognitoSignInResultNextStep &&
+      other
+              is CONFIRM_SIGN_IN_WITH_FIRST_FACTOR_EMAIL_OTPContinueSignInCognitoSignInResultNextStep &&
           session == other.session &&
           codeDeliveryDetails == other.codeDeliveryDetails;
 
@@ -1271,10 +2055,12 @@ class CONFIRM_SIGN_IN_WITH_FIRST_FACTOR_EMAIL_OTPContinueSignInCognitoSignInResu
   int get hashCode => Object.hash(session, codeDeliveryDetails);
 
   @override
-  String toString() => 'CONFIRM_SIGN_IN_WITH_FIRST_FACTOR_EMAIL_OTPContinueSignInCognitoSignInResultNextStep(session: $session, codeDeliveryDetails: $codeDeliveryDetails)';
+  String toString() =>
+      'CONFIRM_SIGN_IN_WITH_FIRST_FACTOR_EMAIL_OTPContinueSignInCognitoSignInResultNextStep(session: $session, codeDeliveryDetails: $codeDeliveryDetails)';
 }
 
-class CONFIRM_SIGN_IN_WITH_FIRST_FACTOR_SMS_OTPContinueSignInCognitoSignInResultNextStep extends ContinueSignInCognitoSignInResultNextStep {
+class CONFIRM_SIGN_IN_WITH_FIRST_FACTOR_SMS_OTPContinueSignInCognitoSignInResultNextStep
+    extends ContinueSignInCognitoSignInResultNextStep {
   final String session;
   final CodeDeliveryDetails codeDeliveryDetails;
 
@@ -1283,10 +2069,14 @@ class CONFIRM_SIGN_IN_WITH_FIRST_FACTOR_SMS_OTPContinueSignInCognitoSignInResult
     required this.codeDeliveryDetails,
   });
 
-  factory CONFIRM_SIGN_IN_WITH_FIRST_FACTOR_SMS_OTPContinueSignInCognitoSignInResultNextStep.fromJson(Map<String, dynamic> json) {
+  factory CONFIRM_SIGN_IN_WITH_FIRST_FACTOR_SMS_OTPContinueSignInCognitoSignInResultNextStep.fromJson(
+    Map<String, dynamic> json,
+  ) {
     return CONFIRM_SIGN_IN_WITH_FIRST_FACTOR_SMS_OTPContinueSignInCognitoSignInResultNextStep(
       session: json['session'] as String,
-      codeDeliveryDetails: CodeDeliveryDetails.fromJson(json['codeDeliveryDetails'] as Map<String, dynamic>),
+      codeDeliveryDetails: CodeDeliveryDetails.fromJson(
+        json['codeDeliveryDetails'] as Map<String, dynamic>,
+      ),
     );
   }
 
@@ -1302,7 +2092,8 @@ class CONFIRM_SIGN_IN_WITH_FIRST_FACTOR_SMS_OTPContinueSignInCognitoSignInResult
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
-      other is CONFIRM_SIGN_IN_WITH_FIRST_FACTOR_SMS_OTPContinueSignInCognitoSignInResultNextStep &&
+      other
+              is CONFIRM_SIGN_IN_WITH_FIRST_FACTOR_SMS_OTPContinueSignInCognitoSignInResultNextStep &&
           session == other.session &&
           codeDeliveryDetails == other.codeDeliveryDetails;
 
@@ -1310,10 +2101,12 @@ class CONFIRM_SIGN_IN_WITH_FIRST_FACTOR_SMS_OTPContinueSignInCognitoSignInResult
   int get hashCode => Object.hash(session, codeDeliveryDetails);
 
   @override
-  String toString() => 'CONFIRM_SIGN_IN_WITH_FIRST_FACTOR_SMS_OTPContinueSignInCognitoSignInResultNextStep(session: $session, codeDeliveryDetails: $codeDeliveryDetails)';
+  String toString() =>
+      'CONFIRM_SIGN_IN_WITH_FIRST_FACTOR_SMS_OTPContinueSignInCognitoSignInResultNextStep(session: $session, codeDeliveryDetails: $codeDeliveryDetails)';
 }
 
-class CONFIRM_SIGN_IN_WITH_WEB_AUTHNContinueSignInCognitoSignInResultNextStep extends ContinueSignInCognitoSignInResultNextStep {
+class CONFIRM_SIGN_IN_WITH_WEB_AUTHNContinueSignInCognitoSignInResultNextStep
+    extends ContinueSignInCognitoSignInResultNextStep {
   final String session;
   final String credentialRequestOptions;
 
@@ -1322,7 +2115,9 @@ class CONFIRM_SIGN_IN_WITH_WEB_AUTHNContinueSignInCognitoSignInResultNextStep ex
     required this.credentialRequestOptions,
   });
 
-  factory CONFIRM_SIGN_IN_WITH_WEB_AUTHNContinueSignInCognitoSignInResultNextStep.fromJson(Map<String, dynamic> json) {
+  factory CONFIRM_SIGN_IN_WITH_WEB_AUTHNContinueSignInCognitoSignInResultNextStep.fromJson(
+    Map<String, dynamic> json,
+  ) {
     return CONFIRM_SIGN_IN_WITH_WEB_AUTHNContinueSignInCognitoSignInResultNextStep(
       session: json['session'] as String,
       credentialRequestOptions: json['credentialRequestOptions'] as String,
@@ -1341,7 +2136,8 @@ class CONFIRM_SIGN_IN_WITH_WEB_AUTHNContinueSignInCognitoSignInResultNextStep ex
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
-      other is CONFIRM_SIGN_IN_WITH_WEB_AUTHNContinueSignInCognitoSignInResultNextStep &&
+      other
+              is CONFIRM_SIGN_IN_WITH_WEB_AUTHNContinueSignInCognitoSignInResultNextStep &&
           session == other.session &&
           credentialRequestOptions == other.credentialRequestOptions;
 
@@ -1349,23 +2145,23 @@ class CONFIRM_SIGN_IN_WITH_WEB_AUTHNContinueSignInCognitoSignInResultNextStep ex
   int get hashCode => Object.hash(session, credentialRequestOptions);
 
   @override
-  String toString() => 'CONFIRM_SIGN_IN_WITH_WEB_AUTHNContinueSignInCognitoSignInResultNextStep(session: $session, credentialRequestOptions: $credentialRequestOptions)';
+  String toString() =>
+      'CONFIRM_SIGN_IN_WITH_WEB_AUTHNContinueSignInCognitoSignInResultNextStep(session: $session, credentialRequestOptions: $credentialRequestOptions)';
 }
 
-class RESET_PASSWORDContinueSignInCognitoSignInResultNextStep extends ContinueSignInCognitoSignInResultNextStep {
-
+class RESET_PASSWORDContinueSignInCognitoSignInResultNextStep
+    extends ContinueSignInCognitoSignInResultNextStep {
   const RESET_PASSWORDContinueSignInCognitoSignInResultNextStep();
 
-  factory RESET_PASSWORDContinueSignInCognitoSignInResultNextStep.fromJson(Map<String, dynamic> json) {
-    return RESET_PASSWORDContinueSignInCognitoSignInResultNextStep(
-    );
+  factory RESET_PASSWORDContinueSignInCognitoSignInResultNextStep.fromJson(
+    Map<String, dynamic> json,
+  ) {
+    return RESET_PASSWORDContinueSignInCognitoSignInResultNextStep();
   }
 
   @override
   Map<String, dynamic> toJson() {
-    return {
-      'name': 'RESET_PASSWORD',
-    };
+    return {'name': 'RESET_PASSWORD'};
   }
 
   @override
@@ -1377,19 +2173,27 @@ class RESET_PASSWORDContinueSignInCognitoSignInResultNextStep extends ContinueSi
   int get hashCode => runtimeType.hashCode;
 
   @override
-  String toString() => 'RESET_PASSWORDContinueSignInCognitoSignInResultNextStep()';
+  String toString() =>
+      'RESET_PASSWORDContinueSignInCognitoSignInResultNextStep()';
 }
 
-class CONFIRM_SIGN_UPContinueSignInCognitoSignInResultNextStep extends ContinueSignInCognitoSignInResultNextStep {
+class CONFIRM_SIGN_UPContinueSignInCognitoSignInResultNextStep
+    extends ContinueSignInCognitoSignInResultNextStep {
   final CodeDeliveryDetails? codeDeliveryDetails;
 
   const CONFIRM_SIGN_UPContinueSignInCognitoSignInResultNextStep({
     this.codeDeliveryDetails,
   });
 
-  factory CONFIRM_SIGN_UPContinueSignInCognitoSignInResultNextStep.fromJson(Map<String, dynamic> json) {
+  factory CONFIRM_SIGN_UPContinueSignInCognitoSignInResultNextStep.fromJson(
+    Map<String, dynamic> json,
+  ) {
     return CONFIRM_SIGN_UPContinueSignInCognitoSignInResultNextStep(
-      codeDeliveryDetails: json['codeDeliveryDetails'] != null ? CodeDeliveryDetails.fromJson(json['codeDeliveryDetails'] as Map<String, dynamic>) : null,
+      codeDeliveryDetails: json['codeDeliveryDetails'] != null
+          ? CodeDeliveryDetails.fromJson(
+              json['codeDeliveryDetails'] as Map<String, dynamic>,
+            )
+          : null,
     );
   }
 
@@ -1397,7 +2201,8 @@ class CONFIRM_SIGN_UPContinueSignInCognitoSignInResultNextStep extends ContinueS
   Map<String, dynamic> toJson() {
     return {
       'name': 'CONFIRM_SIGN_UP',
-      if (codeDeliveryDetails != null) 'codeDeliveryDetails': codeDeliveryDetails?.toJson(),
+      if (codeDeliveryDetails != null)
+        'codeDeliveryDetails': codeDeliveryDetails?.toJson(),
     };
   }
 
@@ -1411,10 +2216,47 @@ class CONFIRM_SIGN_UPContinueSignInCognitoSignInResultNextStep extends ContinueS
   int get hashCode => codeDeliveryDetails.hashCode;
 
   @override
-  String toString() => 'CONFIRM_SIGN_UPContinueSignInCognitoSignInResultNextStep(codeDeliveryDetails: $codeDeliveryDetails)';
+  String toString() =>
+      'CONFIRM_SIGN_UPContinueSignInCognitoSignInResultNextStep(codeDeliveryDetails: $codeDeliveryDetails)';
 }
 
+final class ContinueSignInCognitoSignInResultNextStepUnknown
+    extends ContinueSignInCognitoSignInResultNextStep {
+  final Map<String, dynamic> json;
 
+  const ContinueSignInCognitoSignInResultNextStepUnknown(this.json);
+
+  String get discriminator => json['name'] as String;
+
+  @override
+  Map<String, dynamic> toJson() => Map.of(json);
+
+  @override
+  bool operator ==(Object other) =>
+      other is ContinueSignInCognitoSignInResultNextStepUnknown &&
+      blocksDeepEquals(json, other.json);
+
+  @override
+  int get hashCode => blocksDeepHash(json);
+
+  @override
+  String toString() =>
+      'ContinueSignInCognitoSignInResultNextStepUnknown'
+      '($json)';
+}
+
+Map<String, dynamic> _blocksFrozenObject(Map<String, dynamic> json) =>
+    Map<String, dynamic>.unmodifiable(<String, dynamic>{
+      for (final e in json.entries) e.key: _blocksFrozen(e.value),
+    });
+
+Object? _blocksFrozen(Object? value) => switch (value) {
+  final Map<String, dynamic> map => _blocksFrozenObject(map),
+  final List<dynamic> list => List<dynamic>.unmodifiable(<dynamic>[
+    for (final e in list) _blocksFrozen(e),
+  ]),
+  _ => value,
+};
 
 // --- API Namespaces ---
 
@@ -1423,32 +2265,65 @@ sealed class CognitoConfirmSignInResult {
   Map<String, dynamic> toJson();
   static CognitoConfirmSignInResult fromJson(Map<String, dynamic> json) {
     switch (json['status'] as String) {
-      case 'continueSignIn': return ContinueSignInCognitoConfirmSignInResult.fromJson(json);
-      case 'signedIn': return SignedInCognitoConfirmSignInResult.fromJson(json);
-      default: throw ArgumentError('Unknown status: ${json['status']}');
+      case 'signedIn':
+        return SignedInCognitoConfirmSignInResult.fromJson(json);
+      case 'continueSignIn':
+        return ContinueSignInCognitoConfirmSignInResult.fromJson(json);
+      default:
+        return CognitoConfirmSignInResultUnknown(_blocksFrozenObject(json));
     }
   }
 }
 
-class ContinueSignInCognitoConfirmSignInResult extends CognitoConfirmSignInResult {
-  final ContinueSignInCognitoConfirmSignInResultNextStep nextStep;
+class SignedInCognitoConfirmSignInResult extends CognitoConfirmSignInResult {
+  final AuthenticatedUser user;
 
-  const ContinueSignInCognitoConfirmSignInResult({
-    required this.nextStep,
-  });
+  const SignedInCognitoConfirmSignInResult({required this.user});
 
-  factory ContinueSignInCognitoConfirmSignInResult.fromJson(Map<String, dynamic> json) {
-    return ContinueSignInCognitoConfirmSignInResult(
-      nextStep: ContinueSignInCognitoConfirmSignInResultNextStep.fromJson(json['nextStep'] as Map<String, dynamic>),
+  factory SignedInCognitoConfirmSignInResult.fromJson(
+    Map<String, dynamic> json,
+  ) {
+    return SignedInCognitoConfirmSignInResult(
+      user: AuthenticatedUser.fromJson(json['user'] as Map<String, dynamic>),
     );
   }
 
   @override
   Map<String, dynamic> toJson() {
-    return {
-      'status': 'continueSignIn',
-      'nextStep': nextStep.toJson(),
-    };
+    return {'status': 'signedIn', 'user': user.toJson()};
+  }
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is SignedInCognitoConfirmSignInResult && user == other.user;
+
+  @override
+  int get hashCode => user.hashCode;
+
+  @override
+  String toString() => 'SignedInCognitoConfirmSignInResult(user: $user)';
+}
+
+class ContinueSignInCognitoConfirmSignInResult
+    extends CognitoConfirmSignInResult {
+  final ContinueSignInCognitoConfirmSignInResultNextStep nextStep;
+
+  const ContinueSignInCognitoConfirmSignInResult({required this.nextStep});
+
+  factory ContinueSignInCognitoConfirmSignInResult.fromJson(
+    Map<String, dynamic> json,
+  ) {
+    return ContinueSignInCognitoConfirmSignInResult(
+      nextStep: ContinueSignInCognitoConfirmSignInResultNextStep.fromJson(
+        json['nextStep'] as Map<String, dynamic>,
+      ),
+    );
+  }
+
+  @override
+  Map<String, dynamic> toJson() {
+    return {'status': 'continueSignIn', 'nextStep': nextStep.toJson()};
   }
 
   @override
@@ -1461,97 +2336,54 @@ class ContinueSignInCognitoConfirmSignInResult extends CognitoConfirmSignInResul
   int get hashCode => nextStep.hashCode;
 
   @override
-  String toString() => 'ContinueSignInCognitoConfirmSignInResult(nextStep: $nextStep)';
+  String toString() =>
+      'ContinueSignInCognitoConfirmSignInResult(nextStep: $nextStep)';
 }
 
-class SignedInCognitoConfirmSignInResult extends CognitoConfirmSignInResult {
-  final AuthenticatedUser user;
+final class CognitoConfirmSignInResultUnknown
+    extends CognitoConfirmSignInResult {
+  final Map<String, dynamic> json;
 
-  const SignedInCognitoConfirmSignInResult({
-    required this.user,
-  });
+  const CognitoConfirmSignInResultUnknown(this.json);
 
-  factory SignedInCognitoConfirmSignInResult.fromJson(Map<String, dynamic> json) {
-    return SignedInCognitoConfirmSignInResult(
-      user: AuthenticatedUser.fromJson(json['user'] as Map<String, dynamic>),
-    );
-  }
+  String get discriminator => json['status'] as String;
 
   @override
-  Map<String, dynamic> toJson() {
-    return {
-      'status': 'signedIn',
-      'user': user.toJson(),
-    };
-  }
+  Map<String, dynamic> toJson() => Map.of(json);
 
   @override
   bool operator ==(Object other) =>
-      identical(this, other) ||
-      other is SignedInCognitoConfirmSignInResult &&
-          user == other.user;
+      other is CognitoConfirmSignInResultUnknown &&
+      blocksDeepEquals(json, other.json);
 
   @override
-  int get hashCode => user.hashCode;
+  int get hashCode => blocksDeepHash(json);
 
   @override
-  String toString() => 'SignedInCognitoConfirmSignInResult(user: $user)';
+  String toString() =>
+      'CognitoConfirmSignInResultUnknown'
+      '($json)';
 }
-
-
 
 sealed class CognitoSignInResult {
   const CognitoSignInResult();
   Map<String, dynamic> toJson();
   static CognitoSignInResult fromJson(Map<String, dynamic> json) {
     switch (json['status'] as String) {
-      case 'continueSignIn': return ContinueSignInCognitoSignInResult.fromJson(json);
-      case 'signedIn': return SignedInCognitoSignInResult.fromJson(json);
-      default: throw ArgumentError('Unknown status: ${json['status']}');
+      case 'signedIn':
+        return SignedInCognitoSignInResult.fromJson(json);
+      case 'continueSignIn':
+        return ContinueSignInCognitoSignInResult.fromJson(json);
+      default:
+        return CognitoSignInResultUnknown(_blocksFrozenObject(json));
     }
   }
-}
-
-class ContinueSignInCognitoSignInResult extends CognitoSignInResult {
-  final ContinueSignInCognitoSignInResultNextStep nextStep;
-
-  const ContinueSignInCognitoSignInResult({
-    required this.nextStep,
-  });
-
-  factory ContinueSignInCognitoSignInResult.fromJson(Map<String, dynamic> json) {
-    return ContinueSignInCognitoSignInResult(
-      nextStep: ContinueSignInCognitoSignInResultNextStep.fromJson(json['nextStep'] as Map<String, dynamic>),
-    );
-  }
-
-  @override
-  Map<String, dynamic> toJson() {
-    return {
-      'status': 'continueSignIn',
-      'nextStep': nextStep.toJson(),
-    };
-  }
-
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      other is ContinueSignInCognitoSignInResult &&
-          nextStep == other.nextStep;
-
-  @override
-  int get hashCode => nextStep.hashCode;
-
-  @override
-  String toString() => 'ContinueSignInCognitoSignInResult(nextStep: $nextStep)';
 }
 
 class SignedInCognitoSignInResult extends CognitoSignInResult {
   final AuthenticatedUser user;
 
-  const SignedInCognitoSignInResult({
-    required this.user,
-  });
+  const SignedInCognitoSignInResult({required this.user});
 
   factory SignedInCognitoSignInResult.fromJson(Map<String, dynamic> json) {
     return SignedInCognitoSignInResult(
@@ -1561,17 +2393,13 @@ class SignedInCognitoSignInResult extends CognitoSignInResult {
 
   @override
   Map<String, dynamic> toJson() {
-    return {
-      'status': 'signedIn',
-      'user': user.toJson(),
-    };
+    return {'status': 'signedIn', 'user': user.toJson()};
   }
 
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
-      other is SignedInCognitoSignInResult &&
-          user == other.user;
+      other is SignedInCognitoSignInResult && user == other.user;
 
   @override
   int get hashCode => user.hashCode;
@@ -1580,40 +2408,98 @@ class SignedInCognitoSignInResult extends CognitoSignInResult {
   String toString() => 'SignedInCognitoSignInResult(user: $user)';
 }
 
+class ContinueSignInCognitoSignInResult extends CognitoSignInResult {
+  final ContinueSignInCognitoSignInResultNextStep nextStep;
 
+  const ContinueSignInCognitoSignInResult({required this.nextStep});
+
+  factory ContinueSignInCognitoSignInResult.fromJson(
+    Map<String, dynamic> json,
+  ) {
+    return ContinueSignInCognitoSignInResult(
+      nextStep: ContinueSignInCognitoSignInResultNextStep.fromJson(
+        json['nextStep'] as Map<String, dynamic>,
+      ),
+    );
+  }
+
+  @override
+  Map<String, dynamic> toJson() {
+    return {'status': 'continueSignIn', 'nextStep': nextStep.toJson()};
+  }
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is ContinueSignInCognitoSignInResult && nextStep == other.nextStep;
+
+  @override
+  int get hashCode => nextStep.hashCode;
+
+  @override
+  String toString() => 'ContinueSignInCognitoSignInResult(nextStep: $nextStep)';
+}
+
+final class CognitoSignInResultUnknown extends CognitoSignInResult {
+  final Map<String, dynamic> json;
+
+  const CognitoSignInResultUnknown(this.json);
+
+  String get discriminator => json['status'] as String;
+
+  @override
+  Map<String, dynamic> toJson() => Map.of(json);
+
+  @override
+  bool operator ==(Object other) =>
+      other is CognitoSignInResultUnknown && blocksDeepEquals(json, other.json);
+
+  @override
+  int get hashCode => blocksDeepHash(json);
+
+  @override
+  String toString() =>
+      'CognitoSignInResultUnknown'
+      '($json)';
+}
 
 class Api {
   final BlocksClient _client;
   Api(this._client);
 
-  Future<CognitoConfirmSignInResult> cognitoConfirmSignIn({required String session, required String challengeResponse}) async {
-    final params = <dynamic>[
-      session,
-      challengeResponse,
-    ];
+  Future<CognitoConfirmSignInResult> cognitoConfirmSignIn({
+    required String session,
+    required String challengeResponse,
+  }) async {
+    final params = <dynamic>[session, challengeResponse];
     final result = await _client.call('api.cognitoConfirmSignIn', params);
     return CognitoConfirmSignInResult.fromJson(result as Map<String, dynamic>);
   }
 
-  Future<CognitoSignInResult> cognitoSignIn({required String username, required String password}) async {
-    final params = <dynamic>[
-      username,
-      password,
-    ];
+  Future<CognitoSignInResult> cognitoSignIn({
+    required String username,
+    required String password,
+  }) async {
+    final params = <dynamic>[username, password];
     final result = await _client.call('api.cognitoSignIn', params);
     return CognitoSignInResult.fromJson(result as Map<String, dynamic>);
   }
 }
 
-
-// --- Blocks Client ---
+// --- CDK Blocks Client ---
 
 class Blocks {
   late final Api api;
+  late final BlocksClient _client;
 
   Blocks({required String baseUrl, SessionStore? sessionStore}) {
     final client = BlocksClient(baseUrl: baseUrl, sessionStore: sessionStore);
+    _client = client;
     api = Api(client);
   }
-}
 
+  /// Closes the client. A call after this throws a [ClientClosedException],
+  /// and so does an `OidcClient` one of its calls returned. Closing twice
+  /// does nothing more.
+  void close() => _client.close();
+}

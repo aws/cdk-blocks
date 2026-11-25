@@ -8,6 +8,8 @@ import { type DeploymentTargetOptions, environmentAccessKeys, resolveDeploymentT
 import { assertAwsCredentials } from './preflight-credentials.js';
 import { createCdkOutput } from './cdk-output.js';
 import { migrateLegacyDeployedConfig } from './deployed-config.js';
+import { migrateLegacySandboxDir } from './migrate-sandbox-dir.js';
+import { BLOCKS_SANDBOX_DIR } from '../common/constants.js';
 import { join } from 'node:path';
 import { ignoreClosedOutput, log } from './log.js';
 import { runCapture } from './run-command.js';
@@ -30,7 +32,7 @@ export interface DestroyOptions {
    * treats a missing stack as a successful no-op.
    */
   stackName?: string;
-  /** How the user runs the destroy, in the guidance (for example `cdk-blocks destroy`). Default: `npm run destroy`. */
+  /** How the user runs the destroy, in the guidance. Default: `npm run destroy`. */
   invocation?: string;
 }
 
@@ -142,7 +144,7 @@ function listProductionStackNames(options: DestroyOptions, cdkEnv: NodeJS.Proces
  * Refuse to destroy when the CDK app does not define `stackName`. `cdk destroy`
  * acts on the stacks the app defines, not on the name the caller printed and
  * confirmed, so an app whose `index.cdk.ts` names its stack differently (an app
- * created before `.blocks/config.json`, or a stackId that does not match) would
+ * created before `.cdk-blocks/config.json`, or a stackId that does not match) would
  * delete another stack than the one named. `cdk ls` prints a stack as its
  * construct id, followed by `(name)` when the stack name differs.
  */
@@ -162,9 +164,9 @@ function assertAppDefinesStack(options: DestroyOptions, stackName: string, cdkEn
   const stacks = cdkListedStacks(out);
   if (stacks.some((s) => s === stackName || s.endsWith(` (${stackName})`))) return;
   throw new Error(
-    `The CDK app (aws-blocks/index.cdk.ts) defines ${stacks.length > 0 ? stacks.join(', ') : 'no stack'}, ` +
-      `not ${stackName}, the production stack that .blocks/config.json names; nothing was deleted. ` +
-      `Set "stackId" in .blocks/config.json so that <stackId>-prod is the app's production stack, ` +
+    `The CDK app (cdk-blocks/index.cdk.ts) defines ${stacks.length > 0 ? stacks.join(', ') : 'no stack'}, ` +
+      `not ${stackName}, the production stack that .cdk-blocks/config.json names; nothing was deleted. ` +
+      `Set "stackId" in .cdk-blocks/config.json so that <stackId>-prod is the app's production stack, ` +
       `or name the stack in index.cdk.ts with getStackName().`,
   );
 }
@@ -173,7 +175,8 @@ export async function destroy(options: DestroyOptions) {
   ignoreClosedOutput();
   return trackCommand('destroy', async () => {
     log.progress('🗑️  Destroying production stack...');
-    migrateLegacyDeployedConfig(join(options.projectRoot, '.blocks-sandbox'));
+    migrateLegacySandboxDir(options.projectRoot);
+    migrateLegacyDeployedConfig(join(options.projectRoot, BLOCKS_SANDBOX_DIR));
 
     // The same environment as the production deploy: `.env.production` can set
     // AWS_PROFILE and AWS_REGION (an exported variable wins), so without it the

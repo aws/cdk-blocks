@@ -1,4 +1,4 @@
-# AWS Blocks Kotlin – Agent Guide
+# AWS CDK Blocks Kotlin – Agent Guide
 
 Context for AI coding agents working in this repository.
 
@@ -57,7 +57,7 @@ Plus **fixture-goldens**, a check-only module (not published) that compiles ever
 
 | Purpose | Path |
 |---------|------|
-| Example spec file | `example/typescript/aws-blocks/blocks.spec.json` |
+| Example spec file | `example/typescript/cdk-blocks/blocks.spec.json` |
 | Android example app | `example/android/app/` |
 | Android app build config | `example/android/app/build.gradle.kts` |
 | Android: MainActivity | `example/android/app/src/main/java/com/aws/blocks/example/MainActivity.kt` |
@@ -100,7 +100,7 @@ tests. One `commonTest` suite runs on all three targets.
 ./run-e2e.sh --target android   # boot an emulator first; the script does not
 
 # Against an already-running endpoint, skipping the local dev server
-./run-e2e.sh --target android --blocks-url https://example.com/aws-blocks/api
+./run-e2e.sh --target android --blocks-url https://example.com/cdk-blocks/api
 ```
 
 The Android target runs as an instrumented test APK (`connectedAndroidDeviceTest`), which is the
@@ -203,3 +203,24 @@ If you find yourself needing to break one of these rules, something is wrong wit
 1. Run `cd example/android && ./gradlew :app:cdkBlocksDumpModel` to verify parsing
 2. Run `cd example/android && ./gradlew clean :app:assembleDebug`
 3. Fix any compilation errors in the example app from changed API signatures
+
+## Changesets
+
+Changes to this package need a changeset in `native/kotlin/.changeset/`, keyed
+`"aws-cdk-blocks-kotlin"`. The version in `package.json` is the source of truth and
+`gradle.properties` follows it, so run `scripts/sync-version.sh` after any bump.
+
+Pick the bump type by what the change does to a caller. From 1.0.0 the package follows
+semantic versioning, so these are not interchangeable:
+
+| Bump | Use for |
+|------|---------|
+| `major` | Anything source-breaking: a removed or renamed public declaration, a changed signature or return type, a new exhaustive-`when` branch, or a behaviour change a caller must handle |
+| `minor` | New public API that existing code keeps compiling against |
+| `patch` | Fixes and internal changes with no public API change |
+
+Before 1.0.0 every breaking change was filed as `minor`, because a `minor` bump on a
+`0.x` version is already breaking under semver. That is no longer true: a `minor`
+release off 1.x reads as safe to tools that resolve ranges, such as Dependabot,
+Renovate, or a `1.+` Gradle constraint, and they will pull it in without review. A
+source-breaking change filed as `minor` now ships to those callers as a silent break.

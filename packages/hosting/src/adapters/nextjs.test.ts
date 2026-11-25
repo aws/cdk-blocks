@@ -1,3 +1,6 @@
+// Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+// SPDX-License-Identifier: Apache-2.0
+
 import { afterEach, beforeEach, describe, it, mock } from 'node:test';
 import assert from 'node:assert';
 import * as fs from 'fs';
@@ -5,6 +8,9 @@ import * as path from 'path';
 import * as os from 'os';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
+import { once } from 'node:events';
+import { PassThrough } from 'node:stream';
+import * as zlib from 'node:zlib';
 import type { SpawnSyncOptions } from 'node:child_process';
 import semver from 'semver';
 import { spawn } from './spawn.js';
@@ -15,6 +21,7 @@ import {
   nextjsAdapter,
   patchEdgeBundlesForLambdaEdge,
   patchImageOptimizerForNext16,
+  patchImageOptimizerMissingSource,
   patchImageOptimizerSvgStatus,
   patchStreamingWrapperForApiGateway,
   projectHasEdgeRuntimeRoutes,
@@ -1118,7 +1125,7 @@ void describe('patchStreamingWrapperForApiGateway — brittleness gating', () =>
   void it('canonical wrapper bundle: applies expected edits + post-patch is byte-stable', () => {
     // Synthetic bundle modeled on @opennextjs/aws@3.10.x's emitted
     // aws-lambda-streaming wrapper. Every line below maps to one of the
-    // four signatures the patcher's regexes look for.
+    // signatures the patcher's regexes look for.
     const PRE = [
       '// canonical OpenNext aws-lambda-streaming wrapper shape',
       'const responseStream = awslambda.HttpResponseStream.from(rawStream, metadata);',
@@ -1132,6 +1139,7 @@ void describe('patchStreamingWrapperForApiGateway — brittleness gating', () =>
       '} else {',
       '  encodeStream = passThrough;',
       '}',
+      'prelude.headers["content-encoding"] = contentEncoding;',
       'export const handler = streamifyResponse(awslambda, async (event, responseStream) => { /* ... */ });',
     ].join('\n');
     const bundle = path.join(defaultDir, 'index.mjs');
@@ -1145,16 +1153,18 @@ void describe('patchStreamingWrapperForApiGateway — brittleness gating', () =>
       post,
       /setContentType\("application\/vnd\.awslambda\.http-integration-response"\)/,
     );
-    // Accept-Encoding branches all neutered (none of br/gzip/deflate
-    // remain as the literal `.includes("…")` check; replaced with a
-    // sentinel that never matches a real Accept-Encoding header).
-    for (const algo of ['br', 'gzip', 'deflate']) {
+    // The br and deflate branches are neutered (replaced with a sentinel
+    // that never matches a real Accept-Encoding header); the gzip branch
+    // stays live so the server compresses the stream itself.
+    for (const algo of ['br', 'deflate']) {
       assert.doesNotMatch(post, new RegExp(`\\.includes\\("${algo}"\\)`));
       assert.match(
         post,
         new RegExp(`\\.includes\\("__hosting_no_${algo}__"\\)`),
       );
     }
+    assert.match(post, /\/\*hosting:accepts-gzip\*\/.*\(acceptEncoding\)/);
+    assert.doesNotMatch(post, /__hosting_no_gzip__/);
     // Snapshot: re-running the patcher against the post-patch bundle must
     // be a no-op (the regexes don't match anymore) — proves the patcher
     // is idempotent and not partially-undoing prior runs.
@@ -1176,15 +1186,284 @@ void describe('patchStreamingWrapperForApiGateway — brittleness gating', () =>
     );
     fs.rmSync(tmp2, { recursive: true, force: true });
 
-    // Sanity: post-patch byte-count is non-zero and the file shrunk
-    // (`void 0` < the original setContentType call). Exact size depends
-    // on synth content above; we assert structural shape, not a magic
-    // number that future refactors would have to keep updated.
+    // Sanity: post-patch byte-count is non-zero, and the content-encoding
+    // assignment now drops content-length for a compressed response. Exact
+    // size depends on synth content above; we assert structural shape, not
+    // a magic number that future refactors would have to keep updated.
     assert.ok(stat1 > 0);
-    assert.ok(
-      stat1 < PRE.length,
-      `expected post-patch (${stat1}) < pre-patch (${PRE.length})`,
+    assert.match(
+      post,
+      /contentEncoding!=="identity"&&\(delete prelude\.headers\["content-length"\]/,
     );
+  });
+});
+
+// The streaming response has no Content-Length, so CloudFront cannot compress
+// it at the edge (it only compresses responses that carry one), and the
+// wrapper's `content-encoding: identity` would stop it anyway. The server must
+// therefore compress the stream itself. This runs a wrapper modeled on the
+// @opennextjs/aws `aws-lambda-streaming` wrapper (3.10.x and 4.x share this
+// shape) through the patcher, invokes it with a fake Lambda response stream,
+// and checks what a viewer behind CloudFront receives.
+void describe('patchStreamingWrapperForApiGateway — response compression', () => {
+  const WRAPPER = [
+    'import zlib from "node:zlib";',
+    'export const handler = (handler) => awslambda.streamifyResponse(async (event, responseStream) => {',
+    '  const acceptEncoding = event.headers["Accept-Encoding"] ?? event.headers["accept-encoding"] ?? "";',
+    '  let contentEncoding;',
+    '  let compressedStream;',
+    '  if (acceptEncoding.includes("br")) {',
+    '    contentEncoding = "br";',
+    '    compressedStream = zlib.createBrotliCompress({ flush: zlib.constants.BROTLI_OPERATION_FLUSH });',
+    '    compressedStream.pipe(responseStream);',
+    '  } else if (acceptEncoding.includes("gzip")) {',
+    '    contentEncoding = "gzip";',
+    '    compressedStream = zlib.createGzip({ flush: zlib.constants.Z_SYNC_FLUSH });',
+    '    compressedStream.pipe(responseStream);',
+    '  } else if (acceptEncoding.includes("deflate")) {',
+    '    contentEncoding = "deflate";',
+    '    compressedStream = zlib.createDeflate({ flush: zlib.constants.Z_SYNC_FLUSH });',
+    '    compressedStream.pipe(responseStream);',
+    '  } else {',
+    '    contentEncoding = "identity";',
+    '    compressedStream = responseStream;',
+    '  }',
+    '  const streamCreator = {',
+    '    writeHeaders: (_prelude) => {',
+    '      responseStream.setContentType("application/vnd.awslambda.http-integration-response");',
+    '      _prelude.headers["content-encoding"] = contentEncoding;',
+    '      responseStream.write(JSON.stringify(_prelude));',
+    '      responseStream.write(new Uint8Array(8));',
+    '      return compressedStream ?? responseStream;',
+    '    },',
+    '  };',
+    '  await handler(event, { streamCreator });',
+    '});',
+  ].join('\n');
+
+  const HTML = `<!DOCTYPE html><html><body>${'<p>streamed server-rendered row</p>'.repeat(200)}</body></html>`;
+
+  /**
+   * Patch the wrapper, run it for one request, and return the headers the
+   * prelude carries plus the decoded body. The app handler writes the HTML in
+   * two chunks so the test also covers a streamed (multi-write) body.
+   */
+  const invoke = async (
+    acceptEncoding: string,
+    appHeaders: Record<string, string> = {},
+    { event = {}, statusCode = 200, body = true }: { event?: Record<string, unknown>; statusCode?: number; body?: boolean } = {},
+  ) => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'hosting-patch-gzip-'));
+    try {
+      const dir = path.join(tmp, 'server-functions', 'default');
+      fs.mkdirSync(dir, { recursive: true });
+      const bundle = path.join(dir, 'index.mjs');
+      fs.writeFileSync(bundle, WRAPPER);
+      patchStreamingWrapperForApiGateway(tmp);
+
+      const chunks: Buffer[] = [];
+      const responseStream = new PassThrough();
+      responseStream.on('data', (c: Buffer) => chunks.push(Buffer.from(c)));
+      const g = globalThis as { awslambda?: unknown };
+      g.awslambda = {
+        streamifyResponse:
+          (fn: (event: unknown, stream: unknown) => Promise<void>) =>
+          (event: unknown) =>
+            fn(event, responseStream),
+      };
+      try {
+        const mod = (await import(`${pathToFileURL(bundle).href}?t=${Date.now()}`)) as {
+          handler: (
+            app: (
+              event: unknown,
+              opts: {
+                streamCreator: {
+                  writeHeaders: (p: { statusCode: number; headers: Record<string, string> }) => NodeJS.WritableStream;
+                };
+              },
+            ) => Promise<void>,
+          ) => (event: unknown) => Promise<void>;
+        };
+        const lambda = mod.handler(async (_event, { streamCreator }) => {
+          const stream = streamCreator.writeHeaders({ statusCode, headers: { 'content-type': 'text/html', ...appHeaders } });
+          if (!body) return void stream.end();
+          stream.write(HTML.slice(0, 1000));
+          stream.end(HTML.slice(1000));
+        });
+        await lambda({ ...event, headers: { 'accept-encoding': acceptEncoding } });
+        await once(responseStream, 'end');
+      } finally {
+        delete g.awslambda;
+      }
+      const raw = Buffer.concat(chunks);
+      const preludeEnd = raw.indexOf(Buffer.alloc(8));
+      const prelude = JSON.parse(raw.subarray(0, preludeEnd).toString('utf-8')) as {
+        headers: Record<string, string>;
+      };
+      const payload = raw.subarray(preludeEnd + 8);
+      const encoding = prelude.headers['content-encoding'];
+      const text = encoding === 'gzip' ? zlib.gunzipSync(payload).toString('utf-8') : payload.toString('utf-8');
+      return {
+        encoding,
+        contentLength: prelude.headers['content-length'],
+        vary: prelude.headers.vary,
+        payloadBytes: payload.length,
+        body: text,
+      };
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  };
+
+  void it('gzips the stream when the viewer accepts gzip (CloudFront forwards "br,gzip")', async () => {
+    const res = await invoke('br,gzip');
+    assert.strictEqual(res.encoding, 'gzip');
+    assert.strictEqual(res.body, HTML);
+    assert.ok(res.payloadBytes < HTML.length / 3, `expected a compressed payload, got ${res.payloadBytes} bytes`);
+  });
+
+  void it('gzips the stream for a gzip-only viewer', async () => {
+    const res = await invoke('gzip');
+    assert.strictEqual(res.encoding, 'gzip');
+    assert.strictEqual(res.body, HTML);
+  });
+
+  void it('sends the body uncompressed when the viewer accepts no gzip', async () => {
+    const res = await invoke('');
+    assert.strictEqual(res.encoding, 'identity');
+    assert.strictEqual(res.body, HTML);
+  });
+
+  // A prerendered or cached page (an ISR hit, a static 404) carries Next's
+  // content-length of the uncompressed body; sent with a gzipped body, the
+  // viewer would wait for bytes that never come.
+  void it('drops the uncompressed content-length from a gzipped response', async () => {
+    const res = await invoke('br,gzip', { 'content-length': String(HTML.length) });
+    assert.strictEqual(res.encoding, 'gzip');
+    assert.strictEqual(res.contentLength, undefined);
+    assert.strictEqual(res.body, HTML);
+  });
+
+  void it('keeps content-length on an uncompressed response', async () => {
+    const res = await invoke('', { 'content-length': String(HTML.length) });
+    assert.strictEqual(res.encoding, 'identity');
+    assert.strictEqual(res.contentLength, String(HTML.length));
+    assert.strictEqual(res.payloadBytes, HTML.length);
+  });
+
+  // The upstream check is a substring test, which reads `gzip;q=0` as
+  // accepting gzip.
+  void it('sends the body uncompressed when the client refuses gzip with q=0', async () => {
+    const res = await invoke('identity, gzip;q=0');
+    assert.strictEqual(res.encoding, 'identity');
+    assert.strictEqual(res.body, HTML);
+  });
+
+  void it('gzips the stream when the client gives gzip a non-zero q-value', async () => {
+    const res = await invoke('identity;q=1, GZIP ; q=0.5');
+    assert.strictEqual(res.encoding, 'gzip');
+    assert.strictEqual(res.body, HTML);
+  });
+
+  // The encoding depends on the request's Accept-Encoding, so a shared cache in
+  // front of the door (a custom domain's CDN) needs Vary to key on it.
+  void it('adds Vary: Accept-Encoding to compressed and uncompressed responses', async () => {
+    assert.strictEqual((await invoke('gzip')).vary, 'Accept-Encoding');
+    assert.strictEqual((await invoke('')).vary, 'Accept-Encoding');
+  });
+
+  void it("appends Accept-Encoding to the app's Vary once", async () => {
+    const appended = await invoke('gzip', { vary: 'RSC, Next-Router-State-Tree' });
+    assert.strictEqual(appended.vary, 'RSC, Next-Router-State-Tree, Accept-Encoding');
+    const kept = await invoke('gzip', { Vary: 'rsc, accept-encoding' });
+    assert.strictEqual(kept.vary, 'rsc, accept-encoding');
+  });
+
+  // The wrapper picks the gzip stream from Accept-Encoding before the status
+  // is known, and ending an unwritten gzip stream still emits its 20-byte
+  // header and trailer. A response without a body must stay identity.
+  void it('sends a 304, 204 or 1xx response without a body uncompressed, its headers unchanged', async () => {
+    for (const statusCode of [304, 204, 205, 103]) {
+      const res = await invoke('br,gzip', { etag: '"abc"' }, { statusCode, body: false });
+      assert.strictEqual(res.encoding, 'identity', String(statusCode));
+      assert.strictEqual(res.payloadBytes, 0, String(statusCode));
+    }
+  });
+
+  void it('sends a HEAD response uncompressed and keeps its content-length (REST, HTTP API and Function URL events)', async () => {
+    const events = [
+      { httpMethod: 'HEAD' },
+      { requestContext: { http: { method: 'HEAD' } } },
+      { requestContext: { http: { method: 'head' } } },
+    ];
+    for (const event of events) {
+      const res = await invoke('gzip', { 'content-length': String(HTML.length) }, { event, body: false });
+      assert.strictEqual(res.encoding, 'identity', JSON.stringify(event));
+      assert.strictEqual(res.contentLength, String(HTML.length), JSON.stringify(event));
+      assert.strictEqual(res.payloadBytes, 0, JSON.stringify(event));
+    }
+  });
+
+  void it('still gzips a GET 200 and a 404 that carry a body', async () => {
+    for (const [event, statusCode] of [
+      [{ httpMethod: 'GET' }, 200],
+      [{ requestContext: { http: { method: 'GET' } } }, 404],
+    ] as const) {
+      const res = await invoke('gzip', {}, { event, statusCode });
+      assert.strictEqual(res.encoding, 'gzip');
+      assert.strictEqual(res.body, HTML);
+    }
+  });
+
+  void it('patches the minified 4.x wrapper shape', () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'hosting-patch-min-'));
+    try {
+      const dir = path.join(tmp, 'server-functions', 'default');
+      fs.mkdirSync(dir, { recursive: true });
+      const bundle = path.join(dir, 'index.mjs');
+      // Excerpt of the @opennextjs/aws 4.1.x minified wrapper.
+      fs.writeFileSync(
+        bundle,
+        'awslambda.streamifyResponse(async(r,o,n)=>{let i=r.headers["accept-encoding"]??"",a,u;' +
+          'i.includes("br")?(a="br",u=$i.createBrotliCompress({}),u.pipe(o)):i.includes("gzip")?(a="gzip",u=$i.createGzip({flush:$i.constants.Z_SYNC_FLUSH}),u.pipe(o)):i.includes("deflate")?(a="deflate",u=$i.createDeflate({}),u.pipe(o)):(a="identity",u=o);let m={writeHeaders:C=>{o.setContentType("application/vnd.awslambda.http-integration-response"),C.headers["content-encoding"]=a;let b=JSON.stringify(C);return o.write(b),o.write(new Uint8Array(8)),u??o}};});',
+      );
+      patchStreamingWrapperForApiGateway(tmp);
+      const post = fs.readFileSync(bundle, 'utf-8');
+      assert.match(post, /\/\*hosting:accepts-gzip\*\/.*\(i\)\?\(a="gzip"/);
+      assert.match(post, /a!=="identity"&&\(delete C\.headers\["content-length"\]/);
+      assert.match(post, /\/\*hosting:bodyless\*\/.*\(C\.statusCode,r\)&&a!=="identity"&&\(u!==o&&u\?\.unpipe\?\.\(o\),u=o,a="identity"\)/);
+      // Still valid JavaScript after the rewrite.
+      assert.doesNotThrow(() => new Function('awslambda', '$i', post));
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  void it('throws, and turns gzip off under HOSTING_LENIENT_PATCHES=1, when the header assignment is missing', () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'hosting-patch-nohdr-'));
+    const envBackup = process.env.HOSTING_LENIENT_PATCHES;
+    try {
+      const dir = path.join(tmp, 'server-functions', 'default');
+      fs.mkdirSync(dir, { recursive: true });
+      const bundle = path.join(dir, 'index.mjs');
+      const src = WRAPPER.replace('_prelude.headers["content-encoding"] = contentEncoding;', 'setEncoding(_prelude, contentEncoding);');
+      fs.writeFileSync(bundle, src);
+      delete process.env.HOSTING_LENIENT_PATCHES;
+      assert.throws(
+        () => patchStreamingWrapperForApiGateway(tmp),
+        (error: Error) => error.name === 'UpstreamPatchPatternChangedError',
+      );
+      fs.writeFileSync(bundle, src);
+      process.env.HOSTING_LENIENT_PATCHES = '1';
+      patchStreamingWrapperForApiGateway(tmp);
+      const post = fs.readFileSync(bundle, 'utf-8');
+      assert.doesNotMatch(post, /\.includes\("gzip"\)/);
+      assert.match(post, /__hosting_no_gzip__/);
+    } finally {
+      if (envBackup === undefined) delete process.env.HOSTING_LENIENT_PATCHES;
+      else process.env.HOSTING_LENIENT_PATCHES = envBackup;
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
   });
 });
 
@@ -1431,6 +1710,139 @@ void describe('patchImageOptimizerSvgStatus — disallowed type fails closed (is
         assert.equal(other.status, 500, 'generic error → 500');
       },
     );
+  });
+});
+
+void describe('patchImageOptimizerMissingSource — a missing source image is a 404, not a cached 500', () => {
+  let tmp: string;
+
+  beforeEach(() => {
+    tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'hosting-patch-missing-'));
+  });
+  afterEach(() => {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  });
+
+  const writeBundle = (contents: string): string => {
+    const dir = path.join(tmp, 'image-optimization-function');
+    fs.mkdirSync(dir, { recursive: true });
+    const bundle = path.join(dir, 'index.mjs');
+    fs.writeFileSync(bundle, contents);
+    return bundle;
+  };
+
+  // The minified shapes from a real @opennextjs/aws 4.1.14 image-optimization
+  // bundle (3.10.x emits the same): the failure response, the download handler
+  // Next's optimizer calls for a local image, and the catch around the
+  // optimizer. `optimize` stands in for Next's `fetchInternalImage`, which
+  // re-throws ANY download error as `ImageError(500)`, so the S3 error is gone
+  // by the time the outer catch sees it.
+  const BUNDLE =
+    'function JK(e,t,r=500){if(En(e,r),t){let i=new S_(()=>{},async()=>{},t);i.writeHead(r,{Vary:"Accept","Cache-Control":"public,max-age=60,immutable"}),i.end(e)}' +
+    'return{type:"core",isBase64Encoded:!1,statusCode:r,headers:{Vary:"Accept","Cache-Control":"public,max-age=60,immutable"},body:cX(e)}}' +
+    'async function VRe(e,t,r){En("downloadHandler url",r);try{let s=await GRe.load(r.href);if(!s.body)throw new Error("Empty response body from the S3 request.")}' +
+    'catch(s){throw xl("Failed to download image",s),s}}' +
+    'async function HRe(e,t){try{return await optimize(VRe)}catch(s){return xl("Failed to optimize image",s),JK("Internal server error",t?.streamCreator)}}';
+
+  type Result = { statusCode: number; headers: Record<string, string>; body: string };
+  /** Runs the (patched) bundle with the S3 loader throwing `loadError` for every call. */
+  const run = (src: string, loadErrors: unknown[]): Promise<Result[]> => {
+    const harness = `
+      const En = () => {}; const xl = () => {}; const S_ = class {}; const cX = (m) => m;
+      let loadError;
+      const GRe = { load: async () => { throw loadError; } };
+      async function optimize(download) {
+        try { await download({}, {}, { href: '/missing.png' }); }
+        catch { const e = new Error('"url" parameter is valid but upstream response is invalid'); e.statusCode = 500; throw e; }
+      }
+      ${src}
+      return (async (errors) => {
+        const out = [];
+        for (const e of errors) { loadError = e; out.push(await HRe({}, {})); }
+        return out;
+      });
+    `;
+    // eslint-disable-next-line @typescript-eslint/no-implied-eval
+    const fn = new Function(harness)() as (errors: unknown[]) => Promise<Result[]>;
+    return fn(loadErrors);
+  };
+  const runOne = async (src: string, loadError: unknown): Promise<Result> => {
+    const [res] = await run(src, [loadError]);
+    assert.ok(res, 'a response');
+    return res;
+  };
+  const s3Error = (name: string, message: string): Error => Object.assign(new Error(message), { name });
+  const patchAll = (): string => {
+    const bundle = writeBundle(BUNDLE);
+    // The order the adapter applies them in.
+    patchImageOptimizerSvgStatus(tmp);
+    patchImageOptimizerMissingSource(tmp);
+    return fs.readFileSync(bundle, 'utf-8');
+  };
+
+  void it('unpatched: a missing source image is a 500 the edge caches for 60 s', async () => {
+    const res = await runOne(BUNDLE, s3Error('NoSuchKey', 'The specified key does not exist.'));
+    assert.equal(res.statusCode, 500);
+    assert.equal(res.headers['Cache-Control'], 'public,max-age=60,immutable');
+  });
+
+  void it('returns 404 for an S3 NoSuchKey (the default `s3` loader)', async () => {
+    const res = await runOne(patchAll(), s3Error('NoSuchKey', 'The specified key does not exist.'));
+    assert.equal(res.statusCode, 404);
+    assert.equal(res.body, 'Not Found');
+  });
+
+  void it('returns 404 for the `s3-lite` loader, which throws "The specified key does not exist."', async () => {
+    const res = await runOne(patchAll(), s3Error('FatalError', 'The specified key does not exist.'));
+    assert.equal(res.statusCode, 404);
+  });
+
+  void it('keeps any other download failure a 500, now sent with no-store so the edge does not hold it', async () => {
+    const res = await runOne(patchAll(), s3Error('AccessDenied', 'Access Denied'));
+    assert.equal(res.statusCode, 500);
+    assert.equal(res.body, 'Internal server error');
+    assert.equal(res.headers['Cache-Control'], 'no-store');
+  });
+
+  void it('does not carry a missing image over to the next request', async () => {
+    const [missing, denied] = await run(patchAll(), [
+      s3Error('NoSuchKey', 'The specified key does not exist.'),
+      s3Error('AccessDenied', 'Access Denied'),
+    ]);
+    assert.equal(missing?.statusCode, 404);
+    assert.equal(denied?.statusCode, 500);
+  });
+
+  void it('keeps the 60 s Cache-Control on a 4xx (a missing image is cached as a 404)', async () => {
+    const res = await runOne(patchAll(), s3Error('NoSuchKey', 'The specified key does not exist.'));
+    assert.equal(res.headers['Cache-Control'], 'public,max-age=60,immutable');
+  });
+
+  void it('is idempotent — a second run changes nothing', () => {
+    const once = patchAll();
+    patchImageOptimizerMissingSource(tmp);
+    const twice = fs.readFileSync(path.join(tmp, 'image-optimization-function', 'index.mjs'), 'utf-8');
+    assert.equal(once, twice);
+  });
+
+  void it('returns silently when the image-optimization-function dir is absent', () => {
+    assert.doesNotThrow(() => patchImageOptimizerMissingSource(tmp));
+  });
+
+  void it('warns (does not throw) when neither shape is present', () => {
+    writeBundle('export const handler = async () => ({});\n');
+    const write = process.stderr.write.bind(process.stderr);
+    let logged = '';
+    process.stderr.write = (chunk: string | Uint8Array) => {
+      logged += String(chunk);
+      return true;
+    };
+    try {
+      assert.doesNotThrow(() => patchImageOptimizerMissingSource(tmp));
+    } finally {
+      process.stderr.write = write;
+    }
+    assert.match(logged, /patchImageOptimizerMissingSource/);
   });
 });
 
@@ -2863,7 +3275,9 @@ void describe('pinNextBuildId', () => {
     fs.writeFileSync(configFile, original);
     assert.ok(pinNextBuildId(tmpDir, 'fixed'));
     // The build was killed: the restore never ran.
-    assert.notStrictEqual(fs.readFileSync(configFile, 'utf-8'), original);
+    const wrapper = fs.readFileSync(configFile, 'utf-8');
+    assert.ok(wrapper.includes('// AWS Blocks: deterministic build ID (restored after the build).\n'));
+    assert.ok(wrapper.includes(`// AWS Blocks: pinned by pid ${process.pid}.\n`));
     assert.strictEqual(restorePinnedNextConfig(tmpDir), true);
     assert.strictEqual(fs.readFileSync(configFile, 'utf-8'), original);
     assert.ok(!fs.existsSync(path.join(tmpDir, 'next.config.blocks-base.ts')));

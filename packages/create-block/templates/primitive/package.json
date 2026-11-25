@@ -2,6 +2,9 @@
   "name": "__BB_PKG_NAME__",
   "version": "0.1.0",
   "description": "TODO: one-line description of the __BB_CLASS__ Building Block.",
+  "keywords": [
+    "cdk-blocks"
+  ],
   "author": "Amazon Web Services",
   "license": "Apache-2.0",
   "type": "module",
@@ -30,7 +33,7 @@
     "test": "node --test --test-concurrency=1 dist/*.test.js"
   },
   "dependencies": {
-    "@aws-blocks/core": "^0.7.0"
+    "@aws-cdk-blocks/core": "^0.7.0"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",

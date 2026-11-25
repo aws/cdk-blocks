@@ -1,3 +1,6 @@
+// Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * Source for the IPX Lambda handler the Nitro adapter materialises
  * into the user's project at the image-optimization output directory
@@ -361,6 +364,13 @@ const eventToRequest = (event) => {
   for (const [k, v] of Object.entries(event.headers || {})) {
     if (typeof v === 'string') headers.set(k, v);
   }
+  // API Gateway REST (v1) keeps only the LAST field of a repeated header in
+  // \`headers\`; the complete list is in \`multiValueHeaders\`. Join the Accept
+  // fields, so IPX negotiates its output format on the whole Accept value, the
+  // same value the CloudFront door keys the image cache on.
+  for (const [k, v] of Object.entries(event.multiValueHeaders || {})) {
+    if (k.toLowerCase() === 'accept' && Array.isArray(v) && v.length > 0) headers.set(k, v.join(','));
+  }
 
   const body = event.body
     ? Buffer.from(event.body, event.isBase64Encoded ? 'base64' : 'utf8')
@@ -474,7 +484,7 @@ export const IPX_LAMBDA_PACKAGE_JSON = JSON.stringify(
     dependencies: {
       // Pinned exactly: the no-redirect SSRF guard depends on ipx forwarding
       // `fetchOptions` to its fetch (verified on 3.1.1). A floating range would let
-      // the fetch semantics change at deploy time with no change to AWS Blocks.
+      // the fetch semantics change at deploy time with no change to CDK Blocks.
       // The SVG gate also relies on ipx calling the storage adapters' getData for
       // every source (svgGuard wraps it); its 415 does NOT depend on ipx's error
       // mapping (the handler returns it). Re-run the executable handler tests in

@@ -1,6 +1,6 @@
 # Secret — Design
 
-**Package:** `@aws-blocks/bb-secret`
+**Package:** `@aws-cdk-blocks/bb-secret`
 **Type:** Primitive (new infrastructure)
 **AWS Service:** AWS Secrets Manager
 
@@ -11,7 +11,7 @@ conditional-export shape:
 
 | Entry | Condition | Role |
 |-------|-----------|------|
-| `index.mock.ts` | `default` / `types` | Local dev + tests. Persists plaintext to `.bb-data`. Canonical implementation. |
+| `index.mock.ts` | `default` / `types` | Local dev + tests. Persists plaintext to `.cdk-blocks/local/data`. Canonical implementation. |
 | `index.aws.ts` | `aws-runtime` | Lambda runtime. Calls Secrets Manager via `@aws-sdk/client-secrets-manager`. |
 | `index.cdk.ts` | `cdk` | Provisions the `secretsmanager.Secret`, grants IAM, registers config. |
 | `index.browser.ts` | `browser` | Stub; instantiation throws `NotSupported`. |
@@ -61,7 +61,7 @@ tokens, AWS recommends Secrets Manager
 ([*Where should I store my application data?*](https://docs.aws.amazon.com/systems-manager/latest/userguide/systems-manager-parameter-store.html)).
 So the customer-facing recommendation is: **`Secret` for production secrets;
 `AppSetting(secret: true)` only as a free, encrypted fallback for a low-value
-secret** (e.g. a prototype). The user-facing docs phrase this in Blocks terms
+secret** (e.g. a prototype). The user-facing docs phrase this in AWS CDK Blocks terms
 (`Secret` / `AppSetting`) and link out to that AWS page rather than naming the
 services inline.
 
@@ -100,7 +100,7 @@ For a stack-managed secret it creates one `aws-cdk-lib/aws-secretsmanager.Secret
 - **Resource group:** the created secret is tagged
   `aws-blocks-stack=<rootStackName>` (walking to the non-nested parent stack,
   mirroring `AppSetting`), so it joins the stack's `-settings` resource group —
-  the one the `/aws-blocks/settings` console redirect points at. Core's
+  the one the `/cdk-blocks/settings` console redirect points at. Core's
   `-settings` group query includes `AWS::SecretsManager::Secret` alongside
   `AWS::SSM::Parameter` for this reason.
 - **Config:** the created secret's ARN is passed to the runtime via
@@ -182,7 +182,11 @@ The read surface is designed to grow without breaking:
   the richer subtype — so a `listVersions()` item passes straight to `get()`.
 - `SecretVersion` is a plain structural handle; the intended source is
   `listVersions()`, but a hand-built `{ versionId }` also type-checks. A
-  non-existent id is harmless — it simply reads back as `null`.
+  non-existent id is harmless — it simply reads back as `null`. So does an id
+  Secrets Manager cannot accept (outside 32-64 characters), or, over RPC, a
+  handle without a string `versionId`: both layers return `null` without a
+  lookup (`namesNoVersion()` in `src/validation.ts`), where `GetSecretValue`
+  would fail with `ValidationException` or, with no id, read the current value.
 
 Deeper access (reading by arbitrary id outside the labeled window, custom
 staging labels, full history) is intentionally **not** proxied — use the AWS SDK
@@ -210,20 +214,38 @@ Without a schema the value is an opaque `string` stored/returned verbatim. The
 schema library is never a runtime dependency of this package — it is the
 consumer's choice (`zod` is a `devDependency` here, used only by tests).
 
+## Value limits
+
+`put()` rejects, with `SecretErrors.ValidationFailed`, every value
+`PutSecretValue` would reject, so a write fails the same way locally and on AWS
+instead of surfacing a raw `ValidationException` / `SerializationException`
+from the SDK. `serializeSecretValue()` in `src/validation.ts` runs in both
+layers after schema validation and before the write:
+
+- without a schema the value must be a string (an object reaches the SDK as a
+  structure and fails with `SerializationException`);
+- the stored text (the JSON text with a schema) must be 1 to 65,536 UTF-8
+  bytes. Secrets Manager also caps it at 65,536 characters, which the byte
+  check implies.
+
+The mock still stores the value itself, not the serialized text.
+`src/parity.test.ts` runs the same `put()` and `get({ version })` cases against
+both layers, with the SDK stubbed to answer as Secrets Manager does.
+
 ## Mock ↔ AWS differences
 
 | Aspect | Mock (`index.mock.ts`) | AWS (`index.aws.ts`) |
 |--------|------------------------|----------------------|
-| Storage | Plaintext entry in the shared `.bb-data/settings.json` (keyed by `name`/`fullId`), alongside `AppSetting` — so the `/aws-blocks/settings` route surfaces it | Secrets Manager secret (KMS-encrypted) |
+| Storage | Plaintext entry in the shared `.cdk-blocks/local/data/settings.json` (keyed by `name`/`fullId`), alongside `AppSetting` — so the `/cdk-blocks/settings` route surfaces it | Secrets Manager secret (KMS-encrypted) |
 | ARN source | none (keyed by `name`/`fullId`) | `BLOCKS_SECRET_ARN_<FULLID>` config, or `fromExisting` ARN |
 | Unset value | key absent → `null`; `generate: true` seeds a random 32-char value on first construction | empty secret (neither `GenerateSecretString` nor `SecretString`) → `GetSecretValue` has no `SecretString` → `null`; `generate: true` emits `GenerateSecretString` so a random value exists on deploy |
 | Missing value | key absent → `null` | `SecretString` absent / `ResourceNotFound` → `null` |
 | `put` on missing secret | always writes the entry | may throw `SecretNotFound` if the secret resource is gone |
-| Version history | current + previous, in a `.bb-data/secret-versions.json` sidecar (synthetic version ids) | current + previous via `ListSecretVersionIds` with `IncludeDeprecated: false` (labeled only — real version ids + staging labels) |
+| Version history | current + previous, in a `.cdk-blocks/local/data/secret-versions.json` sidecar (synthetic version ids) | current + previous via `ListSecretVersionIds` with `IncludeDeprecated: false` (labeled only — real version ids + staging labels) |
 | Read caching | none — every `get()` reads fresh from `settings.json` (so `cacheTtlSeconds` is a no-op) | per-instance in-memory cache keyed by version selector, cleared by `put()`; entries held for `cacheTtlSeconds` (default 300s, `0` disables) so steady-state reads skip the API |
 | Security | **plaintext, insecure — dev only** | KMS-encrypted at rest |
 
-Sharing `settings.json` is deliberate: it makes the single `/aws-blocks/settings`
+Sharing `settings.json` is deliberate: it makes the single `/cdk-blocks/settings`
 console/editor route cover both settings and secrets, locally and when deployed.
 
 Because the mock cannot catch serialization/permission differences, behavior is
@@ -234,11 +256,11 @@ sandbox and production deploy.
 
 Values are set **out-of-band**, never from source or the constructor — see the
 README's "Managing secret values" for the three approaches (auto-generated, the
-`/aws-blocks/settings` console route, and a well-known `name` + the `aws` CLI for
+`/cdk-blocks/settings` console route, and a well-known `name` + the `aws` CLI for
 CI/CD). The CDK construct's job is name + IAM grant + runtime ARN registration;
 it never carries the value.
 
-## Framework keys (`@aws-blocks/bb-secret/internal`)
+## Framework keys (`@aws-cdk-blocks/bb-secret/internal`)
 
 Some blocks generate a signing key for their own use: `Auth`
 (`session-secret`) and `Realtime` (`token-secret`). They create it with
@@ -267,7 +289,7 @@ path, change `fullId`, and rename the SSM parameter. The function creates the
 - `'ssm'`: `new AppSetting(scope, id, { secret: true })`. When the stack looks
   like production (`sandboxMode` context not `'true'`, `removalPolicy` `RETAIN`,
   or `deletionProtection` on), synth emits the warning
-  `@aws-blocks/bb-secret:SsmSecretsStoreOutsideSandbox`.
+  `@aws-cdk-blocks/bb-secret:SsmSecretsStoreOutsideSandbox`.
 
 **Runtime.** On every `get()`, the AWS entry checks `process.env` (where the
 handler loaded the config) for the key's Secret ARN (`BLOCKS_SECRET_ARN_<FULLID>`).
@@ -282,7 +304,7 @@ code can cold-start while S3 still serves the previous config, which has no ARN,
 and the loader caches that for the container's life. That code tries SSM, and
 the read fails (the same deploy removed the SSM grant and the parameter). So
 when an SSM read fails, `get()` calls `refreshConfig()` from
-`@aws-blocks/core/internal`, which re-reads the config from S3 and merges it
+`@aws-cdk-blocks/core/internal`, which re-reads the config from S3 and merges it
 into `process.env` (new keys are added, keys an earlier config load set are
 updated, real environment variables are never touched). Then `get()` decides
 again: if the ARN is now present it reads Secrets Manager, otherwise it

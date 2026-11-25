@@ -1,3 +1,6 @@
+// Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * `frontDoor.features` on `HostingConstruct`: each door kind's settings reach
  * its door, the deprecated top-level props merge into them, and a setting set
@@ -369,7 +372,7 @@ describe('HostingConstruct — frontDoor is validated (plain JavaScript, or a ca
   it('an option the kind does not take, or a value of the wrong shape, fails naming it', () => {
     fails({ kind: 'alb', feature: { waf: { enabled: true } } }, 'InvalidFrontDoorOptionError', /`frontDoor\.feature` is not an option of the 'alb'/);
     fails({ kind: 'alb', restrictToCloudFront: true }, 'InvalidFrontDoorOptionError', /`frontDoor\.restrictToCloudFront`/);
-    fails({ kind: 'alb', backendApiUrl: 'https://x.example.com/aws-blocks/api' }, 'InvalidFrontDoorOptionError', /backendApiUrl/);
+    fails({ kind: 'alb', backendApiUrl: 'https://x.example.com/cdk-blocks/api' }, 'InvalidFrontDoorOptionError', /backendApiUrl/);
     fails({ kind: 'alb', internal: 'false' }, 'InvalidFrontDoorOptionError', /`frontDoor\.internal` must be true or false/);
     fails({ kind: 'apiGateway', api: 'REST' }, 'InvalidFrontDoorOptionError', /`frontDoor\.api` must be 'http' or 'rest'/);
     fails({ kind: 'apiGateway', api: 'websocket' }, 'InvalidFrontDoorOptionError', /`frontDoor\.api`/);

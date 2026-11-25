@@ -161,7 +161,7 @@ interface Case {
   chunks?: Buffer[];
 }
 
-function rpc(body: string, headers: Record<string, string | string[]> = {}, path = '/aws-blocks/api'): Case {
+function rpc(body: string, headers: Record<string, string | string[]> = {}, path = '/cdk-blocks/api'): Case {
   return { method: 'POST', path, headers: { 'Content-Type': 'application/json', ...headers }, body };
 }
 
@@ -217,8 +217,8 @@ const CASES: Record<string, Case> = {
   'rpc empty body': rpc(''),
   'rpc invalid JSON-RPC request': rpc(JSON.stringify({ jsonrpc: '1.0', method: 'api.echo', id: 1 })),
   'rpc named params': rpc(rpcBody('api.echo', { msg: 'named' }, 'req-7')),
-  'rpc per-namespace path': rpc(rpcBody('api.echo', ['hi']), {}, '/aws-blocks/api/api'),
-  'rpc per-namespace path that mismatches the body': rpc(rpcBody('api.echo', ['hi']), {}, '/aws-blocks/api/other'),
+  'rpc per-namespace path': rpc(rpcBody('api.echo', ['hi']), {}, '/cdk-blocks/api/api'),
+  'rpc per-namespace path that mismatches the body': rpc(rpcBody('api.echo', ['hi']), {}, '/cdk-blocks/api/other'),
   'rpc body reaches the handler': rpc(rpcBody('api.body')),
   'rpc request headers reach the handler': rpc(rpcBody('api.headers'), { Authorization: 'Bearer t' }),
   'rpc redacts secrets from its log lines': rpc(rpcBody('api.secret', [{ password: 'hunter2-secret' }])),
@@ -239,11 +239,11 @@ const CASES: Record<string, Case> = {
   'rpc body over the size limit': rpc(rpcBody('api.echo', ['x'.repeat(OVERSIZED_BYTES)]), {
     Origin: 'http://localhost:5173',
   }),
-  'GET on the RPC path': { method: 'GET', path: '/aws-blocks/api' },
-  'GET on a per-namespace RPC path': { method: 'GET', path: '/aws-blocks/api/api' },
+  'GET on the RPC path': { method: 'GET', path: '/cdk-blocks/api' },
+  'GET on a per-namespace RPC path': { method: 'GET', path: '/cdk-blocks/api/api' },
   'preflight on the RPC path': {
     method: 'OPTIONS',
-    path: '/aws-blocks/api',
+    path: '/cdk-blocks/api',
     headers: { Origin: 'http://localhost:5173', 'Access-Control-Request-Method': 'POST' },
   },
   'preflight on a frontend path': { method: 'OPTIONS', path: '/some/page', headers: { Origin: 'https://evil.example' } },
@@ -290,6 +290,16 @@ const CASES: Record<string, Case> = {
   'raw route out-of-range status': { method: 'GET', path: '/bad-status' },
   'raw route with the wrong method falls through to the frontend': { method: 'DELETE', path: '/users/1' },
   'unknown path falls through to the frontend': { method: 'GET', path: '/not-a-route' },
+  // API Gateway refuses a path with malformed percent-encoding with a 400 before
+  // the Lambda runs, so the handler never sees the undecodable value.
+  'raw route param with malformed percent-encoding': { method: 'GET', path: '/users/%E0%A4%A' },
+  'raw route wildcard with malformed percent-encoding': { method: 'GET', path: '/files/a/%E0%A4%A' },
+  'RPC namespace with malformed percent-encoding': rpc(rpcBody('api.echo', ['hi']), {}, '/cdk-blocks/api/%E0%A4%A'),
+  'raw route param with a trailing bare percent': { method: 'GET', path: '/users/100%' },
+  // Well-formed escapes that aren't valid UTF-8 pass API Gateway and reach the
+  // Lambda, where the param keeps its raw text (see extractParams in raw-route.ts).
+  'raw route param with a non-UTF-8 escape reaches the handler': { method: 'GET', path: '/users/%FF' },
+  'raw route param with a truncated UTF-8 escape reaches the handler': { method: 'GET', path: '/users/%E0%A4' },
   'runtime config endpoint': { method: 'GET', path: '/.blocks-sandbox/config.json' },
 };
 
@@ -331,7 +341,7 @@ const EXPECTED: Record<string, unknown> = {
       "vary": "Origin"
     },
     "cookies": [],
-    "body": "{\"jsonrpc\":\"2.0\",\"result\":{\"msg\":\"hi\",\"url\":\"http://localhost:3000/aws-blocks/api\",\"cookie\":\"sid=abc\",\"userAgent\":\"client/swift/1.2.3\"},\"id\":1}"
+    "body": "{\"jsonrpc\":\"2.0\",\"result\":{\"msg\":\"hi\",\"url\":\"http://localhost:3000/cdk-blocks/api\",\"cookie\":\"sid=abc\",\"userAgent\":\"client/swift/1.2.3\"},\"id\":1}"
   },
   "rpc success without origin": {
     "status": 200,
@@ -348,7 +358,7 @@ const EXPECTED: Record<string, unknown> = {
       "vary": "Origin"
     },
     "cookies": [],
-    "body": "{\"jsonrpc\":\"2.0\",\"result\":{\"msg\":\"hi\",\"url\":\"http://localhost:3000/aws-blocks/api\",\"cookie\":\"\",\"userAgent\":null},\"id\":1}"
+    "body": "{\"jsonrpc\":\"2.0\",\"result\":{\"msg\":\"hi\",\"url\":\"http://localhost:3000/cdk-blocks/api\",\"cookie\":\"\",\"userAgent\":null},\"id\":1}"
   },
   "rpc refused from a non-localhost origin": {
     "status": 403,
@@ -379,7 +389,7 @@ const EXPECTED: Record<string, unknown> = {
       "vary": "Origin"
     },
     "cookies": [],
-    "body": "{\"jsonrpc\":\"2.0\",\"error\":{\"code\":415,\"message\":\"Unsupported Media Type: the AWS Blocks JSON-RPC API expects Content-Type: application/json\",\"data\":{\"name\":\"UnsupportedMediaType\"}},\"id\":null}"
+    "body": "{\"jsonrpc\":\"2.0\",\"error\":{\"code\":415,\"message\":\"Unsupported Media Type: the AWS CDK Blocks JSON-RPC API expects Content-Type: application/json\",\"data\":{\"name\":\"UnsupportedMediaType\"}},\"id\":null}"
   },
   "RawRoute POST refused from a non-localhost origin": {
     "status": 403,
@@ -427,7 +437,7 @@ const EXPECTED: Record<string, unknown> = {
       "vary": "Origin"
     },
     "cookies": [],
-    "body": "{\"jsonrpc\":\"2.0\",\"result\":{\"msg\":\"hi\",\"url\":\"http://localhost:3000/aws-blocks/api\",\"cookie\":\"\",\"userAgent\":null},\"id\":1}"
+    "body": "{\"jsonrpc\":\"2.0\",\"result\":{\"msg\":\"hi\",\"url\":\"http://localhost:3000/cdk-blocks/api\",\"cookie\":\"\",\"userAgent\":null},\"id\":1}"
   },
   "rpc sets two cookies, a custom header and a status": {
     "status": 201,
@@ -688,7 +698,7 @@ const EXPECTED: Record<string, unknown> = {
       "vary": "Origin"
     },
     "cookies": [],
-    "body": "{\"jsonrpc\":\"2.0\",\"result\":{\"msg\":\"named\",\"url\":\"http://localhost:3000/aws-blocks/api\",\"cookie\":\"\",\"userAgent\":null},\"id\":\"req-7\"}"
+    "body": "{\"jsonrpc\":\"2.0\",\"result\":{\"msg\":\"named\",\"url\":\"http://localhost:3000/cdk-blocks/api\",\"cookie\":\"\",\"userAgent\":null},\"id\":\"req-7\"}"
   },
   "rpc per-namespace path": {
     "status": 200,
@@ -705,7 +715,7 @@ const EXPECTED: Record<string, unknown> = {
       "vary": "Origin"
     },
     "cookies": [],
-    "body": "{\"jsonrpc\":\"2.0\",\"result\":{\"msg\":\"hi\",\"url\":\"http://localhost:3000/aws-blocks/api/api\",\"cookie\":\"\",\"userAgent\":null},\"id\":1}"
+    "body": "{\"jsonrpc\":\"2.0\",\"result\":{\"msg\":\"hi\",\"url\":\"http://localhost:3000/cdk-blocks/api/api\",\"cookie\":\"\",\"userAgent\":null},\"id\":1}"
   },
   "rpc per-namespace path that mismatches the body": {
     "status": 200,
@@ -790,7 +800,7 @@ const EXPECTED: Record<string, unknown> = {
       "vary": "Origin"
     },
     "cookies": [],
-    "body": "{\"jsonrpc\":\"2.0\",\"result\":{\"msg\":\"hi\",\"url\":\"http://localhost:5173/aws-blocks/api\",\"cookie\":\"\",\"userAgent\":null},\"id\":1}"
+    "body": "{\"jsonrpc\":\"2.0\",\"result\":{\"msg\":\"hi\",\"url\":\"http://localhost:5173/cdk-blocks/api\",\"cookie\":\"\",\"userAgent\":null},\"id\":1}"
   },
   "rpc url ignores a non-loopback X-Forwarded-Host": {
     "status": 200,
@@ -807,7 +817,7 @@ const EXPECTED: Record<string, unknown> = {
       "vary": "Origin"
     },
     "cookies": [],
-    "body": "{\"jsonrpc\":\"2.0\",\"result\":{\"msg\":\"hi\",\"url\":\"http://localhost:3000/aws-blocks/api\",\"cookie\":\"\",\"userAgent\":null},\"id\":1}"
+    "body": "{\"jsonrpc\":\"2.0\",\"result\":{\"msg\":\"hi\",\"url\":\"http://localhost:3000/cdk-blocks/api\",\"cookie\":\"\",\"userAgent\":null},\"id\":1}"
   },
   "rpc url ignores front-door-stamped headers": {
     "status": 200,
@@ -824,7 +834,7 @@ const EXPECTED: Record<string, unknown> = {
       "vary": "Origin"
     },
     "cookies": [],
-    "body": "{\"jsonrpc\":\"2.0\",\"result\":{\"msg\":\"hi\",\"url\":\"http://localhost:3000/aws-blocks/api\",\"cookie\":\"\",\"userAgent\":null},\"id\":1}"
+    "body": "{\"jsonrpc\":\"2.0\",\"result\":{\"msg\":\"hi\",\"url\":\"http://localhost:3000/cdk-blocks/api\",\"cookie\":\"\",\"userAgent\":null},\"id\":1}"
   },
   "rpc repeated request header reaches the handler joined": {
     "status": 200,
@@ -858,7 +868,7 @@ const EXPECTED: Record<string, unknown> = {
       "vary": "Origin"
     },
     "cookies": [],
-    "body": "{\"jsonrpc\":\"2.0\",\"result\":{\"msg\":\"€€€€€\",\"url\":\"http://localhost:3000/aws-blocks/api\",\"cookie\":\"\",\"userAgent\":null},\"id\":1}"
+    "body": "{\"jsonrpc\":\"2.0\",\"result\":{\"msg\":\"€€€€€\",\"url\":\"http://localhost:3000/cdk-blocks/api\",\"cookie\":\"\",\"userAgent\":null},\"id\":1}"
   },
   "rpc body over the size limit": {
     "status": 200,
@@ -889,7 +899,7 @@ const EXPECTED: Record<string, unknown> = {
       "vary": "Origin"
     },
     "cookies": [],
-    "body": "{\"error\":\"The AWS Blocks JSON-RPC API expects POST, not GET.\",\"expected\":{\"method\":\"POST\",\"path\":\"/aws-blocks/api\"}}"
+    "body": "{\"error\":\"The AWS CDK Blocks JSON-RPC API expects POST, not GET.\",\"expected\":{\"method\":\"POST\",\"path\":\"/cdk-blocks/api\"}}"
   },
   "GET on a per-namespace RPC path": {
     "status": 404,
@@ -903,7 +913,7 @@ const EXPECTED: Record<string, unknown> = {
       "vary": "Origin"
     },
     "cookies": [],
-    "body": "{\"error\":\"The AWS Blocks JSON-RPC API expects POST, not GET.\",\"expected\":{\"method\":\"POST\",\"path\":\"/aws-blocks/api/api\"}}"
+    "body": "{\"error\":\"The AWS CDK Blocks JSON-RPC API expects POST, not GET.\",\"expected\":{\"method\":\"POST\",\"path\":\"/cdk-blocks/api/api\"}}"
   },
   "preflight on the RPC path": {
     "status": 200,
@@ -1197,10 +1207,11 @@ const EXPECTED: Record<string, unknown> = {
       "access-control-allow-methods": "GET, POST, PUT, DELETE, PATCH, HEAD, OPTIONS",
       "access-control-allow-origin": "http://localhost:<port>",
       "access-control-max-age": "7200",
+      "content-type": "application/json",
       "vary": "Origin"
     },
     "cookies": [],
-    "body": ""
+    "body": "{\"error\":\"Not Found\"}"
   },
   "unknown path falls through to the frontend": {
     "status": 404,
@@ -1210,10 +1221,109 @@ const EXPECTED: Record<string, unknown> = {
       "access-control-allow-methods": "GET, POST, PUT, DELETE, PATCH, HEAD, OPTIONS",
       "access-control-allow-origin": "http://localhost:<port>",
       "access-control-max-age": "7200",
+      "content-type": "application/json",
       "vary": "Origin"
     },
     "cookies": [],
-    "body": ""
+    "body": "{\"error\":\"Not Found\"}"
+  },
+  "raw route param with malformed percent-encoding": {
+    "status": 400,
+    "headers": {
+      "access-control-allow-credentials": "true",
+      "access-control-allow-headers": "Content-Type, Authorization, x-blocks-user-agent",
+      "access-control-allow-methods": "GET, POST, PUT, DELETE, PATCH, HEAD, OPTIONS",
+      "access-control-allow-origin": "http://localhost:<port>",
+      "access-control-max-age": "7200",
+      "content-type": "application/json",
+      "vary": "Origin"
+    },
+    "cookies": [],
+    "body": "{\"error\":\"Bad Request\"}"
+  },
+  "raw route wildcard with malformed percent-encoding": {
+    "status": 400,
+    "headers": {
+      "access-control-allow-credentials": "true",
+      "access-control-allow-headers": "Content-Type, Authorization, x-blocks-user-agent",
+      "access-control-allow-methods": "GET, POST, PUT, DELETE, PATCH, HEAD, OPTIONS",
+      "access-control-allow-origin": "http://localhost:<port>",
+      "access-control-max-age": "7200",
+      "content-type": "application/json",
+      "vary": "Origin"
+    },
+    "cookies": [],
+    "body": "{\"error\":\"Bad Request\"}"
+  },
+  "RPC namespace with malformed percent-encoding": {
+    "status": 400,
+    "headers": {
+      "access-control-allow-credentials": "true",
+      "access-control-allow-headers": "Content-Type, Authorization, x-blocks-user-agent",
+      "access-control-allow-methods": "GET, POST, PUT, DELETE, PATCH, HEAD, OPTIONS",
+      "access-control-allow-origin": "http://localhost:<port>",
+      "access-control-max-age": "7200",
+      "content-type": "application/json",
+      "vary": "Origin"
+    },
+    "cookies": [],
+    "body": "{\"error\":\"Bad Request\"}"
+  },
+  "raw route param with a trailing bare percent": {
+    "status": 400,
+    "headers": {
+      "access-control-allow-credentials": "true",
+      "access-control-allow-headers": "Content-Type, Authorization, x-blocks-user-agent",
+      "access-control-allow-methods": "GET, POST, PUT, DELETE, PATCH, HEAD, OPTIONS",
+      "access-control-allow-origin": "http://localhost:<port>",
+      "access-control-max-age": "7200",
+      "content-type": "application/json",
+      "vary": "Origin"
+    },
+    "cookies": [],
+    "body": "{\"error\":\"Bad Request\"}"
+  },
+  "raw route param with a non-UTF-8 escape reaches the handler": {
+    "status": 201,
+    "headers": {
+      "access-control-allow-credentials": "true",
+      "access-control-allow-headers": "Content-Type, Authorization, x-blocks-user-agent",
+      "access-control-allow-methods": "GET, POST, PUT, DELETE, PATCH, HEAD, OPTIONS",
+      "access-control-allow-origin": "http://localhost:<port>",
+      "access-control-max-age": "7200",
+      "cache-control": "no-store, no-cache, must-revalidate, proxy-revalidate",
+      "content-type": "application/json",
+      "expires": "0",
+      "pragma": "no-cache",
+      "vary": "Origin",
+      "x-route": "users"
+    },
+    "cookies": [
+      "r1=1; Path=/",
+      "r2=2; Path=/"
+    ],
+    "body": "{\"id\":\"%FF\",\"q\":[],\"cookie\":\"\"}"
+  },
+  "raw route param with a truncated UTF-8 escape reaches the handler": {
+    "status": 201,
+    "headers": {
+      "access-control-allow-credentials": "true",
+      "access-control-allow-headers": "Content-Type, Authorization, x-blocks-user-agent",
+      "access-control-allow-methods": "GET, POST, PUT, DELETE, PATCH, HEAD, OPTIONS",
+      "access-control-allow-origin": "http://localhost:<port>",
+      "access-control-max-age": "7200",
+      "cache-control": "no-store, no-cache, must-revalidate, proxy-revalidate",
+      "content-type": "application/json",
+      "expires": "0",
+      "pragma": "no-cache",
+      "vary": "Origin",
+      "x-route": "users"
+    },
+    "cookies": [
+      "r1=1; Path=/",
+      "r2=2; Path=/"
+    ],
+    "body": "{\"id\":\"%E0%A4\",\"q\":[],\"cookie\":\"\"}"
   },
   "runtime config endpoint": {
     "status": 200,
@@ -1228,7 +1338,7 @@ const EXPECTED: Record<string, unknown> = {
       "vary": "Origin"
     },
     "cookies": [],
-    "body": "{\"apiUrl\":\"http://localhost:<port>/aws-blocks/api\",\"environment\":\"local\"}"
+    "body": "{\"apiUrl\":\"http://localhost:<port>/cdk-blocks/api\",\"environment\":\"local\"}"
   }
 };
 
@@ -1308,7 +1418,7 @@ import { startDevServer } from ${JSON.stringify(join(__dirname, 'dev-server.js')
 startDevServer(${JSON.stringify({ backendPath: join(tempDir, 'backend.ts'), port, typegen: false })});
 `);
     const tsxBin = join(__dirname, '..', '..', '..', '..', 'node_modules', '.bin', 'tsx');
-    const env: NodeJS.ProcessEnv = { ...process.env, AWS_BLOCKS_DISABLE_TELEMETRY: '1' };
+    const env: NodeJS.ProcessEnv = { ...process.env, CDK_DISABLE_CLI_TELEMETRY: '1' };
     // Log at the default level so the request log lines are part of the characterization.
     delete env.BLOCKS_DEV_QUIET;
     delete env.BLOCKS_LOG_LEVEL;
@@ -1320,7 +1430,7 @@ startDevServer(${JSON.stringify({ backendPath: join(tempDir, 'backend.ts'), port
     devProcess.stderr?.on('data', chunk => { output.stderr += chunk.toString(); });
 
     const deadline = Date.now() + 20_000;
-    while (!output.stdout.includes('AWS Blocks local server running')) {
+    while (!output.stdout.includes('AWS CDK Blocks local server running')) {
       if (Date.now() > deadline || devProcess.exitCode !== null) {
         assert.fail(`Dev server did not start\nstdout: ${output.stdout}\nstderr: ${output.stderr}`);
       }

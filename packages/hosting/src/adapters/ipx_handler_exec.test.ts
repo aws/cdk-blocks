@@ -23,7 +23,14 @@ import { IPX_LAMBDA_HANDLER_SOURCE } from './ipx_lambda_template.js';
 
 type LambdaResult = { statusCode: number; headers: Record<string, string>; body: string };
 type Handler = (event: unknown) => Promise<LambdaResult>;
-type Control = { s3Bytes: Uint8Array; remoteBytes: Uint8Array; outputType: string; lastPath?: string };
+type Control = {
+  s3Bytes: Uint8Array;
+  remoteBytes: Uint8Array;
+  outputType: string;
+  lastPath?: string;
+  lastAccept?: string | null;
+  s3Missing?: boolean;
+};
 
 const SVG = new TextEncoder().encode('<?xml version="1.0"?>\n<svg xmlns="http://www.w3.org/2000/svg"><rect/></svg>');
 const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0]);
@@ -39,11 +46,14 @@ export const ipxHttpStorage = () => ({ name: 'http', getMeta: async () => ({}), 
 export const createIPXWebServer = (ipx) => async (req) => {
   const url = new URL(req.url);
   control.lastPath = url.pathname;
+  control.lastAccept = req.headers.get('accept');
   const rest = url.pathname.replace(/^\\/+/, '');
   const id = decodeURIComponent(rest.slice(rest.indexOf('/') + 1));
   const storage = /^https?:/.test(id) ? ipx.httpStorage : ipx.storage;
   try {
     const data = await storage.getData(id.startsWith('http') ? id : '/' + id.replace(/^\\/+/, ''));
+    // As ipx@3.1.1: a storage that returns no data is IPX_RESOURCE_NOT_FOUND (404).
+    if (!data) return new Response('{"error":"IPX_RESOURCE_NOT_FOUND"}', { status: 404, headers: { 'content-type': 'application/json' } });
     return new Response(data, { status: 200, headers: { 'content-type': control.outputType } });
   } catch {
     return new Response('{"error":"ipx internal"}', { status: 500, headers: { 'content-type': 'application/json' } });
@@ -55,6 +65,7 @@ const STUB_S3 = `import { control } from '../../../control.mjs';
 export class GetObjectCommand { constructor(input) { this.input = input; } }
 export class S3Client {
   async send() {
+    if (control.s3Missing) throw Object.assign(new Error('The specified key does not exist.'), { name: 'NoSuchKey' });
     return { Body: { transformToByteArray: async () => control.s3Bytes }, LastModified: new Date(0), ContentLength: control.s3Bytes.length };
   }
 }
@@ -139,6 +150,17 @@ void describe('generated IPX handler — SVG gate (executed, not string-matched)
     assert.strictEqual(res.statusCode, 415);
   });
 
+  void it('returns 404, not 500, when the source image is missing from S3 (NoSuchKey)', async () => {
+    const handler = await loadHandler(BASE_ENV);
+    control.s3Missing = true;
+    try {
+      const res = await silenced(() => handler(event('missing.png')));
+      assert.strictEqual(res.statusCode, 404);
+    } finally {
+      control.s3Missing = false;
+    }
+  });
+
   void it('serves a raster image normally', async () => {
     const handler = await loadHandler(BASE_ENV);
     control.s3Bytes = PNG;
@@ -189,3 +211,42 @@ void describe('generated IPX handler — the app base path (executed)', () => {
   });
 });
 
+
+void describe('generated IPX handler — the Accept value IPX negotiates on (executed)', () => {
+  // IPX picks the output format from Accept. The CloudFront door keys the image
+  // cache on the complete Accept value (all fields), so IPX must see that same
+  // value, not only the last field.
+  const v1 = (headers: Record<string, string>, multiValueHeaders?: Record<string, string[]>) => ({
+    resource: '/{proxy+}',
+    path: '/_ipx/_/pic.png',
+    httpMethod: 'GET',
+    headers,
+    ...(multiValueHeaders ? { multiValueHeaders } : {}),
+    queryStringParameters: null,
+    multiValueQueryStringParameters: null,
+  });
+  const acceptSeen = async (event: unknown): Promise<string | null | undefined> => {
+    const handler = await loadHandler(BASE_ENV);
+    control.s3Bytes = PNG;
+    control.outputType = 'image/png';
+    control.lastAccept = undefined;
+    const res = await handler(event);
+    assert.strictEqual(res.statusCode, 200);
+    return control.lastAccept;
+  };
+
+  void it('joins repeated Accept fields of an API Gateway REST event, in order', async () => {
+    const accept = await acceptSeen(
+      v1({ Accept: 'image/png;q=0.5' }, { Accept: ['image/webp', 'image/png;q=0.5'] }),
+    );
+    assert.strictEqual(accept, 'image/webp,image/png;q=0.5');
+  });
+
+  void it('passes a single Accept field through unchanged', async () => {
+    const accept = await acceptSeen(
+      v1({ accept: 'image/webp,image/png;q=0.5' }, { accept: ['image/webp,image/png;q=0.5'] }),
+    );
+    assert.strictEqual(accept, 'image/webp,image/png;q=0.5');
+    assert.strictEqual(await acceptSeen(v1({ accept: 'image/avif,*/*' })), 'image/avif,*/*');
+  });
+});

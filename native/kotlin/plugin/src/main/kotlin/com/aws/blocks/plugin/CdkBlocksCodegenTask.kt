@@ -1,3 +1,6 @@
+// Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+// SPDX-License-Identifier: Apache-2.0
+
 package com.aws.blocks.plugin
 
 import com.aws.blocks.kotlin.builder.CodegenModelBuilder
@@ -71,7 +74,7 @@ abstract class CdkBlocksCodegenTask : DefaultTask() {
     fun generate() {
         val file = openRpcFile.get().asFile
         if (!file.exists()) {
-            throw GradleException("Blocks Spec file not found: ${file.absolutePath}")
+            throw GradleException("AWS CDK Blocks Spec file not found: ${file.absolutePath}")
         }
 
         val model = OpenRpcParser.parse(file.readText())
@@ -135,8 +138,8 @@ abstract class CdkBlocksCodegenTask : DefaultTask() {
         val fix = if (specUrl != null) {
             "the spec declares \"$name\" as \"$specUrl\""
         } else {
-            "the one for that deployment; the dev server writes it to .blocks-sandbox/config.json, " +
-                "a sandbox or production deploy to .blocks-sandbox/config.<stage>.json"
+            "the one for that deployment; the dev server writes it to .cdk-blocks-sandbox/config.json, " +
+                "a sandbox or production deploy to .cdk-blocks-sandbox/config.<stage>.json"
         }
         val uri = try {
             URI(url)
@@ -170,9 +173,9 @@ abstract class CdkBlocksCodegenTask : DefaultTask() {
         val segments = uri.normalize().path.split('/').filter { it.isNotEmpty() && it != "." && it != ".." }
         if (segments.isNotEmpty()) return
         throw GradleException(
-            "cdkBlocks.servers: \"$name\" is \"$url\", which has no RPC path. A Blocks backend serves RPC " +
-                "under /aws-blocks/api, not at the origin, so every call through this server fails. " +
-                "Use the full RPC URL, for example \"${uri.scheme}://${uri.rawAuthority}/aws-blocks/api\" ($fix).",
+            "cdkBlocks.servers: \"$name\" is \"$url\", which has no RPC path. An AWS CDK Blocks backend serves RPC " +
+                "under /cdk-blocks/api, not at the origin, so every call through this server fails. " +
+                "Use the full RPC URL, for example \"${uri.scheme}://${uri.rawAuthority}/cdk-blocks/api\" ($fix).",
         )
     }
 }

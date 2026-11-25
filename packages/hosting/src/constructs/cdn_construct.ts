@@ -1,3 +1,6 @@
+// Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+// SPDX-License-Identifier: Apache-2.0
+
 import { Construct, type IDependable } from 'constructs';
 import { Annotations, CfnOutput, Duration, Fn, RemovalPolicy, Stack, Token } from 'aws-cdk-lib';
 import { LogGroup } from 'aws-cdk-lib/aws-logs';
@@ -62,6 +65,7 @@ import { assertCacheGuardIgnoredCookies } from './ssr_cache_guard.js';
 import type { SkewProtectionConfig } from './skew_protection.js';
 import { QuotaBudget, type QuotaOverrides } from './quota_budget.js';
 import {
+  IMAGE_ACCEPT_CACHE_KEY_HEADER,
   ORIGIN_ID,
   generateKvsRouterRequestCode,
   generateKvsRouterResponseCode,
@@ -271,7 +275,7 @@ export type CdnConstructProps = {
    */
   serverOrigin?: HostingServerOriginConfig;
   /**
-   * Rate limit of the distribution's Blocks-managed web ACL (requests per
+   * Rate limit of the distribution's CDK Blocks-managed web ACL (requests per
    * 5-minute window per IP). When set, each server-origin REST API stage gets
    * a REGIONAL web ACL with the same rules and this limit, with its logs in
    * CloudWatch Logs. `HostingConstruct` sets it when `waf.enabled` builds a
@@ -535,7 +539,7 @@ export class CdnConstruct extends Construct {
     const acceptLegacy = serverOriginOpts.acceptLegacyVerifyHeader === true;
     if (acceptLegacy) {
       Annotations.of(this).addWarningV2(
-        '@aws-blocks/hosting:AcceptLegacyVerifyHeader',
+        '@aws-cdk-blocks/hosting:AcceptLegacyVerifyHeader',
         'Remove frontDoor.features.serverOrigin.acceptLegacyVerifyHeader after this deploy. While it is set, the ' +
           'server origin also accepts the origin-verify value derived from the stack name and construct path, and ' +
           'the SSR REST API stage gets no web ACL until the next deploy.',
@@ -570,7 +574,7 @@ export class CdnConstruct extends Construct {
       };
     };
     // A REGIONAL web ACL on each server-origin stage, mirroring the
-    // distribution's Blocks-managed web ACL (set only when it has one).
+    // distribution's CDK Blocks-managed web ACL (set only when it has one).
     let originWaf: ServerOriginWaf | undefined;
     const protectStage = (api: RestApi, deferWaf: boolean): void => {
       if (serverOriginOpts.accessLogging) {
@@ -814,6 +818,19 @@ export class CdnConstruct extends Construct {
       'next-router-segment-prefetch',
       'next-action',
     ];
+    // With an image origin, the router writes a digest of the Accept value it
+    // sends the image origin into IMAGE_ACCEPT_CACHE_KEY_HEADER on image routes
+    // (and drops that header on all others). Image requests reach the image origin through the default
+    // behavior, so this cache policy is their cache key: without the header the
+    // first viewer's format would be served to every later one (CloudFront
+    // ignores `Vary: Accept`). `accept` itself stays out of the key, so pages
+    // keep one cache entry whatever `Accept` a browser sends.
+    // It takes a cache-key header slot only when one is free: an app already at
+    // the cap with its own cacheKeyHeaders keeps synthesizing as before, with a
+    // warning that the image format isn't in the key. Without an image origin
+    // the router leaves the header alone, so a caller-defined cacheKeyHeaders
+    // entry of the same name keeps working.
+    const hasImageOrigin = computeOrigins.has('image-optimization');
     const RESERVED_SSR_CACHE_COOKIES = [
       '__prerender_bypass',
       '__next_preview_data',
@@ -837,6 +854,27 @@ export class CdnConstruct extends Construct {
     const extraCacheKeyCookies = [
       ...new Set(props.cacheKeyCookies ?? []),
     ].filter((c) => !ROUTER_RESERVED_COOKIES.includes(c));
+    if (hasImageOrigin && extraCacheKeyHeaders.includes(IMAGE_ACCEPT_CACHE_KEY_HEADER)) {
+      throw new HostingError('ReservedCacheKeyHeaderError', {
+        message:
+          `cdn.cacheKeyHeaders includes '${IMAGE_ACCEPT_CACHE_KEY_HEADER}', which the edge router reserves for ` +
+          'the image cache key when the app has an image optimizer: it replaces the value on image routes and ' +
+          'drops it on every other route, so pages could not vary by it.',
+        resolution: 'Send that value in a header with another name and list that name in cacheKeyHeaders.',
+      });
+    }
+    const keyImageAccept =
+      hasImageOrigin &&
+      extraCacheKeyHeaders.length + RESERVED_SSR_CACHE_HEADERS.length < CLOUDFRONT_CACHE_KEY_HEADER_CAP;
+    if (hasImageOrigin && !keyImageAccept) {
+      Annotations.of(this).addWarningV2(
+        '@aws-cdk-blocks/hosting:ImageAcceptNotInCacheKey',
+        `cdn.cacheKeyHeaders uses every cache-key header slot, so ${IMAGE_ACCEPT_CACHE_KEY_HEADER} is not in the ` +
+          'cache key: CloudFront serves one cached image format per image URL, whatever the viewer accepts. ' +
+          `Free a slot (at most ${CLOUDFRONT_CACHE_KEY_HEADER_CAP - RESERVED_SSR_CACHE_HEADERS.length - 1} cacheKeyHeaders), ` +
+          'or raise quotas.cacheKeyHeaders if AWS granted your account a higher limit.',
+      );
+    }
     const hasCacheKeyCredentials =
       extraCacheKeyHeaders.length > 0 || extraCacheKeyCookies.length > 0;
     // ssrDefaultTtl may be an unresolved CDK token. Same-unit conversion
@@ -974,6 +1012,9 @@ export class CdnConstruct extends Construct {
             // cache key for correctness.
             // See: node_modules/@opennextjs/aws/dist/core/routing/cacheInterceptor.js
             'next-action',
+            // The viewer's Accept, on image routes (see
+            // RESERVED_SSR_CACHE_HEADERS above).
+            ...(keyImageAccept ? [IMAGE_ACCEPT_CACHE_KEY_HEADER] : []),
             // Caller-supplied credential-bearing headers (e.g. 'authorization')
             // so authenticated SSR responses vary per credential in the key.
             ...extraCacheKeyHeaders,
@@ -1037,7 +1078,7 @@ export class CdnConstruct extends Construct {
     // distribution would burn that scarce account-wide limit (and fails to
     // deploy once the account is at the cap). `CACHING_OPTIMIZED` honors the
     // origin `Cache-Control` (immutable assets cache up to 1y); its `minTtl: 1s`
-    // can briefly edge-cache the `no-cache` HTML, but that is SAFE across
+    // can briefly edge-cache the `max-age=0, must-revalidate` HTML, but that is SAFE across
     // deploys: every static request — HTML included — is rewritten to
     // `/builds/<buildId>/...` BEFORE the cache lookup, so the cache key is
     // build-scoped and a redeploy (new buildId) yields a new key rather than
@@ -1116,7 +1157,7 @@ export class CdnConstruct extends Construct {
 
     // ---- Router functions (build-independent; routing data lives in KVS) ----
     const routerRequestFn = new CloudFrontFunction(this, 'KvsRouterRequest', {
-      code: FunctionCode.fromInline(generateKvsRouterRequestCode()),
+      code: FunctionCode.fromInline(generateKvsRouterRequestCode({ imageAcceptKey: keyImageAccept })),
       runtime: CLOUDFRONT_FUNCTION_RUNTIME,
       keyValueStore: routeStore,
       comment: 'KVS edge router: origin selection + build-id rewrite',
@@ -1442,9 +1483,9 @@ export class CdnConstruct extends Construct {
         : []),
       ...(hasCompute
         ? [
-            // 500: Don't cache Lambda 500s — they're likely transient.
-            // Image-opt Lambda returns 500 for missing images; caching
-            // that error would serve stale errors to all users.
+            // 500: Don't cache Lambda 500s — they're likely transient, and
+            // caching one would serve a stale error to all users. (A missing
+            // source image is a 404 from the image-opt Lambda, not a 500.)
             // 502/503/504: not cached either (see withServerErrorsNotCached).
             {
               httpStatus: 500,
@@ -1493,13 +1534,18 @@ export class CdnConstruct extends Construct {
           : undefined,
       httpVersion: HttpVersion.HTTP2_AND_3,
       priceClass: props.priceClass ?? PriceClass.PRICE_CLASS_100,
-      minimumProtocolVersion: SecurityPolicyProtocol.TLS_V1_2_2021,
+      // `minimumProtocolVersion` is part of the viewer certificate, so it is set
+      // only with a custom certificate. Without one the distribution uses the
+      // CloudFront default certificate, whose security policy is fixed at
+      // TLSv1: aws-cdk-lib ignores the setting and warns
+      // (`@aws-cdk/aws-cloudfront:minimumProtocolVersionWithoutCertificate`).
       ...(props.certificate && props.domainName
         ? {
             domainNames: Array.isArray(props.domainName)
               ? props.domainName
               : [props.domainName],
             certificate: props.certificate,
+            minimumProtocolVersion: SecurityPolicyProtocol.TLS_V1_2_2021,
           }
         : {}),
       ...(props.webAclArn
@@ -1673,7 +1719,8 @@ export class CdnConstruct extends Construct {
     // build's hashed assets → 403. This is not Next-specific — it also hits
     // Nuxt `routeRules` swr/isr and Astro SSR (see the field doc in
     // manifest/types.ts). Pure-static deploys (no compute) serve HTML from S3
-    // with `no-cache`, so they need no invalidation and get none.
+    // with `max-age=0, must-revalidate` under the build's own key, so they
+    // need no invalidation and get none.
     //
     // Default: `['/*']` for any deploy with compute; nothing for pure-static.
     // `manifest.invalidationPaths` OVERRIDES the default — set explicit

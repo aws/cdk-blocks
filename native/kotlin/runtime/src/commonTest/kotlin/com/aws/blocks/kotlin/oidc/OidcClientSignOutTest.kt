@@ -1,3 +1,6 @@
+// Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+// SPDX-License-Identifier: Apache-2.0
+
 package com.aws.blocks.kotlin.oidc
 
 import com.aws.blocks.kotlin.CookieJarKey
@@ -59,7 +62,7 @@ class OidcClientSignOutTest {
     /** A client signed in through a stubbed exchange, so a sign-out has a state to change. */
     private suspend fun signedIn(httpClient: HttpClient): OidcClient<AnyProvider> =
         authBlockClient(httpClient, listOf("google")).also {
-            it.exchange("c", "v", "s", "", "google", "http://localhost:3001/aws-blocks/auth/callback")
+            it.exchange("c", "v", "s", "", "google", "http://localhost:3001/cdk-blocks/auth/callback")
             requests.clear()
         }
 
@@ -85,7 +88,7 @@ class OidcClientSignOutTest {
 
         client.signOut() shouldBe "https://idp.example.com/logout"
 
-        requests shouldBe listOf("POST /aws-blocks/auth/signout?format=json {}")
+        requests shouldBe listOf("POST /cdk-blocks/auth/signout?format=json {}")
         client.authState.value shouldBe OidcAuthState.SignedOut
     }
 
@@ -194,7 +197,7 @@ class OidcClientSignOutTest {
         }
         val client = authBlockClient(
             backend(HttpStatusCode.OK, headers = clearsSsoCookie, cookies = jar), listOf("corp"),
-            base = "/aws-blocks/auth/sso",
+            base = "/cdk-blocks/auth/sso",
         )
 
         client.signOut()
@@ -208,7 +211,7 @@ class OidcClientSignOutTest {
         val http = backend(HttpStatusCode.InternalServerError, cookies = jar)
             .also { it.attributes.put(CookieJarKey, jar) }
         val descriptor = buildJsonObject {
-            authBlockDescriptor(listOf("corp"), base = "/aws-blocks/auth/sso").jsonObject.forEach { (k, v) -> put(k, v) }
+            authBlockDescriptor(listOf("corp"), base = "/cdk-blocks/auth/sso").jsonObject.forEach { (k, v) -> put(k, v) }
             put("sessionCookieName", "blocks-session-sso")
         }
         val client = OidcClient.fromJson<AnyProvider>(descriptor, http, fixtureServer, "myapp://auth")

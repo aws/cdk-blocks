@@ -132,7 +132,7 @@ export const pgliteUnrefTimersExtension: PgliteExtensionLike = {
  * `Symbol.for` key so that every copy of this module (two installed versions
  * included) shares one set, and so that the dev server, which does not depend
  * on this package, can run them itself before it calls `process.exit()`, which
- * skips `beforeExit` (see `closeLocalEngines` in `@aws-blocks/core`).
+ * skips `beforeExit` (see `closeLocalEngines` in `@aws-cdk-blocks/core`).
  */
 const LOCAL_ENGINE_CLOSERS = Symbol.for('aws-blocks.local-engine-closers');
 const globalScope = globalThis as Record<symbol, unknown>;
@@ -162,7 +162,7 @@ function closePendingOnBeforeExit(): void {
  *
  * `beforeExit` is not emitted for `process.exit()` or a fatal signal. The dev
  * server runs the pending closers itself before it exits on a stop (Ctrl-C,
- * `cdk-blocks dev stop`), so only a crash or a SIGKILL leaves `postmaster.pid` behind.
+ * `npm run dev:stop`), so only a crash or a SIGKILL leaves `postmaster.pid` behind.
  *
  * @internal
  */

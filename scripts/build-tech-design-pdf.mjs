@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+// Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+// SPDX-License-Identifier: Apache-2.0
 
 /**
  * Generates the docs in docs/tech-design as PDF + DOCX:
@@ -123,7 +125,7 @@ const PDF_OPTIONS = {
 	headerTemplate: `<span></span>`,
 	footerTemplate: `
 		<div style="width:100%;text-align:center;font-size:7px;color:#aaa;padding:0 12mm;">
-			AWS Blocks – Technical Design
+			AWS CDK Blocks – Technical Design
 			<span style="float:right"><span class="pageNumber"></span>/<span class="totalPages"></span></span>
 		</div>`,
 };

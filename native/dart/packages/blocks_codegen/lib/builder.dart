@@ -1,5 +1,9 @@
+// Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+// SPDX-License-Identifier: Apache-2.0
+
 import 'package:build/build.dart';
 
+import 'src/language_version.dart';
 import 'src/parser.dart';
 import 'src/builder.dart' as codegen_builder;
 import 'src/generator.dart';
@@ -42,7 +46,14 @@ class _BlocksCodegenBuilder extends Builder {
     for (final w in codegenModel.warnings) {
       log.warning(w);
     }
-    final output = const DartCodeGenerator().generate(codegenModel);
+    // Format for the language version of the package being built, which is
+    // the one `dart format` formats the output at.
+    final packageConfig = await buildStep.packageConfig;
+    final output = DartCodeGenerator(
+      languageVersion: formatterLanguageVersion(
+        packageConfig[inputId.package]?.languageVersion,
+      ),
+    ).generate(codegenModel);
 
     // .spec.json → .blocks.dart (strip both extensions)
     final path = inputId.path;

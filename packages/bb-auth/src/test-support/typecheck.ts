@@ -3,7 +3,7 @@
 
 /**
  * Typecheck snippets of customer code against the real, built packages: the
- * files are written under this package's `dist/`, so `@aws-blocks/*` resolve
+ * files are written under this package's `dist/`, so `@aws-cdk-blocks/*` resolve
  * through the workspace `node_modules` exactly as an app's would.
  */
 
@@ -39,7 +39,7 @@ export function writeFiles(dir: string, files: Record<string, string>): string[]
 }
 
 /**
- * Typecheck `rootFiles` the way an AWS Blocks app is compiled (strict, ESM,
+ * Typecheck `rootFiles` the way a CDK Blocks app is compiled (strict, ESM,
  * bundler resolution, default conditions → the mock entry's types). Returns
  * the formatted diagnostics; empty means it compiles.
  */

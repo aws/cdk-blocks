@@ -5,7 +5,7 @@
  * Shared types for FileBucket. Imported by mock, aws, and browser entry points.
  * This file has zero runtime dependencies — types only.
  */
-import type { ChildLogger } from '@aws-blocks/bb-logger';
+import type { ChildLogger } from '@aws-cdk-blocks/bb-logger';
 
 // ── Constructor options ─────────────────────────────────────────────────────
 
@@ -78,7 +78,7 @@ export interface FileBucketOptions {
 	 * - a {@link ExternalKmsKeyRef} from {@link FileBucket.fromKmsKey}: SSE-KMS
 	 *   with an **existing** CMK you own, so several buckets (or tables) can share
 	 *   one key. The key policy must let the account's IAM principals use it —
-	 *   Blocks grants the runtime role `kms:Decrypt` / `kms:GenerateDataKey*` on
+	 *   CDK Blocks grants the runtime role `kms:Decrypt` / `kms:GenerateDataKey*` on
 	 *   it, which only takes effect when the key policy delegates to IAM.
 	 *
 	 * Presigned `getUrl()` / `putUrl()` URLs keep working under SSE-KMS: they are

@@ -1,7 +1,7 @@
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import type { BlocksContext } from '@aws-blocks/core';
+import type { BlocksContext } from '@aws-cdk-blocks/core';
 
 // Canonical auth error vocabulary + guards. See `errors.ts`.
 export type { AuthErrorName } from './errors.js';
@@ -40,7 +40,7 @@ export interface AuthUser {
 }
 
 /**
- * Common interface for all Blocks auth Building Blocks.
+ * Common interface for all CDK Blocks auth Building Blocks.
  *
  * Auth BBs extend `Scope` and implement `BlocksAuth`. This ensures a consistent
  * API for server-side auth checks and a uniform client-side experience

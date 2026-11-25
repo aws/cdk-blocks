@@ -1,9 +1,9 @@
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import type { ChildLogger } from '@aws-blocks/bb-logger';
-import type { SqlQuery } from './common/sql.js';
+import type { ChildLogger } from '@aws-cdk-blocks/bb-logger';
 import type { StandardSchemaV1 } from '@standard-schema/spec';
+import type { SqlQuery } from './common/sql.js';
 
 /**
  * The categories of cluster a {@link DatabaseCluster} can provision.
@@ -16,6 +16,10 @@ import type { StandardSchemaV1 } from '@standard-schema/spec';
  *   configuration: all of PostgreSQL (triggers, PL/pgSQL, extensions, Row Level
  *   Security, transactions of any size), created in seconds, scales to zero,
  *   reached over its public endpoint with IAM authentication. No VPC.
+ *   Locally, PGlite creates the contrib extensions that both it and Aurora
+ *   have (`citext`, `pgcrypto`, `pg_trgm`, `hstore`, `uuid-ossp` and more; the
+ *   README's Local mode section lists them). One it lacks, such as `vector`,
+ *   fails locally.
  *
  * The value names the engine, so every stop and limit can say which database
  * it comes from.
@@ -40,16 +44,34 @@ export interface ConnectionStringSource {
 }
 
 /**
- * Options for `DatabaseCluster.fromExisting()`. Give exactly one of `name` and
- * `connectionString`.
+ * Where the RDS Data API finds an Aurora PostgreSQL cluster. The block then
+ * sends each statement as an HTTPS call to the Data API and opens no
+ * connection, so the cluster can stay in a VPC with no path to it. The cluster
+ * must have the Data API (its HTTP endpoint) enabled.
+ */
+export interface DataApiOptions {
+	/** The ARN of the Aurora cluster. */
+	clusterArn: string;
+	/**
+	 * The ARN of the Secrets Manager secret that holds the database user name
+	 * and password. The statements run as that user.
+	 */
+	secretArn: string;
+	/** The name of the database in the cluster. */
+	database: string;
+}
+
+/**
+ * Options for `DatabaseCluster.fromExisting()`. Give exactly one of `name`,
+ * `connectionString` and `dataApi`.
  */
 export interface ExistingClusterOptions {
 	/**
 	 * A short name for the connection string. On AWS the block reads the SSM
 	 * SecureString `/<stackName>-<name>`, so each stage has its own value;
-	 * `cdk-blocks db connect --name <name> --stage <stage>` stores it. In local
-	 * mode the block reads the value that `cdk-blocks db connect --name <name>`
-	 * stored under `.bb-data/`.
+	 * `npm run db -- connect --name <name> --stage <stage>` stores it. In local
+	 * mode the block reads the value that `npm run db -- connect --name <name>`
+	 * stored under `.cdk-blocks/local/data/`.
 	 */
 	name?: string;
 	/**
@@ -59,10 +81,18 @@ export interface ExistingClusterOptions {
 	 */
 	connectionString?: ConnectionStringSource;
 	/**
+	 * An Aurora PostgreSQL cluster that the block reaches through the RDS Data
+	 * API, with no connection string. The block's schema is `public`. A result
+	 * is limited to 1 MB, and a `Date` or an object goes to the server as text,
+	 * so a statement that writes one to a `timestamptz` or `jsonb` column casts
+	 * the parameter.
+	 */
+	dataApi?: DataApiOptions;
+	/**
 	 * The certificate authority that signed the server certificate, as PEM
 	 * text. Needed when the provider uses its own authority (Supabase). Without
 	 * it Node's trust store applies. The server certificate is always verified;
-	 * there is no option that turns verification off.
+	 * there is no option that turns verification off. Not used with `dataApi`.
 	 */
 	ca?: string;
 }
@@ -76,6 +106,7 @@ export interface ExistingClusterRef {
 	readonly type: 'external';
 	readonly name?: string;
 	readonly connectionString?: ConnectionStringSource;
+	readonly dataApi?: DataApiOptions;
 	readonly ca?: string;
 }
 
@@ -89,6 +120,65 @@ export interface DatabaseClusterLike {
 	readonly type: ClusterType;
 	/** The cluster's scoped id; drives resource naming. */
 	readonly fullId: string;
+	/**
+	 * Set on a `LegacyDatabaseCluster`: on AWS the block reaches the cluster
+	 * through the RDS Data API, and its schema is `public`.
+	 */
+	readonly dataApi?: true;
+}
+
+/**
+ * Where a `LegacyDatabaseCluster` places its cluster when the app runs in a
+ * VPC that you provide. Set at most one of `subnetType`, `subnetGroupName` and
+ * `subnetIds`.
+ */
+export interface LegacySubnetSelection {
+	/** Select all subnets of the given tier. */
+	subnetType?: 'isolated' | 'private-with-egress' | 'public';
+	/** Restrict the selection to these Availability Zones. */
+	availabilityZones?: string[];
+	/** Return at most one subnet per Availability Zone. */
+	onePerAz?: boolean;
+	/** Select a named subnet group of the VPC. */
+	subnetGroupName?: string;
+	/** Select individual subnets by id. */
+	subnetIds?: string[];
+}
+
+/**
+ * Options of a `LegacyDatabaseCluster`: the options of `Database` in
+ * `@aws-blocks/bb-data` 0.5.0 that shaped its Aurora cluster. Give each one
+ * the value that the `Database` had. A different value changes the deployed
+ * cluster, and some changes replace it.
+ */
+export interface LegacyDatabaseClusterOptions {
+	/** Minimum capacity in Aurora Capacity Units. Default `0.5`. */
+	minCapacity?: number;
+	/** Maximum capacity in Aurora Capacity Units. Default `2`. */
+	maxCapacity?: number;
+	/** Database name. Default: the cluster's full id, with `_` for every other character. */
+	databaseName?: string;
+	/**
+	 * CloudFormation removal policy for the cluster. When omitted, the
+	 * stack-wide `defaults` apply: `production` retains, `sandbox` destroys.
+	 */
+	removalPolicy?: 'destroy' | 'retain' | 'snapshot';
+	/** Aurora PostgreSQL engine version, for example `'16.13'`. Default `'16.13'`. */
+	postgresVersion?: string;
+	/** Where the cluster is placed in a VPC that you provide. */
+	subnets?: LegacySubnetSelection;
+	/**
+	 * ARN of a customer managed KMS key for the cluster's storage and for its
+	 * credentials secret.
+	 */
+	storageEncryptionKeyArn?: string;
+	/**
+	 * Retention of the cluster's automated backups, which is also its
+	 * point-in-time recovery window. `true` is 15 days, `false` is the 1-day
+	 * minimum, and `{ retentionDays }` is an integer from 1 to 35. When
+	 * omitted, the stack-wide `defaults.pointInTimeRecovery` applies.
+	 */
+	pointInTimeRecovery?: boolean | { retentionDays: number };
 }
 
 /**
@@ -155,7 +245,7 @@ export type DatabaseClusterOptions = DsqlClusterOptions | AuroraClusterOptions;
 export interface DatabaseBlockOptions {
 	/**
 	 * Directory of `.sql` migration files for this block, relative to the project
-	 * root. Defaults to `./aws-blocks/migrations/{id}`, which may be absent; an
+	 * root. Defaults to `./cdk-blocks/migrations/{id}`, which may be absent; an
 	 * explicit path must exist.
 	 */
 	migrationsPath?: string;

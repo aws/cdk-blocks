@@ -64,13 +64,20 @@ const CONFIGS = {
 	cognitoOidcOnly: `new Auth(stack, 'auth', { emailPassword: false, providers: { okta: { type: 'oidc', issuer: 'https://dev-1.okta.com', clientId: '0oa1', clientSecret: ${SECRET} } } })`,
 	// Email + password and social in `auth`; the directly federated okta can no longer share it, so it gets its
 	// own `store: 'builtin'` block, built first (the comma expression keeps `auth` the block under test).
-	mixed: `(new Auth(stack, 'sso', { store: 'builtin', providers: { ${OKTA_DIRECT} }, users: { groups: ['admins'] }, redirects: { callbackPath: '/aws-blocks/auth/sso/callback', signOutPath: '/aws-blocks/auth/sso/signout' } }), new Auth(stack, 'auth', { providers: { google: { type: 'google', clientId: 'g-client', clientSecret: ${SECRET} } }, users: { groups: ['admins'] } }))`,
+	mixed: `(new Auth(stack, 'sso', { store: 'builtin', providers: { ${OKTA_DIRECT} }, users: { groups: ['admins'] }, redirects: { callbackPath: '/cdk-blocks/auth/sso/callback', signOutPath: '/cdk-blocks/auth/sso/signout' } }), new Auth(stack, 'auth', { providers: { google: { type: 'google', clientId: 'g-client', clientSecret: ${SECRET} } }, users: { groups: ['admins'] } }))`,
 } as const;
 
+/** CDK context of a sandbox deployment, as `npm run sandbox` sets it. */
+const SANDBOX_CONTEXT = { sandboxMode: 'true' };
+
 const cache: Record<string, SynthesizedAuth> = {};
-function synth(construct: string, preset?: 'sandbox' | 'production'): SynthesizedAuth {
-	const key = `${preset ?? ''}|${construct}`;
-	cache[key] ??= synthIdentity(construct, preset);
+function synth(
+	construct: string,
+	preset?: 'sandbox' | 'production',
+	context?: Record<string, unknown>,
+): SynthesizedAuth {
+	const key = `${preset ?? ''}|${JSON.stringify(context ?? {})}|${construct}`;
+	cache[key] ??= synthIdentity(construct, preset, [], 'ssm', context);
 	return cache[key];
 }
 
@@ -111,7 +118,7 @@ function sessionsTableOf(template: CfnTemplateJson): CfnResourceJson {
 }
 
 const removalWarnings = (s: SynthesizedAuth) =>
-	s.warnings.filter((w) => w.message.includes('@aws-blocks/bb-auth:RemovalPolicyUnset'));
+	s.warnings.filter((w) => w.message.includes('@aws-cdk-blocks/bb-auth:RemovalPolicyUnset'));
 
 describe('Auth — conditional provisioning', () => {
 	test('default: pool, client and session-secret keep the AuthCognito identity; the session store is the new table', () => {
@@ -146,7 +153,7 @@ describe('Auth — conditional provisioning', () => {
 
 		test('with an OAuth 2.0 provider (github()) too: still only the session store and `session-secret`', () => {
 			const s = synthIdentity(CONFIGS.directAndOauth2, undefined, [
-				"import { github } from '@aws-blocks/bb-auth';",
+				"import { github } from '@aws-cdk-blocks/bb-auth';",
 			]);
 			assert.deepStrictEqual(cognitoResources(s.template), []);
 			assert.deepStrictEqual(
@@ -260,11 +267,36 @@ describe('Auth — pool durability follows the stack defaults', () => {
 			assert.strictEqual(table.Properties?.DeletionProtectionEnabled, false);
 		});
 
-		test('removalPolicy unset → warns at synth, naming the resolved default', () => {
+		// The harness sets no `sandboxMode` context: not a sandbox deployment.
+		test('removalPolicy unset, on a deployment that is not a sandbox → warns at synth, naming the resolved default', () => {
 			const warnings = removalWarnings(synth(CONFIGS.default, 'sandbox'));
 			assert.strictEqual(warnings.length, 1);
 			assert.strictEqual(warnings[0].path, '/TestStack/auth');
-			assert.match(warnings[0].message, /follows the stack default \('destroy'\)/);
+			assert.match(
+				warnings[0].message,
+				/follows the stack default \('destroy'\), and this deployment is not a sandbox/,
+			);
+			assert.match(warnings[0].message, /Set `removalPolicy: 'retain'`/);
+		});
+
+		test('removalPolicy unset, in a sandbox deployment (`sandboxMode` context) → does not warn', () => {
+			const s = synth(CONFIGS.default, 'sandbox', SANDBOX_CONTEXT);
+			// Still the destroying posture: only the warning is gone.
+			assert.strictEqual(poolOf(s.template).DeletionPolicy, 'Delete');
+			assert.deepStrictEqual(removalWarnings(s), []);
+		});
+
+		test("explicit removalPolicy: 'destroy', a wrapped existing pool, and no pool at all do not warn outside a sandbox", () => {
+			assert.deepStrictEqual(
+				removalWarnings(synth("new Auth(stack, 'auth', { removalPolicy: 'destroy' })", 'sandbox')),
+				[],
+			);
+			const existing = synth(
+				"new Auth(stack, 'auth', { userPool: Auth.fromExisting('us-east-1_existing') })",
+				'sandbox',
+			);
+			assert.deepStrictEqual(removalWarnings(existing), []);
+			assert.deepStrictEqual(removalWarnings(synth(CONFIGS.directOnly, 'sandbox')), []);
 		});
 
 		test("explicit removalPolicy: 'retain' + deletionProtection: true win over the preset, and do not warn", () => {
@@ -294,10 +326,16 @@ describe('Auth — pool durability follows the stack defaults', () => {
 			assert.strictEqual(table.Properties?.DeletionProtectionEnabled, true);
 		});
 
-		test('removalPolicy unset → warns at synth, naming the resolved default', () => {
-			const warnings = removalWarnings(synth(CONFIGS.default, 'production'));
-			assert.strictEqual(warnings.length, 1);
-			assert.match(warnings[0].message, /follows the stack default \('retain'\)/);
+		test('removalPolicy unset → does not warn (the pool is retained)', () => {
+			assert.deepStrictEqual(removalWarnings(synth(CONFIGS.default, 'production')), []);
+		});
+
+		// A template's configuration, unchanged: no warning of any id (D-033).
+		test('the default Auth synthesizes without any warning, on the production preset and in a sandbox', () => {
+			const production = synthIdentity(CONFIGS.default, 'production', [], 'secrets-manager');
+			assert.deepStrictEqual(production.warnings, []);
+			const sandbox = synth(CONFIGS.default, 'sandbox', SANDBOX_CONTEXT);
+			assert.deepStrictEqual(sandbox.warnings, []);
 		});
 
 		test("explicit removalPolicy: 'destroy' + deletionProtection: false win over the preset, and do not warn", () => {

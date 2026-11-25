@@ -1,3 +1,21 @@
+## 1.0.0
+
+### Breaking
+
+- Requires `blocks_runtime` 1.0.0.
+- This package is now a Dart plugin that registers a secure-storage session
+  store as the default on Android, iOS, macOS, Linux and Windows, so sessions
+  survive app restarts. Call `registerDefaultSessionStore(null)` to opt out.
+  See the README for the platform setup this needs.
+- `FlutterBrowserLauncher` throws `OidcCancelledException` when the user closes
+  the browser, on `timeout`, or when `cancel` completes, and a `StateError` when
+  no browser opens. It used to wait forever.
+
+### Other changes
+
+- `FlutterBrowserLauncher` no longer misses a redirect that arrives right away.
+- `FlutterSecureStore` can be used before `runApp`.
+
 ## 0.2.0
 
 - `FlutterSecureStore()` now stores iOS and macOS Keychain items with

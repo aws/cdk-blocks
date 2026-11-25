@@ -1,5 +1,5 @@
-import { api, authBasicApi, authCognitoApi, oidcAuthStateApi } from 'aws-blocks';
-import { Authenticator, onAuthChange } from '@aws-blocks/bb-auth/ui';
+import { api, authBasicApi, authCognitoApi, oidcAuthStateApi } from 'cdk-blocks';
+import { Authenticator, onAuthChange } from '@aws-cdk-blocks/bb-auth/ui';
 
 function esc(str: string): string {
   return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -9,7 +9,7 @@ let currentUser: { username: string } | null = null;
 let currentSort: 'priority' | 'createdAt' | undefined = undefined;
 
 // ============================================================================
-// Auth — three `Auth` blocks; the email + password one drives the todo list
+// Auth: four `Auth` blocks; the email + password one drives the todo list
 // ============================================================================
 
 document.addEventListener('DOMContentLoaded', () => {

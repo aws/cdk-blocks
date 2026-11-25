@@ -11,8 +11,8 @@
  *
  * @example
  * ```typescript
- * import { isBlocksError } from '@aws-blocks/core';
- * import { Secret, SecretErrors } from '@aws-blocks/bb-secret';
+ * import { isBlocksError } from '@aws-cdk-blocks/core';
+ * import { Secret, SecretErrors } from '@aws-cdk-blocks/bb-secret';
  *
  * const secret = new Secret(scope, 'api-key', { allowRuntimeWrite: true });
  *
@@ -29,7 +29,9 @@
 export const SecretErrors = {
 	/**
 	 * Schema validation failed, or a stored value could not be parsed as JSON
-	 * when a schema is configured.
+	 * when a schema is configured. Also thrown by `put()` for a value Secrets
+	 * Manager would reject: a non-string without a schema, an empty string, or
+	 * more than 65,536 UTF-8 bytes as stored.
 	 */
 	ValidationFailed: 'ValidationFailedException',
 	/**

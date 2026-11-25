@@ -5,7 +5,7 @@
  * Locating a Building Block's own deploy-time Lambda handlers (custom-resource
  * handlers, migration runners, …) in both layouts a block's CDK code runs from:
  *
- * - **Installed** (`node_modules/@aws-blocks/bb-x/dist/…`): the package's build
+ * - **Installed** (`node_modules/@aws-cdk-blocks/bb-x/dist/…`): the package's build
  *   output is there — a pre-built `build:lambda` bundle, or the tsc-compiled
  *   `.js` handler.
  * - **Vendorized** (`vendor/bb-x/src/…`, made by `blocks-vendorize`): only `src/`
@@ -85,7 +85,7 @@ interface Esbuild {
  * 3. **Neither** — throws an error naming the missing bundle and how to restore it.
  *
  * **esbuild comes from the app.** Step 2 resolves `esbuild` from the vendorized
- * package's location, i.e. from the app's `node_modules`. Every AWS Blocks app
+ * package's location, i.e. from the app's `node_modules`. Every CDK Blocks app
  * already has it (the default compute bundles the app's handler with
  * `NodejsFunction`); when it is missing, synth fails with the install command.
  *

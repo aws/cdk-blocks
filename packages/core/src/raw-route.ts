@@ -3,7 +3,7 @@
 
 import type { BlocksContext } from './api.js';
 import type { ScopeParent } from './common/index.js';
-import { BLOCKS_NAMESPACE, BLOCKS_RPC_PREFIX } from './constants.js';
+import { BLOCKS_NAMESPACE, BLOCKS_RPC_PREFIX, canonicalBlocksPath } from './constants.js';
 
 // ── Public types ────────────────────────────────────────────────────────────
 
@@ -117,7 +117,7 @@ export interface RegisteredRoute {
 }
 
 /**
- * Registry state shared by every copy of `@aws-blocks/core` in the process.
+ * Registry state shared by every copy of `@aws-cdk-blocks/core` in the process.
  *
  * A bundle can end up carrying more than one physical copy of this package
  * (an unlucky dependency tree, no dedupe). With module-local state each copy
@@ -147,7 +147,7 @@ interface RawRouteRegistryState {
  *
  * **The key is a permanent contract — do not bump it.** `_V1_` names the shape
  * this file introduced; it is not a license to mint `_V2_`. The copies that
- * share a process are usually *different versions* of `@aws-blocks/core` — that
+ * share a process are usually *different versions* of `@aws-cdk-blocks/core` — that
  * is how a tree ends up with duplicates in the first place — so a copy reading
  * a different key does not get a private namespace, it re-splits the registry:
  * routes registered through one key, dispatched through the other, 404. And
@@ -203,9 +203,9 @@ function getState(): RawRouteRegistryState {
     state.copies += 1;
     if (state.copies > 1) {
       console.warn(
-        `AWS Blocks: ${state.copies} copies of @aws-blocks/core loaded in this process. ` +
+        `AWS CDK Blocks: ${state.copies} copies of @aws-cdk-blocks/core loaded in this process. ` +
           'They now share one RawRoute registry, but duplicate copies indicate a ' +
-          'dependency-tree problem — deduplicate @aws-blocks/core.',
+          'dependency-tree problem — deduplicate @aws-cdk-blocks/core.',
       );
     }
   }
@@ -214,7 +214,7 @@ function getState(): RawRouteRegistryState {
 }
 
 /**
- * Number of `@aws-blocks/core` copies taking part in the shared route registry.
+ * Number of `@aws-cdk-blocks/core` copies taking part in the shared route registry.
  *
  * `1` for a healthy install. A higher number means the dependency tree carries
  * duplicates — routes still work (the registry is shared), but it is worth
@@ -246,7 +246,7 @@ export function unlockRouteRegistry(): void {
  *
  * @throws If registration is locked (after handler creation).
  * @throws If the HTTP method is invalid.
- * @throws If the path is under the reserved namespace (`/aws-blocks` or `/aws-blocks/api/*`).
+ * @throws If the path is under the reserved namespace (`/cdk-blocks` or `/cdk-blocks/api/*`, or their legacy `/aws-blocks` twins).
  * @throws {RawRouteErrors.DuplicateRoute} If the same method+path is registered twice under the same owner.
  */
 export function registerRoute(options: RawRouteOptions & { path: string; ownerRootId?: string }): void {
@@ -259,12 +259,12 @@ export function registerRoute(options: RawRouteOptions & { path: string; ownerRo
     throw new Error(`Invalid HTTP method: ${options.method}. Must be one of: ${Array.from(VALID_METHODS).join(', ')}`);
   }
 
-  const normalizedPath = options.path.replace(/\/+/g, '/').replace(/\/$/, '') || '/';
+  const normalizedPath = canonicalBlocksPath(options.path.replace(/\/+/g, '/').replace(/\/$/, '') || '/');
   if (normalizedPath === '/') {
     throw new Error("Cannot register RawRoute at '/' — root path is not supported (API Gateway proxy resource doesn't handle root). Use a sub-path like '/health'.");
   }
 
-  const lowerPath = normalizedPath.toLowerCase();
+  const lowerPath = canonicalBlocksPath(normalizedPath.toLowerCase());
   if (lowerPath === BLOCKS_NAMESPACE || lowerPath === BLOCKS_RPC_PREFIX || lowerPath.startsWith(`${BLOCKS_RPC_PREFIX}/`)) {
     throw new Error(`Cannot register RawRoute at ${BLOCKS_NAMESPACE} or ${BLOCKS_RPC_PREFIX}/* — these paths are reserved for RPC dispatch`);
   }
@@ -315,14 +315,21 @@ export function clearRouteRegistry(): void {
 /**
  * Match an incoming HTTP request against registered routes.
  *
+ * The root path (`/`, or a run of slashes that collapses to it) never matches,
+ * not even a `/*` wildcard: no route can be registered at the root.
+ *
  * @returns The matched route and extracted path parameters, or `null` if no match.
  */
 export function matchRoute(
   method: string,
   path: string,
 ): { route: RegisteredRoute; params: Record<string, string> } | null {
-  // Normalize incoming path: collapse double slashes
-  path = path.replace(/\/+/g, '/');
+  path = canonicalBlocksPath(path.replace(/\/+/g, '/'));
+
+  // The root is never a route (registerRoute rejects '/'). A `/*` wildcard
+  // compiles to `^/(.*)$`, which would match '/' with an empty capture, so a
+  // stage-root request would run a catch-all handler instead of answering 404.
+  if (path === '/') return null;
 
   for (const route of getState().routes) {
     if (route.method !== method) continue;

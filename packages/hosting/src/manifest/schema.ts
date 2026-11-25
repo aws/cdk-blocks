@@ -1,3 +1,6 @@
+// Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+// SPDX-License-Identifier: Apache-2.0
+
 import { z } from 'zod';
 import { BUILD_ID_PATTERN } from '../defaults.js';
 
@@ -61,6 +64,7 @@ export const cacheConfigSchema = z.object({
   computeResource: z.string().min(1),
   driver: z.enum(['opennext', 'nitro-s3']).optional(),
   tagRevalidation: z.boolean().optional(),
+  cdnInvalidation: z.boolean().optional(),
   revalidationQueue: z.boolean().optional(),
   revalidationFunction: z
     .object({

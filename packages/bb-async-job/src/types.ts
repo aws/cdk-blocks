@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { StandardSchemaV1 } from '@standard-schema/spec';
-import type { ComputeProvider } from '@aws-blocks/core/cdk/internal';
-import type { ChildLogger } from '@aws-blocks/bb-logger';
+import type { ComputeProvider } from '@aws-cdk-blocks/core/cdk/internal';
+import type { ChildLogger } from '@aws-cdk-blocks/bb-logger';
 
 /**
  * Context passed to the AsyncJob handler with metadata about the current job.
@@ -106,7 +106,7 @@ export type AsyncJobOptions<T> = AsyncJobBaseOptions<T> &
 				compute: ComputeProvider<'container'>;
 				/**
 				 * How many deliveries of this job run at once per instance, expressed
-				 * **per vCPU**. Blocks multiplies by the compute's vCPU count for the
+				 * **per vCPU**. CDK Blocks multiplies by the compute's vCPU count for the
 				 * per-instance concurrency: `max(1, ceil(maxConcurrencyPerCPU × vcpu))`.
 				 * Higher for IO-bound work that mostly awaits; explicitly set 1 for
 				 * CPU-bound work. When omitted, the poller allows five in-flight deliveries
@@ -191,7 +191,12 @@ export interface WaitUntilCompleteOptions {
  * Options for submit() and submitBatch() calls.
  */
 export interface SubmitOptions {
-	/** Delay before the job becomes visible for processing. 0–900 seconds. Default: 0. */
+	/**
+	 * Delay before the job becomes visible for processing, in seconds. Default: 0.
+	 *
+	 * Must be an integer from 0 to 900 (the range Amazon SQS accepts); any other
+	 * value is rejected with `AsyncJobErrors.ValidationFailed` before anything is queued.
+	 */
 	delaySeconds?: number;
 }
 

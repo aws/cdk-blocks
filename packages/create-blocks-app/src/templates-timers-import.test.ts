@@ -1,3 +1,6 @@
+// Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+// SPDX-License-Identifier: Apache-2.0
+
 // Every template's test/e2e.test.ts is where users add their own tests. Its imports must leave the
 // global callback-style `setTimeout(cb, ms)` intact, so a user test can call it. This compiles each
 // template's real import declarations, appends such a call, and runs the result in Node.
@@ -36,7 +39,7 @@ describe('template e2e tests keep the global setTimeout callable', () => {
 	for (const template of templates) {
 		it(`${template}: setTimeout(cb, ms) works next to the template's imports`, () => {
 			const source = readFileSync(join(templatesDir, template, 'test/e2e.test.ts'), 'utf-8');
-			// Inside the package, so `@aws-blocks/*` imports resolve through the workspace's node_modules.
+			// Inside the package, so `@aws-cdk-blocks/*` imports resolve through the workspace's node_modules.
 			const dir = mkdtempSync(join(packageDir, '.timers-check-'));
 			try {
 				const entry = join(dir, 'check.mjs');

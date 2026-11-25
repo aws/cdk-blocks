@@ -1,3 +1,6 @@
+// Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+// SPDX-License-Identifier: Apache-2.0
+
 package com.aws.blocks.kotlin.oidc
 
 import com.aws.blocks.kotlin.BlocksServer
@@ -30,14 +33,14 @@ import kotlinx.serialization.json.putJsonArray
 import kotlinx.serialization.json.putJsonObject
 
 /**
- * A client hydrated from the `oidc/client` descriptor an AWS Blocks `Auth` block's
+ * A client hydrated from the `oidc/client` descriptor a CDK Blocks `Auth` block's
  * `createOidcApi().getClient()` returns: the block's federation routes under one base path, and
  * its providers. The keys and paths are exactly what `packages/bb-auth` emits
  * (`oidc-client-api.test.ts` pins that side).
  */
 class OidcClientAuthDescriptorTest {
 
-    private val server = BlocksServer("local", "http://localhost:3001/aws-blocks/api")
+    private val server = BlocksServer("local", "http://localhost:3001/cdk-blocks/api")
 
     /** `Auth`'s descriptor for routes under [base], the directory of `redirects.callbackPath`. */
     private fun authDescriptor(providers: List<String>, base: String): JsonElement = buildJsonObject {
@@ -65,7 +68,7 @@ class OidcClientAuthDescriptorTest {
     private fun authClient(
         http: HttpClient,
         providers: List<String>,
-        base: String = "/aws-blocks/auth",
+        base: String = "/cdk-blocks/auth",
     ): OidcClient<AnyProvider> = OidcClient.fromJson(authDescriptor(providers, base), http, server, "myapp://auth")
 
     /** Every request the client made, as `"METHOD path"`. */
@@ -151,13 +154,13 @@ class OidcClientAuthDescriptorTest {
 
         user.username shouldBe "alice"
         requests shouldBe listOf(
-            "POST /aws-blocks/auth/authorize-params/google",
-            "POST /aws-blocks/auth/exchange",
-            "POST /aws-blocks/auth/signout",
+            "POST /cdk-blocks/auth/authorize-params/google",
+            "POST /cdk-blocks/auth/exchange",
+            "POST /cdk-blocks/auth/signout",
         )
         // The IdP returns to the backend's callback, which relays to the app.
         Url(launcher.authorizeUrl!!).parameters["redirect_uri"] shouldBe
-            "http://localhost:3001/aws-blocks/auth/callback"
+            "http://localhost:3001/cdk-blocks/auth/callback"
         client.authState.value shouldBe OidcAuthState.SignedOut
     }
 
@@ -200,26 +203,26 @@ class OidcClientAuthDescriptorTest {
         val exchange = Json.parseToJsonElement(exchangeBody!!).jsonObject
         exchange["provider"]!!.jsonPrimitive.content shouldBe "google"
         exchange["code"]!!.jsonPrimitive.content shouldBe "the-code"
-        exchange["callbackUrl"]!!.jsonPrimitive.content shouldBe "http://localhost:3001/aws-blocks/auth/callback"
+        exchange["callbackUrl"]!!.jsonPrimitive.content shouldBe "http://localhost:3001/cdk-blocks/auth/callback"
         exchange["tokens"]!!.jsonPrimitive.content shouldBe "false"
     }
 
     @Test
     fun `a second block's own redirects move every route`() = runTest {
         val launcher = RelayingLauncher()
-        val client = authClient(backend(), listOf("google"), base = "/aws-blocks/auth/second")
+        val client = authClient(backend(), listOf("google"), base = "/cdk-blocks/auth/second")
             .also { it.platformLauncher = launcher }
 
         client.signIn("google")
         client.signOut()
 
         requests shouldBe listOf(
-            "POST /aws-blocks/auth/second/authorize-params/google",
-            "POST /aws-blocks/auth/second/exchange",
-            "POST /aws-blocks/auth/second/signout",
+            "POST /cdk-blocks/auth/second/authorize-params/google",
+            "POST /cdk-blocks/auth/second/exchange",
+            "POST /cdk-blocks/auth/second/signout",
         )
         Url(launcher.authorizeUrl!!).parameters["redirect_uri"] shouldBe
-            "http://localhost:3001/aws-blocks/auth/second/callback"
+            "http://localhost:3001/cdk-blocks/auth/second/callback"
     }
 
     @Test
@@ -245,19 +248,19 @@ class OidcClientAuthDescriptorTest {
         }
         val launcher = RelayingLauncher()
         val client = OidcClient.fromJson<AnyProvider>(
-            authBlockDescriptor(listOf("corp"), base = "/aws-blocks/auth/sso", callbackPath = "/aws-blocks/auth/sso/return"),
+            authBlockDescriptor(listOf("corp"), base = "/cdk-blocks/auth/sso", callbackPath = "/cdk-blocks/auth/sso/return"),
             recording, fixtureServer, "myapp://auth",
         ).also { it.platformLauncher = launcher }
 
         client.signIn("corp")
 
         requests shouldBe listOf(
-            "POST /aws-blocks/auth/sso/authorize-params/corp",
-            "POST /aws-blocks/auth/sso/exchange",
+            "POST /cdk-blocks/auth/sso/authorize-params/corp",
+            "POST /cdk-blocks/auth/sso/exchange",
         )
-        Url(launcher.authorizeUrl!!).parameters["redirect_uri"] shouldBe "http://localhost:3001/aws-blocks/auth/sso/return"
+        Url(launcher.authorizeUrl!!).parameters["redirect_uri"] shouldBe "http://localhost:3001/cdk-blocks/auth/sso/return"
         Json.parseToJsonElement(exchangeBody!!).jsonObject["callbackUrl"]!!.jsonPrimitive.content shouldBe
-            "http://localhost:3001/aws-blocks/auth/sso/return"
+            "http://localhost:3001/cdk-blocks/auth/sso/return"
     }
 
     @Test
@@ -266,11 +269,11 @@ class OidcClientAuthDescriptorTest {
             .also { it.platformLauncher = RelayingLauncher() }
 
         client.signIn("corp+eu")
-        requests.first() shouldBe "POST /aws-blocks/auth/authorize-params/corp%2Beu"
+        requests.first() shouldBe "POST /cdk-blocks/auth/authorize-params/corp%2Beu"
 
         requests.clear()
         client.signIn("a/b")
-        requests.first() shouldBe "POST /aws-blocks/auth/authorize-params/a%2Fb"
+        requests.first() shouldBe "POST /cdk-blocks/auth/authorize-params/a%2Fb"
     }
 
     @Test

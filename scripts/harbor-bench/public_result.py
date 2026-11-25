@@ -1,3 +1,6 @@
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+
 """Never publish raw Harbor logs, trajectories, generated app files, or exception text."""
 import json
 import re
@@ -33,7 +36,7 @@ def numeric(value):
 
 
 def storage(snapshot):
-    """Blocks storage the app constructs in its backend sources; only the fixed STORAGE names leave here."""
+    """CDK Blocks storage the app constructs in its backend sources; only the fixed STORAGE names leave here."""
     found = set()
     try:
         with tarfile.open(snapshot, 'r:gz') as archive:

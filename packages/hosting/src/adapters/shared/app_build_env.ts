@@ -1,3 +1,6 @@
+// Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * A `cdk` export condition in a `NODE_OPTIONS` value, with the whitespace
  * after it. Matches `--conditions=cdk`, `--conditions cdk` and `-C cdk`, and
@@ -14,11 +17,11 @@ const CDK_CONDITION = /(?<!\S)("?)(?:--conditions(?:=|\s+)|-C\s+)("?)cdk\2\1(?!\
 
 /**
  * The environment for the app's own build command (`npm run build`, a custom
- * `buildCommand`), spawned by a framework adapter or by the `@aws-blocks/core`
+ * `buildCommand`), spawned by a framework adapter or by the `@aws-cdk-blocks/core`
  * `Hosting` construct.
  *
  * Both run during CDK synth, and a synth runs with
- * `NODE_OPTIONS=--conditions=cdk` so that `@aws-blocks/*` packages resolve to
+ * `NODE_OPTIONS=--conditions=cdk` so that `@aws-cdk-blocks/*` packages resolve to
  * their CDK constructs. A child process inherits `NODE_OPTIONS`, so without
  * this every Node.js process in the app's build (a `prebuild` script, the
  * bundler, a prerender) would resolve those packages through the `cdk`

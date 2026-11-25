@@ -5,10 +5,12 @@
 //
 // Publishes all packages to a local file-based registry, then for every
 // scaffoldable template: creates an app from the published CLI (exactly as a
-// customer would), runs its `test:e2e` suite, and runs `vendorize`. The suite
-// is LOCAL ONLY — each template's `test:e2e` boots a mock dev server, so there
-// is no AWS deploy and no credentials are needed. The real deploy/sandbox smoke
-// stays in windows-e2e.yml (scheduled).
+// customer would), runs its `test:e2e` suite, checks that it synthesizes
+// without unexpected warnings (template-synth-warnings.mjs; not on Windows),
+// and runs `vendorize`. The suite is LOCAL ONLY — each template's `test:e2e`
+// boots a mock dev server and `cdk synth` needs no account, so there is no AWS
+// deploy and no credentials are needed. The real deploy/sandbox smoke stays in
+// windows-e2e.yml (scheduled).
 //
 // This is the single harness for the per-PR template suite (it replaced a
 // bash-only script that could not run on Windows), so the same check runs
@@ -24,6 +26,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { killTree, runBool, startRegistry, isWin } from './_proc.mjs';
+import { checkTemplateSynthWarnings } from './template-synth-warnings.mjs';
 import { checkDevLifecycle } from './windows-dev-lifecycle.mjs';
 
 const ROOT = join(fileURLToPath(import.meta.url), '..', '..', '..');
@@ -104,7 +107,7 @@ function discoverTemplates() {
  * test:templates` exports npm's own resolved configuration that way
  * (`npm_config_userconfig=~/.npmrc`, `npm_config_cache`, …). Child npm processes
  * read them, and `npm_config_userconfig` overrides `NPM_CONFIG_USERCONFIG`, so a
- * registry in the caller's ~/.npmrc would serve the scaffolded apps' @aws-blocks
+ * registry in the caller's ~/.npmrc would serve the scaffolded apps' @aws-cdk-blocks
  * packages instead of the local registry. Dropping them makes `npm run
  * test:templates` behave exactly like `node scripts/ci/templates-e2e.mjs` (what CI
  * runs). Uppercase `NPM_CONFIG_*` variables a caller sets on purpose are kept.
@@ -114,23 +117,23 @@ function callerEnvWithoutNpmConfig() {
 }
 
 /**
- * True when the install in `dir` took `@aws-blocks/<name>` from the local
- * registry, so a registry leaking in from the caller's npm config fails loudly
- * instead of testing published packages.
+ * True when the install in `dir` took `name` from the local registry, so a registry
+ * leaking in from the caller's npm config fails loudly instead of testing published
+ * packages. `name` is the full package name, because the umbrella is unscoped.
  */
 function assertLocalRegistry(dir, name) {
 	let resolved = '';
 	try {
 		const lock = JSON.parse(readFileSync(join(dir, 'package-lock.json'), 'utf-8'));
-		resolved = lock.packages?.[`node_modules/@aws-blocks/${name}`]?.resolved ?? '';
+		resolved = lock.packages?.[`node_modules/${name}`]?.resolved ?? '';
 	} catch {
 		/* no lockfile: reported below */
 	}
 	if (!resolved.startsWith(REGISTRY_URL)) {
-		console.error(`  FAIL: @aws-blocks/${name} in ${dir} was not installed from the local registry (resolved: ${resolved || '<none>'})`);
+		console.error(`  FAIL: ${name} in ${dir} was not installed from the local registry (resolved: ${resolved || '<none>'})`);
 		return false;
 	}
-	console.log(`  ✓ @aws-blocks/${name} installed from the local registry`);
+	console.log(`  ✓ ${name} installed from the local registry`);
 	return true;
 }
 
@@ -158,7 +161,12 @@ async function main() {
 	const baseTmp = process.env.RUNNER_TEMP || tmpdir();
 	work = mkdtempSync(join(baseTmp, 'bb-templates-e2e-'));
 	const userNpmrc = join(work, '.npmrc');
-	writeFileSync(userNpmrc, `@aws-blocks:registry=${REGISTRY_URL}\n`);
+	// The default registry rather than a `@aws-cdk-blocks:registry=` line: npm
+	// resolves a registry per scope, so a scope line cannot route the unscoped
+	// `aws-cdk-blocks` umbrella every template depends on. The local registry
+	// forwards third-party packages upstream and never forwards our own, so
+	// assertLocalRegistry still catches a published copy standing in.
+	writeFileSync(userNpmrc, `registry=${REGISTRY_URL}\n`);
 	const env = {
 		...callerEnvWithoutNpmConfig(),
 		NPM_CONFIG_USERCONFIG: userNpmrc,
@@ -167,19 +175,19 @@ async function main() {
 		// test traffic, not real usage. A local run (no CI env var set) would
 		// otherwise emit telemetry tagged Ci=false and be counted as a real user
 		// on the product dashboard, so suppress it at the source.
-		AWS_BLOCKS_DISABLE_TELEMETRY: '1',
+		CDK_DISABLE_CLI_TELEMETRY: '1',
 	};
 
 	console.log('\n=== Step 3: Install create-blocks-app from registry ===');
-	if (!run('npm', ['install', '@aws-blocks/create-blocks-app@latest'], { cwd: work, env })) {
-		throw new Error('installing @aws-blocks/create-blocks-app from the local registry failed');
+	if (!run('npm', ['install', '@aws-cdk-blocks/create-blocks-app@latest'], { cwd: work, env })) {
+		throw new Error('installing @aws-cdk-blocks/create-blocks-app from the local registry failed');
 	}
-	if (!assertLocalRegistry(work, 'create-blocks-app')) {
-		throw new Error('@aws-blocks/create-blocks-app was not installed from the local registry');
+	if (!assertLocalRegistry(work, '@aws-cdk-blocks/create-blocks-app')) {
+		throw new Error('@aws-cdk-blocks/create-blocks-app was not installed from the local registry');
 	}
 	const createBin = join(work, 'node_modules', '.bin', isWin ? 'create-blocks-app.cmd' : 'create-blocks-app');
 
-	// ── Step 4: per-template loop (scaffold → test:e2e → vendorize) ───────────
+	// ── Step 4: per-template loop (scaffold → test:e2e → synth warnings → vendorize) ──
 	const templates = discoverTemplates();
 	if (templates.length === 0) throw new Error(`no scaffoldable templates found under ${TEMPLATES_DIR}`);
 	console.log(`\nTemplates under e2e: ${templates.join(' ')}`);
@@ -204,9 +212,28 @@ async function main() {
 			continue;
 		}
 
-		if (!assertLocalRegistry(app, 'blocks')) {
+		if (!assertLocalRegistry(app, 'aws-cdk-blocks')) {
 			failed.push(template);
 			continue;
+		}
+
+		if (template === 'default') {
+			console.log('\n--- Testing docs tasks on an upgraded app ---');
+			const manifest = join(app, 'package.json');
+			const pkg = JSON.parse(readFileSync(manifest, 'utf-8'));
+			for (const task of ['docs', 'docs:search', 'docs:api', 'migrate']) delete pkg.scripts[task];
+			writeFileSync(manifest, JSON.stringify(pkg, null, 2) + '\n');
+			const bootstrap = ['--input-type=module', '-e', "import 'aws-cdk-blocks/run'", '--'];
+			if (
+				!run(process.execPath, [...bootstrap, 'migrate', '--force'], { ...inApp, shell: false }) ||
+				!run('npm', ['run', '-s', 'migrate', '--', '--dry-run'], inApp) ||
+				!run('npm', ['run', '-s', 'docs', 'KVStore'], inApp) ||
+				!run('npm', ['run', '-s', 'docs:search', 'ConditionalCheckFailed'], inApp) ||
+				!run('npm', ['run', '-s', 'docs:api', 'KVStore'], inApp)
+			) {
+				failed.push(`${template} (docs upgrade)`);
+				continue;
+			}
 		}
 
 		console.log('\n--- Running e2e tests ---');
@@ -216,8 +243,22 @@ async function main() {
 			continue;
 		}
 
-		console.log('\n--- Testing vendorize bin ---');
-		if (!run('npm', ['run', 'vendorize', '--', '@aws-blocks/bb-kv-store'], inApp)) {
+		// After test:e2e and before vendorize, which replaces a block with its
+		// source: from there on the app is no longer an untouched scaffold.
+		// Skipped on Windows: annotations do not depend on the OS.
+		if (!isWin) {
+			console.log('\n--- Checking synth warnings ---');
+			const problems = checkTemplateSynthWarnings({ template, appDir: app, outDir: join(appParent, 'synth'), env });
+			if (problems.length > 0) {
+				for (const problem of problems) console.error(`  FAIL: ${problem}`);
+				failed.push(`${template} (synth warnings)`);
+				continue;
+			}
+			console.log(`  ✓ Template ${template} synthesizes without unexpected warnings`);
+		}
+
+		console.log('\n--- Testing vendorize task ---');
+		if (!run('npm', ['run', 'vendorize', '--', '@aws-cdk-blocks/bb-kv-store'], inApp)) {
 			console.error(`  FAIL: vendorize failed for template ${template}`);
 			failed.push(template);
 			continue;
@@ -230,7 +271,7 @@ async function main() {
 			failed.push(template);
 			continue;
 		}
-		// Windows only: the user's `cdk-blocks dev` → edit → `dev stop` session, which `test:e2e`'s
+		// Windows only: the user's `npm run dev` → edit → `npm run dev:stop` session, which `test:e2e`'s
 		// `taskkill /T` teardown does not exercise (see windows-dev-lifecycle.mjs).
 		if (isWin && template === 'default') {
 			try {

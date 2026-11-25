@@ -3,10 +3,10 @@ import assert from 'node:assert';
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { isBlocksError } from '@aws-blocks/blocks/client';
-import { createTestClient, getLastAuthCode, installCookieJar, isServerRunning, totpCodeFor } from '@aws-blocks/blocks/utils';
-import type { AuthState } from '@aws-blocks/blocks';
-import type { api as apiType, authApi as authApiType, hello as helloType } from 'aws-blocks';
+import { isBlocksError } from 'aws-cdk-blocks/client';
+import { createTestClient, getLastAuthCode, installCookieJar, isServerRunning, totpCodeFor } from 'aws-cdk-blocks/utils';
+import type { AuthState } from 'aws-cdk-blocks';
+import type { api as apiType, authApi as authApiType, hello as helloType } from 'cdk-blocks';
 
 // npm is npm.cmd on Windows, which spawn won't resolve without a shell.
 const isWin = process.platform === 'win32';
@@ -14,7 +14,7 @@ const isWin = process.platform === 'win32';
 installCookieJar();
 
 let server: ChildProcess | null = null;
-let app: typeof import('aws-blocks');
+let app: typeof import('cdk-blocks');
 let api: typeof apiType;
 let hello: typeof helloType;
 let authApi: typeof authApiType;
@@ -23,12 +23,12 @@ const serverPort: number = JSON.parse(readFileSync('package.json', 'utf-8')).blo
 const readinessUrl = `http://localhost:${serverPort}/.blocks-sandbox/config.json`;
 
 // The app under test: the dev server on that port, or a deployed app when you set TEST_URL to the URL its
-// API is under (TEST_URL=https://<id>.cloudfront.net, or the deployed API URL without /aws-blocks/api). The
+// API is under (TEST_URL=https://<id>.cloudfront.net, or the deployed API URL without /cdk-blocks/api). The
 // client resolves BLOCKS_API_URL first, so a deploy, which records its URL in config.<stage>.json, never redirects these tests.
 const testUrl = process.env.TEST_URL?.replace(/\/$/, '') || undefined;
 
 // The sign-in tests below read each emailed code with `getLastAuthCode()`, which
-// reads the local mock pool's files (.bb-data/): against a running sandbox the
+// reads the local mock pool's files (.cdk-blocks/local/data/): against a running sandbox the
 // dev server proxies to the deployed Lambda, where Cognito emails the code
 // and each run would create a real user. The readiness config.json says which
 // one we hit.
@@ -41,7 +41,7 @@ function skipUnlessLocal(t: { skip(message?: string): void }): boolean {
   return true;
 }
 
-// Wait for the Blocks server to be ready without depending on the sample API.
+// Wait for the CDK Blocks server to be ready without depending on the sample API.
 async function waitForServer() {
   for (let i = 0; i < 60; i++) {
     try {
@@ -75,12 +75,12 @@ test.before(async () => {
   if (!testUrl) await waitForServer();
 
   // Pin the client to the app under test. Only now: a dev server started above must not inherit it.
-  process.env.BLOCKS_API_URL = `${testUrl ?? `http://localhost:${serverPort}`}/aws-blocks/api`;
+  process.env.BLOCKS_API_URL = `${testUrl ?? `http://localhost:${serverPort}`}/cdk-blocks/api`;
 
   // Import the client only once the server answers: the dev server regenerates
-  // aws-blocks/client.js before it listens, so an earlier import could load a
+  // cdk-blocks/client.js before it listens, so an earlier import could load a
   // stale client that lacks namespaces exported since the last generation.
-  app = await import('aws-blocks');
+  app = await import('cdk-blocks');
   api = app.api;
   hello = app.hello;
   authApi = app.authApi;
@@ -118,7 +118,7 @@ test.after(async () => {
 
 // App-level readiness — independent of the sample API, so it keeps passing
 // after you replace `greet`/`setValue`/`getValue` with your own methods.
-test('app: server serves its Blocks config', { skip: testUrl && 'TEST_URL targets a deployed app' }, async () => {
+test('app: server serves its AWS CDK Blocks config', { skip: testUrl && 'TEST_URL targets a deployed app' }, async () => {
   const response = await fetch(readinessUrl);
   assert.ok(response.ok, `expected ${readinessUrl} to respond ok`);
 });
@@ -195,7 +195,7 @@ test('auth: custom attribute round-trip', async (t) => {
 test('todos: per-user create and list', async (t) => {
   if (skipUnlessLocal(t)) return;
   const me = await api.whoAmI();
-  const todo = await api.createTodo('Try AWS Blocks', 1);
+  const todo = await api.createTodo('Try AWS CDK Blocks', 1);
   assert.strictEqual(todo.userSub, me.userSub, "the todo is keyed on the owner's userSub");
   const list = await api.listTodos();
   assert.ok(list.some((t) => t.todoId === todo.todoId));

@@ -5,7 +5,7 @@
  * The local (mock) user-pool engine — a port of `AuthCognito`'s mock behind
  * the {@link NativeEngine} contract. Runs fully offline: users, groups, codes,
  * challenges, MFA / TOTP, devices, passkeys and the admin surface live in
- * `.bb-data/<fullId>/state.json` (`native-mock-store.ts`, `AuthCognito`'s file
+ * `.cdk-blocks/local/data/<fullId>/state.json` (`native-mock-store.ts`, `AuthCognito`'s file
  * format, read as-is).
  *
  * Throws Cognito-shaped service errors (`serviceError`), never `ApiError`s for
@@ -24,8 +24,8 @@
  */
 
 import crypto from 'node:crypto';
-import { registerSdkIdentifiers } from '@aws-blocks/core';
-import { getMockDataDir } from '@aws-blocks/core/bb-utils';
+import { registerSdkIdentifiers } from '@aws-cdk-blocks/core';
+import { getMockDataDir } from '@aws-cdk-blocks/core/bb-utils';
 import { selfSignUpEnabled } from '../cdk/contract.js';
 import {
 	DECOY_FIRST_FACTORS,
@@ -243,6 +243,11 @@ export class MockNativeEngine implements NativeEngine {
 		if (!selfSignUpEnabled(this.host.options)) throw signUpNotPermitted();
 		// As Cognito does: an unknown or non-string attribute is refused, not stored.
 		this.attributeSchema.check(input.attributes, 'signUp');
+		// Cognito checks the `Password` member's format before the username or
+		// the policy (`InvalidParameterException`). After the attribute rules,
+		// so a write breaking both gets the same error name as on AWS, where the
+		// schema-independent attribute rules run before the SDK call.
+		this.store.enforcePasswordFormat(password);
 		const { username, userSub, attributes } = this.newUser(
 			input.username,
 			{ ...input.attributes },
@@ -821,6 +826,8 @@ export class MockNativeEngine implements NativeEngine {
 	}
 
 	async confirmResetPassword(input: { username: string; code: string; newPassword: string }): Promise<void> {
+		// Cognito validates the `Password` member before it looks at the user or the code.
+		this.store.enforcePasswordFormat(input.newPassword);
 		const found = this.store.resolve(input.username);
 		// `AuthBase` answers an unknown user exactly like a wrong code.
 		if (!found) throw userNotFound();
@@ -842,6 +849,10 @@ export class MockNativeEngine implements NativeEngine {
 	}
 
 	async updatePassword(input: { accessToken: string; oldPassword: string; newPassword: string }): Promise<void> {
+		// Cognito validates `PreviousPassword` and `ProposedPassword` before the
+		// token or the comparison. An empty old password (a passwordless user) is skipped.
+		this.store.enforcePasswordFormat(input.oldPassword);
+		this.store.enforcePasswordFormat(input.newPassword);
 		const { user } = this.store.userForAccessToken(input.accessToken);
 		if (user.password !== input.oldPassword) {
 			throw serviceError(AuthErrors.NotAuthorized, 'Incorrect username or password.');

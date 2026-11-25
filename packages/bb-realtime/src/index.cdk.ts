@@ -2,11 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * @aws-blocks/bb-realtime — CDK construct.
+ * @aws-cdk-blocks/bb-realtime — CDK construct.
  *
  * Provisions a shared API Gateway WebSocket API with a DynamoDB connections
  * table (via KVStore) for channel-based pub/sub. All WebSocket
- * routes ($connect, $disconnect, $default) are handled by the existing Blocks
+ * routes ($connect, $disconnect, $default) are handled by the existing CDK Blocks
  * handler Lambda — no separate Lambdas are created.
  *
  * First Realtime instance in a stack creates the shared infrastructure;
@@ -19,12 +19,12 @@ import { WebSocketApi, WebSocketStage, LogGroupLogDestination } from 'aws-cdk-li
 import { WebSocketLambdaIntegration } from 'aws-cdk-lib/aws-apigatewayv2-integrations';
 import { AccessLogFormat } from 'aws-cdk-lib/aws-apigateway';
 import { LogGroup } from 'aws-cdk-lib/aws-logs';
-import { BuildingBlockScope, synthGuard, ensureApiGatewayAccount, blocksError, getOrCreateOnRoot } from '@aws-blocks/core/cdk';
-import { registerConfig } from '@aws-blocks/core/cdk';
-import { LambdaCompute } from '@aws-blocks/bb-lambda-compute/cdk';
-import { frameworkKey } from '@aws-blocks/bb-secret/internal';
-import { KVStore } from '@aws-blocks/bb-kv-store';
-import type { ScopeParent } from '@aws-blocks/core';
+import { BuildingBlockScope, synthGuard, ensureApiGatewayAccount, blocksError, getOrCreateOnRoot } from '@aws-cdk-blocks/core/cdk';
+import { registerConfig } from '@aws-cdk-blocks/core/cdk';
+import { LambdaCompute } from '@aws-cdk-blocks/bb-lambda-compute/cdk';
+import { frameworkKey } from '@aws-cdk-blocks/bb-secret/internal';
+import { KVStore } from '@aws-cdk-blocks/bb-kv-store';
+import type { ScopeParent } from '@aws-cdk-blocks/core';
 import type { StandardSchemaV1 } from '@standard-schema/spec';
 import type { NamespaceConfig, NamespaceDefs, RealtimeOptions } from './types.js';
 import { RealtimeErrors } from './errors.js';
@@ -71,7 +71,7 @@ function getOrCreateSharedInfra(handler: cdk.aws_lambda.IFunction, parent: Build
 		// The options are the ones the runtime entry constructs its store with.
 		new KVStore(parent, 'connections', connectionsTableOptions);
 
-		// ── WebSocket API — all routes point at the Blocks handler Lambda ──────
+		// ── WebSocket API — all routes point at the CDK Blocks handler Lambda ──────
 		const wsApi = new WebSocketApi(root, 'BlocksRtWebSocket', {
 			connectRouteOptions: {
 				integration: new WebSocketLambdaIntegration('ConnectInteg', handler),
@@ -132,7 +132,7 @@ function getOrCreateSharedInfra(handler: cdk.aws_lambda.IFunction, parent: Build
 		// pattern (grant the role, not one handler).
 		wsApi.grantManageConnections(parent.executionRole);
 
-		// Env vars for the Blocks handler Lambda
+		// Env vars for the CDK Blocks handler Lambda
 		registerConfig(parent, 'BLOCKS_RT_WS_URL', stage.url);
 		registerConfig(parent, 'BLOCKS_RT_CALLBACK_URL', stage.callbackUrl);
 
@@ -149,7 +149,7 @@ function getOrCreateSharedInfra(handler: cdk.aws_lambda.IFunction, parent: Build
  * CDK construct for Realtime. Creates shared WebSocket API + DynamoDB
  * connections table infrastructure on first use, reuses on subsequent
  * instances within the same stack. All WebSocket events are handled by
- * the existing Blocks handler Lambda.
+ * the existing CDK Blocks handler Lambda.
  *
  * Same constructor signature as the mock — `new Realtime(scope, id, options)` —
  * so the user's backend code works unchanged under `--conditions=cdk`.

@@ -14,6 +14,7 @@ import httpProxy from 'http-proxy';
 import { writeClientCode } from './generate-client.js';
 import { BLOCKS_RPC_PREFIX, BLOCKS_SANDBOX_PREFIX, CLIENT_USER_AGENT_HEADER, isRpcPath } from '../constants.js';
 import { BLOCKS_SANDBOX_DIR } from '../common/constants.js';
+import { migrateLegacySandboxDir } from './migrate-sandbox-dir.js';
 import { matchRoute, lockRouteRegistry } from '../raw-route.js';
 import { CORS_MAX_AGE, corsRejection } from '../cors.js';
 import { registerBuiltinRoutes } from '../builtin-routes.js';
@@ -148,7 +149,7 @@ const STATE_CHANGING_METHODS: ReadonlySet<string> = new Set(['POST', 'PUT', 'PAT
  * `PATCH`, `DELETE`) that carries this `Origin`. This is the cross-site request
  * forgery check. The `Host` check ({@link isAllowedDevRequestHost}) doesn't
  * stop it: a page on another site that sends a `POST` to
- * `http://localhost:3000/aws-blocks/api` addresses the dev server by its real,
+ * `http://localhost:3000/cdk-blocks/api` addresses the dev server by its real,
  * loopback name. A `text/plain` body even goes without a CORS preflight, so the
  * call would run before the browser hides the answer. Allowed origins:
  *
@@ -219,7 +220,7 @@ export function rejectsDevRequestOrigin(
  * `text/plain`, `application/x-www-form-urlencoded` or `multipart/form-data`
  * body, or one with no `Content-Type`, to another origin without a CORS
  * preflight, so refusing them keeps a cross-site page from running an RPC call
- * at all. Every AWS Blocks client sends `application/json`.
+ * at all. Every CDK Blocks client sends `application/json`.
  */
 export function isJsonRpcContentType(contentType: string | undefined): boolean {
   return (contentType ?? '').split(';')[0].trim().toLowerCase() === 'application/json';
@@ -303,7 +304,7 @@ export interface BlocksRuntimeConfig {
  * Build the runtime config the browser fetches at `${BLOCKS_SANDBOX_PREFIX}/config.json`.
  * The browser targets the dev server's own front door on the host it binds
  * (see {@link devUrlHost}); in sandbox mode the dev server proxies
- * `/aws-blocks/api` to the deployed API, so the shape is the same in both
+ * `/cdk-blocks/api` to the deployed API, so the shape is the same in both
  * modes — only `environment` differs.
  */
 export function buildBlocksConfig(port: number, isSandbox: boolean, host = '127.0.0.1'): BlocksRuntimeConfig {
@@ -316,9 +317,9 @@ export function buildBlocksConfig(port: number, isSandbox: boolean, host = '127.
 /**
  * The runtime config the dev server answers at `${BLOCKS_SANDBOX_PREFIX}/config.json`:
  * {@link buildBlocksConfig}, except that a server bound to all interfaces (`0.0.0.0`, `::`)
- * serves the same-origin `apiUrl` `/aws-blocks/api`. A browser can load the app at any of
+ * serves the same-origin `apiUrl` `/cdk-blocks/api`. A browser can load the app at any of
  * the machine's addresses, and the absolute `http://localhost:<port>` would send it to
- * another origin, or to another machine. The `.blocks-sandbox/config.json` file keeps the
+ * another origin, or to another machine. The `.cdk-blocks-sandbox/config.json` file keeps the
  * absolute URL: Node.js reads it, and a relative URL has no origin there.
  */
 export function buildServedBlocksConfig(port: number, isSandbox: boolean, host = '127.0.0.1'): BlocksRuntimeConfig {
@@ -363,7 +364,7 @@ export interface DevServerOptions {
   frontendPort?: number;
   /**
    * Interface the dev server binds. Default: `127.0.0.1` (loopback only). The dev
-   * server proxies your whole Blocks API — with local mock auth, which
+   * server proxies your whole CDK Blocks API — with local mock auth, which
    * authenticates nothing — against the local mock datastore, so it must not be
    * reachable from other machines by default. Set a wider host (e.g. `0.0.0.0`)
    * only for container / remote-devbox setups where you control who can reach the
@@ -379,7 +380,7 @@ export interface DevServerOptions {
    */
   typegen?: boolean;
   /**
-   * Regenerate `aws-blocks/client.js` from the backend at startup (local mode
+   * Regenerate `cdk-blocks/client.js` from the backend at startup (local mode
    * only; sandbox mode never does). Set `false` for an app that ships its own
    * client, such as the Amplify overlay, whose `client.js` reads
    * `amplify_outputs.json` and adds the Cognito token. When omitted, the dev
@@ -391,7 +392,7 @@ export interface DevServerOptions {
 
 /**
  * `package.json#blocks.dev.generateClient` in `root`: `false` keeps a
- * hand-written `aws-blocks/client.js`. `undefined` when the package.json, the
+ * hand-written `cdk-blocks/client.js`. `undefined` when the package.json, the
  * key or a boolean value is missing; a non-boolean value is warned about and
  * ignored, since it's an option the dev server can work without.
  */
@@ -431,7 +432,7 @@ export function typegenWatchOptions(): { unref: true; log: (msg: string) => void
 
 async function startTypegenWatch(): Promise<(() => void) | undefined> {
   try {
-    const { scanValueKeys, watchHostingValues } = await import('@aws-blocks/hosting/scripts');
+    const { scanValueKeys, watchHostingValues } = await import('@aws-cdk-blocks/hosting/scripts');
     const scan = await scanValueKeys();
     if (scan.secretKeys.length === 0 && scan.configKeys.length === 0) {
       return undefined; // app doesn't use secret()/config() → nothing to type, skip silently
@@ -735,14 +736,14 @@ export function portInUseHint(
   platform: NodeJS.Platform = process.platform,
 ): string {
   const pids = result.foreign.length > 0 ? result.foreign.map((h) => h.pid) : result.pids;
-  const again = 'then run `npx --no -- cdk-blocks dev` again';
+  const again = 'then run `npm run dev` again';
   const windows = platform === 'win32';
   if (pids.length > 0) {
     const stop = windows ? pids.map((pid) => `taskkill /PID ${pid} /T /F`).join(' && ') : `kill ${pids.join(' ')}`;
-    return `Stop it with \`${stop}\`, ${again}, or choose another port with ${option}.`;
+    return `Stop it with \`${stop}\`, ${again}, or choose another port with \`npm run dev -- ${option} <port>\`.`;
   }
   const find = windows ? `netstat -ano | findstr :${port}` : `lsof -i :${port}`;
-  return `Find the process that holds it with \`${find}\` and stop it, ${again}, or choose another port with ${option}.`;
+  return `Find the process that holds it with \`${find}\` and stop it, ${again}, or choose another port with \`npm run dev -- ${option} <port>\`.`;
 }
 
 /**
@@ -924,19 +925,19 @@ function watchPidfileHandoff(pidfilePath: string): void {
       windowsHide: true,
       env: { ...process.env, NODE_OPTIONS: '' },
     }).unref();
-  } catch { /* best effort: a later start or `dev stop` still treats a dead owner as gone */ }
+  } catch { /* best effort: a later start or `npm run dev:stop` still treats a dead owner as gone */ }
 }
 
 /**
  * The environment variable naming a file the dev server writes a one-line
  * reason to when it can't start (another dev server owns the port, the port is
- * taken, the bind fails). `cdk-blocks dev` sets it, so it can tell this failure
+ * taken, the bind fails). `npm run dev` sets it, so it can tell this failure
  * apart from a requested stop: both end its `tsx watch` with a signal.
  */
 export const DEV_FAILURE_FILE_ENV = 'BLOCKS_DEV_FAILURE_FILE';
 
 /**
- * The environment variable, `1`, that `cdk-blocks dev` (and the sandbox's dev
+ * The environment variable, `1`, that `npm run dev` (and the sandbox's dev
  * command) set because they run the dev server under `tsx watch`.
  */
 export const DEV_UNDER_WATCH_ENV = 'BLOCKS_DEV_UNDER_WATCH';
@@ -950,12 +951,12 @@ export function runsUnderTsxWatch(env: NodeJS.ProcessEnv, parentCommand: string)
   return env[DEV_UNDER_WATCH_ENV] === '1' || isTsxWatcher(parentCommand);
 }
 
-/** `npx --no -- cdk-blocks dev stop`, with `--port` when the port isn't the default: a command an app's shell runs as is. */
+/** `npm run dev:stop`, with `--port` when the port isn't the default: a command an app's shell runs as is. */
 export function devStopCommand(port: number): string {
-  return port === 3000 ? 'npx --no -- cdk-blocks dev stop' : `npx --no -- cdk-blocks dev stop --port ${port}`;
+  return port === 3000 ? 'npm run dev:stop' : `npm run dev:stop -- --port ${port}`;
 }
 
-/** The `Symbol.for` key of the local data engines' pending closers (see `closeOnProcessExit` in `@aws-blocks/bb-database`). */
+/** The `Symbol.for` key of the local data engines' pending closers (see `closeOnProcessExit` in `@aws-cdk-blocks/bb-database`). */
 const LOCAL_ENGINE_CLOSERS = Symbol.for('aws-blocks.local-engine-closers');
 
 /** How long {@link closeLocalEngines} waits for the engines: within `tsx watch`'s 5 s, with the frontend's teardown. */
@@ -990,7 +991,7 @@ const FAIL_RELAY_GRACE_MS = 2000;
  *
  * A `tsx watch` parent (`underWatch`, see {@link runsUnderTsxWatch}) would
  * otherwise wait for a file change forever after we exit, with nothing left
- * running that `dev stop` could find, so it is stopped too: it gets a SIGTERM,
+ * running that `npm run dev:stop` could find, so it is stopped too: it gets a SIGTERM,
  * relays it back to us, and we exit 1 then — not before — so that tsx exits
  * with our code instead of reporting a stop. On Windows the SIGTERM is
  * `TerminateProcess`, which ends `tsx watch` with exit code 1 at once.
@@ -1014,14 +1015,14 @@ function failDevStartup(reason: string, hint: string | undefined, underWatch: bo
 }
 
 export async function startDevServer(options: DevServerOptions) {
-  // A closed output pipe (`cdk-blocks dev | head`, a background job whose reader
+  // A closed output pipe (`npm run dev | head`, a background job whose reader
   // went away) must not kill the server on its next log line (see ignoreClosedOutput).
   ignoreClosedOutput();
   // Bind loopback unless the developer explicitly opts into a wider interface.
   const host = resolveDevHost(options.host);
   if (!isLoopbackHost(host)) {
     console.warn(
-      `\n⚠️  AWS Blocks dev server is binding ${host}, not loopback. Anyone who can reach this ` +
+      `\n⚠️  AWS CDK Blocks dev server is binding ${host}, not loopback. Anyone who can reach this ` +
         'machine on that interface can call every API method against your local mock data ' +
         '(local auth authenticates nothing). Use this only in a container or devbox whose ' +
         'port you control.' +
@@ -1043,13 +1044,13 @@ export async function startDevServer(options: DevServerOptions) {
   installDevRejectionHandler();
 
   // ── Singleton guard ─────────────────────────────────────────────────────
-  // One dev server per front-door port: a second `cdk-blocks dev` must not start a
+  // One dev server per front-door port: a second `npm run dev` must not start a
   // supervisor that fights the first over :3000/:3100. The per-port pidfile is
   // created exclusively (see {@link claimDevPidfile}), so this holds even for
   // two starts at the same moment. The recorded `ppid` (the stable `tsx watch`
   // watcher) tells a hot-reload relaunch of OUR OWN script from a second
   // invocation, and the recorded command lines tell a live owner from a reused
-  // pid. A stale pidfile (dead owner) never blocks startup. Under `cdk-blocks dev`,
+  // pid. A stale pidfile (dead owner) never blocks startup. Under `npm run dev`,
   // the CLI claimed the session before it started us (see claimDevSession), and
   // we take its record over.
   const pidfilePath = devPidfilePath(port);
@@ -1069,10 +1070,11 @@ export async function startDevServer(options: DevServerOptions) {
   const session = Number(process.env[DEV_SESSION_ENV]);
   delete process.env[DEV_SESSION_ENV]; // not the frontend's to inherit
   const sessionPid = Number.isInteger(session) && session > 1 ? session : undefined;
-  // The top of the session, which `dev stop` ends on Windows (see DevServerPidRecord.session).
+  // The top of the session, which `npm run dev:stop` ends on Windows (see DevServerPidRecord.session).
   if (sessionPid !== undefined) selfRecord.session = { pid: sessionPid };
   const underTsxWatch = process.ppid > 1 && runsUnderTsxWatch(process.env, selfRecord.parentCommand ?? '');
   delete process.env[DEV_UNDER_WATCH_ENV]; // not the frontend's to inherit
+  migrateLegacySandboxDir(process.cwd());
   mkdirSync(BLOCKS_SANDBOX_DIR, { recursive: true });
   const claim = claimDevPidfile(pidfilePath, selfRecord, {}, sessionPid);
   if (!claim.acquired) {
@@ -1082,10 +1084,10 @@ export async function startDevServer(options: DevServerOptions) {
   }
   // `tsx watch` restarts us on a file change with a SIGTERM (and relays a
   // SIGTERM stop the same way). The session goes on across a restart, so the
-  // pidfile stays: a `dev stop` run before the successor has booted must still
-  // find it. The successor takes it over (see evaluateSingleton), and `dev stop`
+  // pidfile stays: a `npm run dev:stop` run before the successor has booted must still
+  // find it. The successor takes it over (see evaluateSingleton), and `npm run dev:stop`
   // removes it once the port is free. Every other signal ends the session.
-  // A SIGTERM that was a stop looks the same to us (the `cdk-blocks` CLI SIGTERMs
+  // A SIGTERM that was a stop looks the same to us (the task runner SIGTERMs
   // this process, then its `tsx watch`), so a handoff watch removes the kept
   // pidfile once `tsx watch` exits without a successor (see watchPidfileHandoff).
   const signals: NodeJS.Signals[] = ['SIGINT', 'SIGTERM', 'SIGHUP'];
@@ -1129,13 +1131,13 @@ export async function startDevServer(options: DevServerOptions) {
 
   // Detect sandbox: if BLOCKS_API_URL env var is set (by sandbox.ts), proxy to it.
   const isSandbox = !!process.env.BLOCKS_API_URL;
-  const apiTarget = isSandbox ? process.env.BLOCKS_API_URL!.replace(/\/aws-blocks\/api$/, '') : null;
+  const apiTarget = isSandbox ? process.env.BLOCKS_API_URL!.replace(/\/cdk-blocks\/api$/, '') : null;
 
   // Write config for client-side JS — always reflects the current mode.
   // In sandbox, point the browser at the localhost front door (not the raw
   // execute-api URL) so the data-plane RPC is same-origin with the page and the
   // session cookie — set host-scoped to localhost during the auth callback — is
-  // sent on every request. The dev server proxies `/aws-blocks/api` to
+  // sent on every request. The dev server proxies `/cdk-blocks/api` to
   // BLOCKS_API_URL server-side, so the request still reaches the deployed Lambda.
   // This makes sandbox single-origin, matching `npm run dev` and the prod
   // CloudFront proxy; `crossDomain` stays unnecessary.
@@ -1235,7 +1237,7 @@ export async function startDevServer(options: DevServerOptions) {
    * Windows has no process groups, and a frontend that a shell started outlives
    * a dev server that `tsx watch` restarted or that was killed: once `child`
    * listens, record the processes of its tree that hold the port, for a later
-   * start's reclaim and `dev stop` (see {@link ownsLeftoverFrontend}).
+   * start's reclaim and `npm run dev:stop` (see {@link ownsLeftoverFrontend}).
    */
   const recordWindowsFrontend = async (child: ChildProcess): Promise<void> => {
     const root = child.pid;
@@ -1415,7 +1417,7 @@ export async function startDevServer(options: DevServerOptions) {
     if (!isAllowedDevRequestHost(req.headers.host, host)) {
       res.writeHead(403, { 'Content-Type': 'text/plain; charset=utf-8', 'Connection': 'close' });
       res.end(
-        'Forbidden: the AWS Blocks dev server only answers requests addressed to localhost, 127.0.0.1, [::1] ' +
+        'Forbidden: the AWS CDK Blocks dev server only answers requests addressed to localhost, 127.0.0.1, [::1] ' +
           'or the host set in BLOCKS_DEV_HOST.\n',
       );
       return;
@@ -1435,7 +1437,7 @@ export async function startDevServer(options: DevServerOptions) {
       return;
     }
 
-    // ── Blocks runtime config ──────────────────────────────────────────
+    // ── CDK Blocks runtime config ──────────────────────────────────────────
     // Reserved path: serve it from the front door so it works for every
     // framework (Next/Nuxt/Astro/SPA all proxy through this :3000 server),
     // mirroring production where CloudFront serves `${BLOCKS_SANDBOX_PREFIX}/*`
@@ -1460,6 +1462,19 @@ export async function startDevServer(options: DevServerOptions) {
         apiProxy.web(req, res);
         return;
       }
+      // API Gateway answers a path holding a `%` not followed by two hex digits
+      // with a 400 before the Lambda runs. Do the same here, so a local handler
+      // never receives that text as if it were a literal parameter value. The
+      // status matches API Gateway; the body follows the dispatcher's
+      // `{"error": ...}` shape. Only matched API paths reach this check: a
+      // malformed path that matches no route still gets the 404 below, where an
+      // API-only deployment would answer 400. (The sandbox branch above
+      // forwards to the real API Gateway, which gives its own answer.)
+      if (hasMalformedPercentEncoding(url.pathname)) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Bad Request' }));
+        return;
+      }
       handleApiRequest(req, res, url, method, dispatch, bound);
       return;
     }
@@ -1468,8 +1483,10 @@ export async function startDevServer(options: DevServerOptions) {
     if (frontendProxy) {
       frontendProxy.web(req, res);
     } else {
-      res.writeHead(404);
-      res.end();
+      // No frontend and no matching route: answer with the same JSON 404 the
+      // deployed dispatcher gives an unmatched request (see dispatch.ts).
+      res.writeHead(404, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Not Found' }));
     }
   });
 
@@ -1510,7 +1527,7 @@ export async function startDevServer(options: DevServerOptions) {
   if (!isSandbox) {
     const clientPath = join(dirname(resolvedPath), 'client.js');
     if ((options.generateClient ?? readDevGenerateClient(process.cwd())) === false) {
-      log.detail('📝 Keeping aws-blocks/client.js (generateClient is false).');
+      log.detail('📝 Keeping cdk-blocks/client.js (generateClient is false).');
     } else {
       log.progress('📝 Generating client code...');
       await writeClientCode(resolvedPath, clientPath);
@@ -1556,7 +1573,7 @@ export async function startDevServer(options: DevServerOptions) {
     // record. Two starts of this version can't take it from each other (see
     // claimDevPidfile), but a dev server of an older version, started at the same
     // moment, writes its own record over ours and removes it when it bows out. We
-    // would then serve with no pidfile, and `dev stop` would report nothing to
+    // would then serve with no pidfile, and `npm run dev:stop` would report nothing to
     // stop. The claim writes the whole record again, token included, and leaves
     // a live record of another session alone.
     try {
@@ -1564,10 +1581,10 @@ export async function startDevServer(options: DevServerOptions) {
       try { recorded = parsePidRecord(readFileSync(pidfilePath, 'utf-8')); } catch { /* no pidfile */ }
       if (recorded?.pid !== process.pid) claimDevPidfile(pidfilePath, selfRecord);
     } catch { /* best effort: the server runs on, as it would without a record */ }
-    console.log(`AWS Blocks local server running on ${frontDoor}`);
+    console.log(`AWS CDK Blocks local server running on ${frontDoor}`);
     buildAndSendEvent({ command: 'dev', state: 'SUCCESS', duration: Date.now() - devStartTime });
 
-    // Spawn frontend dev server after Blocks server is ready
+    // Spawn frontend dev server after CDK Blocks server is ready
     if (frontendCommand) {
       const child = spawnFrontend(frontendCommand);
       await announceFrontendReady(child);
@@ -1722,7 +1739,7 @@ export interface StopResult {
    *                 on Windows, the end of its whole tree.
    *  - `listener` — fallback: killed the recorded child pid's listener tree
    *                 (watcher was already gone / not a tsx watcher).
-   *  - `cli`      — SIGTERM to the `cdk-blocks dev` CLI whose dev server was still
+   *  - `cli`      — SIGTERM to the `npm run dev` launcher whose dev server was still
    *                 starting (a {@link DevServerPidRecord.starting} record); on
    *                 Windows, also the end of the tree of the CLI that runs it.
    *  - `frontend` — the recorded dev server was gone (a SIGKILL of its group),
@@ -1738,7 +1755,7 @@ export interface StopResult {
   portFree: boolean;
   /**
    * When nothing of this app was stopped but the port is bound: the processes
-   * holding it, which `dev stop` never signals. Empty otherwise.
+   * holding it, which `npm run dev:stop` never signals. Empty otherwise.
    */
   holders: PortHolder[];
   /** The recorded frontend and its port that were stopped: for `frontend`, and for `watcher` when the runner was already dead. */
@@ -1750,7 +1767,7 @@ export interface StopResult {
    */
   killed?: true;
   /**
-   * The `cdk-blocks sandbox` session whose dev server this was (see
+   * The `npm run sandbox` session whose dev server this was (see
    * {@link DevServerPidRecord.sandbox}): it ends with its dev server, stopping
    * its `cdk watch`, and the stop waited for it.
    */
@@ -1817,7 +1834,7 @@ function defaultStopDeps(): StopDevServerDeps {
 }
 
 /**
- * How long {@link stopDevServer} waits for a starting `cdk-blocks dev` CLI to exit
+ * How long {@link stopDevServer} waits for a starting `npm run dev` launcher to exit
  * after its SIGTERM: the CLI waits up to 10 s for its dev server's cleanup.
  */
 const CLI_STOP_TIMEOUT_MS = 12_000;
@@ -1830,7 +1847,7 @@ const CLI_STOP_TIMEOUT_MS = 12_000;
 const WATCHER_EXIT_TIMEOUT_MS = 8000;
 
 /**
- * How long {@link stopDevServer} waits for a `cdk-blocks sandbox` session to exit
+ * How long {@link stopDevServer} waits for a `npm run sandbox` session to exit
  * once its dev server has: it stops its `cdk watch` (2 s) and its dev server
  * tree (6 s) at the same time, then exits.
  */
@@ -1848,7 +1865,7 @@ const WINDOWS_TREE_EXIT_MS = 5000;
 
 /**
  * The process at the top of the dev session `record` names, on Windows, which
- * `dev stop` ends with its whole tree: the `cdk-blocks dev` CLI that started the
+ * `npm run dev:stop` ends with its whole tree: the `npm run dev` launcher that started the
  * session ({@link DevServerPidRecord.session}), while the recorded `tsx watch`
  * still descends from it; else that `tsx watch`, while the recorded runner
  * still descends from it. Undefined unless the recorded `ppid` is a `tsx watch`
@@ -1884,13 +1901,13 @@ export function windowsSessionRoot(
  *     that would be the self-kill this command exists to prevent.)
  *  3. Watcher gone / not a tsx watcher but the recorded child `pid` still holds
  *     the port → fall back to SIGTERM→SIGKILL of that child's listener tree.
- *  4. A {@link DevServerPidRecord.starting} record: the `cdk-blocks dev` CLI whose
+ *  4. A {@link DevServerPidRecord.starting} record: the `npm run dev` launcher whose
  *     dev server is still starting → SIGTERM the CLI, which stops what it
  *     started, and wait for it to exit.
  *  5. On Windows, a signal is `TerminateProcess`: a SIGTERM to `tsx watch` runs
  *     no cleanup, and what a shell started (the frontend) outlives its parent.
  *     So the session ends from its top ({@link windowsSessionRoot}: the
- *     `cdk-blocks dev` CLI, else `tsx watch`) with its whole tree (`taskkill /T /F`):
+ *     `npm run dev` launcher, else `tsx watch`) with its whole tree (`taskkill /T /F`):
  *     the CLI does not start the dev server again on the next save. Then the
  *     stop waits for the ports to be free, and removes the record.
  *
@@ -1943,7 +1960,7 @@ export async function stopDevServer(
     d.isAlive(record.pid) && (record.command === undefined || d.commandOf(record.pid) === record.command);
   const childAlive = runnerAlive();
 
-  // A `cdk-blocks dev` CLI whose dev server has not taken the session over yet: it
+  // A `npm run dev` launcher whose dev server has not taken the session over yet: it
   // stops what it started on a SIGTERM, and exits once all of it has.
   if (record.starting) {
     if (!childAlive) {
@@ -2074,7 +2091,7 @@ export async function stopDevServer(
     // A runner that died by a signal ran no cleanup: its frontend is still up.
     const left = childAlive ? null : await stopLeftFrontend();
     await d.waitFree(port, 3000);
-    // A `cdk-blocks sandbox` session ends with its dev server: it stops its `cdk watch` and exits. Wait for that.
+    // A `npm run sandbox` session ends with its dev server: it stops its `cdk watch` and exits. Wait for that.
     const sandbox = record.sandbox;
     const sandboxEnded = !sandbox || !d.isAlive(sandbox.pid) || (await d.waitExit(sandbox.pid, SANDBOX_STOP_TIMEOUT_MS));
     const portFree = !(await d.probe(port)) && (left === null || left.reclaim.reclaimed);
@@ -2139,21 +2156,21 @@ export function stopMessage(result: StopResult): string {
     const how = result.killed ? '; its tsx watch had lost its runner and ignored SIGTERM, so it was killed' : '';
     if (result.sandbox) {
       return (
-        `🛑 Stopped the cdk-blocks sandbox session on :${result.port}${who}: its dev server and its cdk watch${how}. ` +
-        'Its AWS resources are still deployed; `npx --no -- cdk-blocks sandbox destroy` deletes them.'
+        `🛑 Stopped the npm run sandbox session on :${result.port}${who}: its dev server and its cdk watch${how}. ` +
+        'Its AWS resources are still deployed; `npm run sandbox:destroy` deletes them.'
       );
     }
     return `🛑 Stopped the dev server on :${result.port}${who}${how}.`;
   }
   if (result.sandbox) {
     return (
-      `⚠️  Signalled the cdk-blocks sandbox session on :${result.port}${who}, but it has not ended yet: ` +
+      `⚠️  Signalled the npm run sandbox session on :${result.port}${who}, but it has not ended yet: ` +
       'its dev server or its cdk watch may still be shutting down.'
     );
   }
   if (result.via === 'cli') {
     return (
-      `⚠️  Signalled the cdk-blocks dev on :${result.port}${who}, but it has not ended yet: ` +
+      `⚠️  Signalled the dev task on :${result.port}${who}, but it has not ended yet: ` +
       'it may still be stopping what it started, or another process now holds the port.'
     );
   }
@@ -2281,10 +2298,21 @@ function createDevDispatcher(backend: unknown, bound: DevServerAddress): Dispatc
 function unsupportedMediaTypeResponse(): string {
   return errorResponse(
     415,
-    'Unsupported Media Type: the AWS Blocks JSON-RPC API expects Content-Type: application/json',
+    'Unsupported Media Type: the AWS CDK Blocks JSON-RPC API expects Content-Type: application/json',
     null,
     { name: 'UnsupportedMediaType' },
   );
+}
+
+/**
+ * Whether `pathname` holds a `%` that isn't followed by two hex digits
+ * (e.g. `/users/%E0%A4%A`, `/users/100%`). API Gateway refuses such a request
+ * with a 400 before it reaches the Lambda, so the dev server refuses it too.
+ * Well-formed escapes that aren't valid UTF-8 (`%FF`) reach the Lambda
+ * deployed, so they are not refused here.
+ */
+function hasMalformedPercentEncoding(pathname: string): boolean {
+  return /%(?![0-9A-Fa-f]{2})/.test(pathname);
 }
 
 /**
@@ -2397,20 +2425,20 @@ function handleApiRequest(
     return;
   }
 
-  // Anything that reaches here didn't match `POST /aws-blocks/api`. Returning a
+  // Anything that reaches here didn't match `POST /cdk-blocks/api`. Returning a
   // bare empty 404 leaves a developer poking at the endpoint (e.g. opening it in
   // a browser, which sends a GET, or trying a REST-style URL) with no feedback.
   // Reply with a small JSON hint pointing at the one supported shape. When the
   // path was right but the method wasn't, say so explicitly.
   const wrongMethodOnApi = isRpcPath(url.pathname);
   const message = wrongMethodOnApi
-    ? `The AWS Blocks JSON-RPC API expects POST, not ${method}.`
-    : 'Not found. The AWS Blocks JSON-RPC API is served at POST /aws-blocks/api.';
+    ? `The AWS CDK Blocks JSON-RPC API expects POST, not ${method}.`
+    : 'Not found. The AWS CDK Blocks JSON-RPC API is served at POST /cdk-blocks/api.';
   res.writeHead(404, { 'Content-Type': 'application/json' });
   res.end(
     JSON.stringify({
       error: message,
-      // On an RPC path, echo the path the caller hit (e.g. `/aws-blocks/api/{namespace}`).
+      // On an RPC path, echo the path the caller hit (e.g. `/cdk-blocks/api/{namespace}`).
       expected: { method: 'POST', path: wrongMethodOnApi ? url.pathname : BLOCKS_RPC_PREFIX },
     }),
   );

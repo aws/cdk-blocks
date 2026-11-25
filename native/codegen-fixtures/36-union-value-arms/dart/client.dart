@@ -1,11 +1,21 @@
 // GENERATED CODE — DO NOT MODIFY BY HAND
 // Generator: blocks-codegen
 // Source: test v1.0.0
-// Requires blocks_runtime 0.2.0 or later.
+// Requires blocks_runtime 1.0.0 or later.
 // ignore_for_file: constant_identifier_names
+// dart format width=80
 
 import 'package:blocks_runtime/blocks_runtime.dart';
-export 'package:blocks_runtime/blocks_runtime.dart' show BlocksClient, BlocksRpcException, SessionStore, InMemorySessionStore;
+export 'package:blocks_runtime/blocks_runtime.dart'
+    show
+        ApiException,
+        BlocksClient,
+        BlocksException,
+        ClientClosedException,
+        InMemorySessionStore,
+        SessionStore,
+        TransportException,
+        isBlocksError;
 
 // --- Models ---
 
@@ -13,31 +23,19 @@ class Point {
   final num x;
   final num y;
 
-  const Point({
-    required this.x,
-    required this.y,
-  });
+  const Point({required this.x, required this.y});
 
   factory Point.fromJson(Map<String, dynamic> json) {
-    return Point(
-      x: json['x'] as num,
-      y: json['y'] as num,
-    );
+    return Point(x: json['x'] as num, y: json['y'] as num);
   }
 
   Map<String, dynamic> toJson() {
-    return {
-      'x': x,
-      'y': y,
-    };
+    return {'x': x, 'y': y};
   }
 
   @override
   bool operator ==(Object other) =>
-      identical(this, other) ||
-      other is Point &&
-          x == other.x &&
-          y == other.y;
+      identical(this, other) || other is Point && x == other.x && y == other.y;
 
   @override
   int get hashCode => Object.hash(x, y);
@@ -46,7 +44,6 @@ class Point {
   String toString() => 'Point(x: $x, y: $y)';
 }
 
-
 // --- API Namespaces ---
 
 class Api {
@@ -54,49 +51,37 @@ class Api {
   Api(this._client);
 
   Future<dynamic> echoPrimitive({required dynamic value}) async {
-    final params = <dynamic>[
-      value,
-    ];
+    final params = <dynamic>[value];
     final result = await _client.call('api.echoPrimitive', params);
     return result as dynamic;
   }
 
   Future<dynamic> echoCollection({required dynamic value}) async {
-    final params = <dynamic>[
-      value,
-    ];
+    final params = <dynamic>[value];
     final result = await _client.call('api.echoCollection', params);
     return result as dynamic;
   }
 
   Future<dynamic> echoShape({required dynamic value}) async {
-    final params = <dynamic>[
-      value,
-    ];
+    final params = <dynamic>[value];
     final result = await _client.call('api.echoShape', params);
     return result as dynamic;
   }
 
   Future<dynamic> echoLiteral({required dynamic value}) async {
-    final params = <dynamic>[
-      value,
-    ];
+    final params = <dynamic>[value];
     final result = await _client.call('api.echoLiteral', params);
     return result as dynamic;
   }
 
   Future<dynamic> echoTagged({required dynamic value}) async {
-    final params = <dynamic>[
-      value,
-    ];
+    final params = <dynamic>[value];
     final result = await _client.call('api.echoTagged', params);
     return result as dynamic;
   }
 
   Future<dynamic> echoMoment({required dynamic value}) async {
-    final params = <dynamic>[
-      value,
-    ];
+    final params = <dynamic>[value];
     final result = await _client.call('api.echoMoment', params);
     return result as dynamic;
   }
@@ -107,15 +92,20 @@ class Api {
   }
 }
 
-
-// --- Blocks Client ---
+// --- CDK Blocks Client ---
 
 class Blocks {
   late final Api api;
+  late final BlocksClient _client;
 
   Blocks({required String baseUrl, SessionStore? sessionStore}) {
     final client = BlocksClient(baseUrl: baseUrl, sessionStore: sessionStore);
+    _client = client;
     api = Api(client);
   }
-}
 
+  /// Closes the client. A call after this throws a [ClientClosedException],
+  /// and so does an `OidcClient` one of its calls returned. Closing twice
+  /// does nothing more.
+  void close() => _client.close();
+}

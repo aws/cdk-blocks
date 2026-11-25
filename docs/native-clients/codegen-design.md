@@ -1,12 +1,12 @@
 # Native Client Codegen — Design
 
-This is the design rationale for how Blocks serves typed native clients (Swift, Kotlin, Dart) from a TypeScript API. It documents *why* the pipeline is shaped the way it is. For *how to write APIs that codegen well*, see [`schema-generation-guide-for-devs.md`](./schema-generation-guide-for-devs.md).
+This is the design rationale for how AWS CDK Blocks serves typed native clients (Swift, Kotlin, Dart) from a TypeScript API. It documents *why* the pipeline is shaped the way it is. For *how to write APIs that codegen well*, see [`schema-generation-guide-for-devs.md`](./schema-generation-guide-for-devs.md).
 
 ---
 
 ## Context
 
-Blocks' client-facing surface is `ApiNamespace` — a method-dispatch protocol over JSON-RPC 2.0. Every call goes to a single endpoint:
+CDK Blocks' client-facing surface is `ApiNamespace` — a method-dispatch protocol over JSON-RPC 2.0. Every call goes to a single endpoint:
 
 ```
 POST /api HTTP/1.1
@@ -15,7 +15,7 @@ Content-Type: application/json
 { "jsonrpc": "2.0", "method": "api.kvGet", "params": ["myKey"], "id": 1 }
 ```
 
-The wire error contract follows Blocks' core JSON-RPC implementation: reserved JSON-RPC errors use the standard negative codes (`-32700`, `-32600`, `-32601`, `-32602`, `-32603`), while application `ApiError`s use the positive HTTP status code as `error.code` and carry the structured name in `error.data.name` when available.
+The wire error contract follows CDK Blocks' core JSON-RPC implementation: reserved JSON-RPC errors use the standard negative codes (`-32700`, `-32600`, `-32601`, `-32602`, `-32603`), while application `ApiError`s use the positive HTTP status code as `error.code` and carry the structured name in `error.data.name` when available.
 
 The TypeScript web client gets type safety for free — `client.js` is generated alongside the server. Native clients (Swift, Kotlin, Dart) need their own codegen pipeline.
 
@@ -28,11 +28,11 @@ The Model Context Protocol faces the same problem: a JSON-RPC based protocol wit
 3. **Platform SDKs** (`swift-sdk`, `kotlin-sdk`) — hand-written against the spec, handle transport and message framing
 4. **App-specific usage** sits on top of the platform SDK
 
-Blocks differs from MCP in one place: MCP's protocol is fixed (tools, resources, prompts are standard interfaces), so the platform SDK alone is sufficient. Blocks' `ApiNamespace` methods are **application-specific** — each app has different methods. This adds one layer:
+CDK Blocks differs from MCP in one place: MCP's protocol is fixed (tools, resources, prompts are standard interfaces), so the platform SDK alone is sufficient. CDK Blocks' `ApiNamespace` methods are **application-specific** — each app has different methods. This adds one layer:
 
 ```
-MCP:     platform SDK  ←  app uses directly
-Blocks:  platform SDK  ←  generated typed facade  ←  app uses
+MCP:             platform SDK  ←  app uses directly
+CDK Blocks:  platform SDK  ←  generated typed facade  ←  app uses
 ```
 
 The generated facade is thin: typed method wrappers that call into the platform SDK's transport primitive. The SDK owns the wire.
@@ -80,11 +80,11 @@ The question this document answers: **what format does the codegen layer read?**
 
 ## Decision: OpenRPC over fabricated OpenAPI
 
-The format is OpenRPC 1.3.2, emitted as `aws-blocks/blocks.spec.json`. The alternative considered was OpenAPI 3.1 with fabricated paths.
+The format is OpenRPC 1.3.2, emitted as `cdk-blocks/blocks.spec.json`. The alternative considered was OpenAPI 3.1 with fabricated paths.
 
 ### Why not OpenAPI
 
-OpenAPI requires a `paths` section. Blocks' API has one path (`POST /api`). To give a generator per-method operations, the build step would have to fabricate one fake path per method:
+OpenAPI requires a `paths` section. CDK Blocks' API has one path (`POST /api`). To give a generator per-method operations, the build step would have to fabricate one fake path per method:
 
 ```yaml
 # Fabricated — these paths do not exist on the server.
@@ -104,14 +104,14 @@ The generator reads `operationId` as the method name and the request/response sc
 
 ### Why OpenRPC
 
-Blocks' wire protocol already conforms to JSON-RPC 2.0 (`rpc.ts` handles encoding/decoding). OpenRPC is the natural description format for a JSON-RPC service:
+CDK Blocks' wire protocol already conforms to JSON-RPC 2.0 (`rpc.ts` handles encoding/decoding). OpenRPC is the natural description format for a JSON-RPC service:
 
 - The generator reads `method.name`, `method.params[].schema`, and `method.result.schema` directly
 - No REST structure to navigate, no fake paths to fabricate
 - A real spec with a JSON Schema you can validate against
 - Existing tooling for documentation rendering (OpenRPC playground/inspector)
 
-OpenRPC's existing generators (`open-rpc/generator`) target TypeScript, Go, Python, and Rust — not Swift, Kotlin, or Dart. Blocks still builds its own generator regardless. But the generator reads a standard format instead of a bespoke one.
+OpenRPC's existing generators (`open-rpc/generator`) target TypeScript, Go, Python, and Rust — not Swift, Kotlin, or Dart. CDK Blocks still builds its own generator regardless. But the generator reads a standard format instead of a bespoke one.
 
 ### Single-file format
 
@@ -150,13 +150,13 @@ The OpenRPC document is emitted as a single self-contained file (`blocks.spec.js
 }
 ```
 
-### Blocks-specific extensions
+### CDK Blocks-specific extensions
 
-Two `x-blocks-*` extension fields cover the gaps where standard OpenRPC doesn't capture Blocks semantics: `x-blocks-transferable` and `x-blocks-type-args` (on result schemas for Realtime / FileBucket / OIDC handles).
+Two `x-blocks-*` extension fields cover the gaps where standard OpenRPC doesn't capture CDK Blocks semantics: `x-blocks-transferable` and `x-blocks-type-args` (on result schemas for Realtime / FileBucket / OIDC handles).
 
 The full reference, including the tag table for native codegen authors, lives in [`schema-generation-guide-for-devs.md` § Spec extensions reference](./schema-generation-guide-for-devs.md#spec-extensions-reference).
 
-A tag maps to one runtime type, and the generated facade returns that type with the spec's type arguments applied (`RealtimeChannel<Cursor>`). One exception, on Dart only: an `oidc/client` whose spec names its providers returns `TypedOidcClient<P>`, an extension type over the runtime `OidcClient` that narrows `signIn`, `signInRelay` and `exchange` to the generated provider enum `P`. It adds no runtime type and no logic, only a compile-time view. Swift and Kotlin make `OidcClient` itself generic. Dart doesn't, for two reasons: a generic `OidcClient<P>` would break every caller that passes a provider's name, and, because Dart's generics are covariant and `P` only appears in parameters, an upcast client would fail on a wrong provider with a `TypeError` (and in a dart2js `-O4` build not at all). The view is covariant too (`TypedOidcClient<OidcProvider>` takes any provider), but it is erased, so a wrong provider always reaches `OidcClient`'s own check and fails on its name with `OidcUnknownProviderException`. See [`schema-generation-guide-for-devs.md`](./schema-generation-guide-for-devs.md#x-blocks-type-args-on-a-methods-resultschema).
+A tag maps to one runtime type, and the generated facade returns that type with the spec's type arguments applied (`RealtimeChannel<Cursor>`). One exception, on Dart only: an `oidc/client` whose spec names its providers returns `TypedOidcClient<P>`, an extension type over the runtime `OidcClient` that narrows `signInDirect`, `signIn` and `exchange` to the generated provider enum `P`. It adds no runtime type and no logic, only a compile-time view. Swift and Kotlin make `OidcClient` itself generic. Dart doesn't, for two reasons: a generic `OidcClient<P>` would break every caller that passes a provider's name, and, because Dart's generics are covariant and `P` only appears in parameters, an upcast client would fail on a wrong provider with a `TypeError` (and in a dart2js `-O4` build not at all). The view is covariant too (`TypedOidcClient<OidcProvider>` takes any provider), but it is erased, so a wrong provider always reaches `OidcClient`'s own check and fails on its name with `OidcUnknownProviderException`. See [`schema-generation-guide-for-devs.md`](./schema-generation-guide-for-devs.md#x-blocks-type-args-on-a-methods-resultschema).
 
 #### Declared native packages and bindings
 
@@ -176,7 +176,7 @@ This supersedes the `Scope.registerNativePackage()` / `Scope.registerNativeBindi
 
 See [D-019](../DECISIONS.md#d-019-native-declarations-are-read-from-every-resolvable-manifest-not-only-declared-dependencies) for the scan's trust boundary.
 
-`blocks-generate-spec` reads that key from every `node_modules` level from the spec project up to the filesystem root, resolving each import specifier to its nearest installed copy, and passes what it finds as `nativeDeclarations`.
+The `spec` task reads that key from every `node_modules` level from the spec project up to the filesystem root, resolving each import specifier to its nearest installed copy, and passes what it finds as `nativeDeclarations`.
 
 #### Unbound transferables: the `UnknownTransferable` carrier
 
@@ -198,6 +198,28 @@ The `AWSBLOCKS-NATIVE-` numbers are one namespace shared by the Dart, Swift and 
 | `AWSBLOCKS-NATIVE-004` | A binding whose `kind` schema 1 does not define; the binding is skipped. | Yes | Yes | Yes | live |
 | `AWSBLOCKS-NATIVE-005` | A binding whose `tag` is a built-in transferable tag (`realtime/channel`, `file-bucket/download`, `file-bucket/upload`, `oidc/client`), which cannot be re-bound; the binding is skipped. | — | Yes | — | live |
 | `AWSBLOCKS-NATIVE-006` | An opt-out that names a package the spec does not declare; nothing is opted out for it. | Yes | Yes | Yes | live |
+
+#### Open enums: values a client doesn't know
+
+A string enum that a response can carry is generated *open*: a value the client was generated without decodes instead of failing, keeps the string as the server sent it, and encodes back as that string. A server can add a value (a new auth state, field type or action capability) without breaking clients already shipped. "Response" is decided per generator from the spec: an enum is open when a method's result reaches it at any depth, through models, union arms, lists, maps, optionals, tuples and a transferable's type arguments. An `oidc/client`'s type argument is the set of providers a caller may pass, so it is not a response position. A component enum is open when a result reaches that component, even if parameters use it too; an inline type that only shares its name doesn't count. An enum used in both positions is open in both, so a client can send back a value it received and didn't know: it re-encodes as the server sent it, and the server still validates it. Only an enum that parameters alone use stays closed. There is no spec marker for this; position is enough.
+
+| SDK | Open enum `X` | Unknown value | Exhaustive match |
+|---|---|---|---|
+| Dart | `sealed class X`; known values are the constants of `enum XKnown implements X`, which `X.a` and `X.values` alias | `XUnknown(value)` | `switch` needs an `XUnknown()` case |
+| Swift | `enum X: RawRepresentable, Codable, Hashable` with a non-failable `init(rawValue:)` | `case unknown(String)` | `switch` needs `.unknown` |
+| Kotlin | `sealed class X` with a string serializer; known values are `data object`s named as enum constants, listed in `X.entries` | `X.Unknown(value)` | `when` needs `is X.Unknown` |
+
+When a spec value already takes the fallback's name, the spec value keeps it and the fallback steps aside: Swift `unknownValue`, Kotlin `UnknownValue` (and a value named `companion` makes Kotlin name the companion object `Known`). In Dart a spec value can't take the fallback's name; when another type of the library already has the name `XKnown` or `XUnknown`, the generated class takes a trailing `$` (`XUnknown$`). Decoding maps a known string to its known case, so a hand-built unknown case holding a known string (`X.Unknown("a")`) is not equal to that case. A union without a discriminator decodes by trying each arm in turn, and an open enum would accept every string, so an enum arm accepts only the values it declares: Swift checks the decoded value against them, Kotlin matches the arm by its literal values, and Dart types such a union `dynamic`. An inline enum arm stays closed in Swift. Every type an object arm of such a union reaches, at any depth, is closed in Swift and Kotlin, even where it also appears elsewhere in a result: open, an enum inside the first arm with matching keys would take an object meant for a later arm and drop that arm's fields. Dart keeps such a type open where another result reaches it, since its union is `dynamic` and never decodes the arms.
+
+Unions follow the same rule. A union with a JSON string discriminator whose arms are all objects, when a method's result reaches it, gets one extra arm for an object whose discriminator names no arm. That arm holds the object as the server sent it and encodes it back as equal JSON: Dart `XUnknown` (with `json`, a copy from `toJson()`, and `discriminator`), Swift `case unknown(JSONValue)` (with the union's `unknownDiscriminator`), Kotlin `X.Unknown(json: JsonObject)` (with `discriminator`; Kotlin generates the union's serializer for this, since kotlinx's sealed-class serializer can't fall back). An arm tagged `unknown` keeps its own name, so the fallback steps aside: Swift `unknownValue`, Kotlin `UnknownValue`. An exhaustive match over such a union needs the fallback case. An unknown arm's JSON can carry fields that a generated type would never expose, so don't log or display it whole; read the fields you need. These stay closed: a union only parameters use, one with a boolean discriminator (`true`/`false` is already exhaustive), one with a bare value arm or no discriminator (there is no tag to call unknown), and a union embedded in another arm's object, which shares that object.
+
+| SDK | Unknown arm of `X` | Its tag | Hand-built without a tag |
+|---|---|---|---|
+| Dart | `XUnknown(json)` | `discriminator` (`String`) | `discriminator` throws |
+| Swift | `case unknown(JSONValue)` | `unknownDiscriminator` on `X` (`String?`) | `unknownDiscriminator` is `nil` |
+| Kotlin | `X.Unknown(json: JsonObject)` | `discriminator` (`String`) | `discriminator` throws |
+
+Decoding only builds the unknown arm for an object whose tag is a string, so the last column applies to an arm an app builds itself.
 
 ---
 
@@ -271,11 +293,11 @@ The trade-off is one parallel definition layer per method (the schema). Schemas 
 The OpenRPC document is emitted at build time, alongside the existing `client.js` codegen. The mechanism is shared: dynamically import the backend, discover `ApiNamespace` exports via `API_NAMESPACE_MARKER`, introspect methods, and emit the document. See `packages/core/src/scripts/generate-spec.ts` for the implementation.
 
 ```
-aws-blocks/
+cdk-blocks/
 	blocks.spec.json        # all namespaces, all methods
 ```
 
-**Environment config** — the CLI populates the OpenRPC `servers` array with the API URL of the running dev server (`.blocks-sandbox/config.json`) or, with `BLOCKS_SPEC_STAGE=sandbox` or `production`, of that stage's last deploy (`.blocks-sandbox/config.<stage>.json`). A deploy never writes `config.json`, so a spec targets AWS only when you ask:
+**Environment config** — the CLI populates the OpenRPC `servers` array with the API URL of the running dev server (`.cdk-blocks-sandbox/config.json`) or, with `BLOCKS_SPEC_STAGE=sandbox` or `production`, of that stage's last deploy (`.cdk-blocks-sandbox/config.<stage>.json`). A deploy never writes `config.json`, so a spec targets AWS only when you ask:
 
 ```json
 {
@@ -311,16 +333,16 @@ The spec is a build input with the same trust as the backend source it is genera
 
 ```mermaid
 flowchart LR
-  App[Hand-written<br/>ApiNamespace code] --> TS[aws-blocks/*.ts]
-  TS -- "npx blocks-generate-spec" --> Spec[aws-blocks/blocks.spec.json<br/>local, gitignored]
-  Sandbox[.blocks-sandbox/config.json<br/>or config.&lt;stage&gt;.json] -- servers URL --> Spec
+  App[Hand-written<br/>ApiNamespace code] --> TS[cdk-blocks/*.ts]
+  TS -- "npm run spec" --> Spec[cdk-blocks/blocks.spec.json<br/>local, gitignored]
+  Sandbox[.cdk-blocks-sandbox/config.json<br/>or config.&lt;stage&gt;.json] -- servers URL --> Spec
   Spec -- local file read --> Dart[blocks_codegen]
   Spec -- local file read --> Swift[BlocksCodegen plugins]
   Spec -- local file read --> Kotlin[Gradle codegen task]
 ```
 
-- **Generated locally.** `generate-spec-cli.ts` (`blocks-generate-spec`, the `spec` script in scaffolded apps) imports the backend entry and writes `aws-blocks/blocks.spec.json`. It is run explicitly, not as part of `npm run dev` or deploy.
-- **Gitignored in apps.** Every `create-blocks-app` template, and the entries `create-blocks-app` adds when initializing an existing directory, ignore `aws-blocks/blocks.spec.json`. (This repo commits a few specs as Swift test fixtures under `native/swift/Tests/`.)
+- **Generated locally.** `generate-spec-cli.ts` (via `npm run spec` in scaffolded apps) imports the backend entry and writes `cdk-blocks/blocks.spec.json`. It is run explicitly, not as part of `npm run dev` or deploy.
+- **Gitignored in apps.** Every `create-blocks-app` template, and the entries `create-blocks-app` adds when initializing an existing directory, ignore `cdk-blocks/blocks.spec.json`. (This repo commits a few specs as Swift test fixtures under `native/swift/Tests/`.)
 - **Not served by the deployed API.** No runtime or CDK code reads or bundles the spec, and the JSON-RPC handler has no discovery method that returns it.
 - **Read from a local path, no network fetch.** Dart reads `*.spec.json` build assets (`builder.dart`) or `--spec <path>` (CLI); the Swift plugins pass the target's `blocks.spec.json` file to the generator, which reads it with `FileManager`; the Kotlin task reads `cdkBlocks.apiSpec` (default `rootProject/blocks.spec.json`) with `readText()`.
 
