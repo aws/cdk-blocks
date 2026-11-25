@@ -34,24 +34,25 @@ if (!url) {
 		const schema = `blocks_tx_${randomBytes(6).toString('hex')}`;
 		const connection = connectionOf(url);
 		const admin = new pg.Pool({ ...connection, max: 1 });
-		let engine: PgEngine;
-		let core: DatabaseCore;
+		const pool = new pg.Pool({ ...connection, max: 4, options: `-c search_path=${schema}` });
+		const engine = new PgEngine({ kind: 'external', connection, pool });
+		const core = new DatabaseCore({ engine: async () => engine });
 
 		const ids = async (): Promise<number[]> =>
 			(await core.query<{ id: number }>(sql`SELECT id FROM entries ORDER BY id`)).map((row) => row.id);
 
 		before(async () => {
 			await admin.query(`CREATE SCHEMA ${schema}`);
-			const pool = new pg.Pool({ ...connection, max: 4, options: `-c search_path=${schema}` });
-			engine = new PgEngine({ kind: 'external', connection, pool });
-			core = new DatabaseCore({ engine: async () => engine });
 			await core.execute(sql`CREATE TABLE entries (id integer PRIMARY KEY)`);
 		});
 
 		after(async () => {
-			await engine.destroy();
-			await admin.query(`DROP SCHEMA ${schema} CASCADE`);
-			await admin.end();
+			try {
+				await engine.destroy();
+				await admin.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE`);
+			} finally {
+				await admin.end();
+			}
 		});
 
 		beforeEach(async () => {
