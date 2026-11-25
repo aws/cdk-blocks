@@ -13,6 +13,8 @@ import { CodeBuildStep, CodePipelineSource } from 'aws-cdk-lib/pipelines';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import { fileURLToPath } from 'url';
+import { __PIPELINE_STAGE_SCOPE__ } from './constants.js';
 import { config, secret } from './index.js';
 import { Pipeline, validateAppFilePath } from './pipeline-construct.js';
 import type { PipelineProps, PipelineStageConfig } from './types.js';
@@ -1840,6 +1842,152 @@ describe('validateAppFilePath', () => {
     } finally {
       fs.unlinkSync(symlinkPath);
     }
+  });
+});
+
+// CDK_DEFAULT_ACCOUNT / CDK_DEFAULT_REGION are the environment the CDK CLI runs
+// the pipeline in. A scaffolded index.cdk.ts passes them to its stack as `env`,
+// which would override the environment of the stage the file is imported for.
+describe('appFile import and the CDK CLI environment', () => {
+  const CLI_ACCOUNT = '111111111111';
+  const CLI_REGION = 'eu-west-1';
+  const STAGE_ENV = { account: '222222222222', region: 'ap-south-1' };
+
+  // What `BlocksStack.create()` does in an app file: its own App, a stack on the
+  // ambient pipeline stage, and here the CLI's environment as the stack's `env`.
+  const APP_WITH_CLI_ENV = [
+    "import { App, Stack } from 'aws-cdk-lib';",
+    'const app = new App();',
+    `const scope = globalThis[${JSON.stringify(__PIPELINE_STAGE_SCOPE__)}] ?? app;`,
+    "new Stack(scope, 'AppStack', {",
+    '  env: { account: process.env.CDK_DEFAULT_ACCOUNT, region: process.env.CDK_DEFAULT_REGION },',
+    '});',
+    '',
+  ].join('\n');
+  const APP_THAT_THROWS =
+    "throw new Error('app file saw ' + process.env.CDK_DEFAULT_ACCOUNT + '/' + process.env.CDK_DEFAULT_REGION);\n";
+
+  const source = { repo: MOCK_REPO, connectionArn: MOCK_CONNECTION_ARN };
+
+  let tmpDir: string;
+  let originalCwd: string;
+  let originalCliEnv: [string | undefined, string | undefined];
+  let appFileCount = 0;
+
+  const cliEnv = (): [string | undefined, string | undefined] => [
+    process.env.CDK_DEFAULT_ACCOUNT,
+    process.env.CDK_DEFAULT_REGION,
+  ];
+
+  function setCliEnv(account: string | undefined, region: string | undefined): void {
+    for (const [key, value] of [
+      ['CDK_DEFAULT_ACCOUNT', account],
+      ['CDK_DEFAULT_REGION', region],
+    ] as const) {
+      if (value === undefined) {
+        delete process.env[key];
+      } else {
+        process.env[key] = value;
+      }
+    }
+  }
+
+  /** A new file per call: Node caches an imported module by its URL, which includes the stage name. */
+  function writeAppFile(content: string): string {
+    const file = path.join(tmpDir, `app-${appFileCount++}.mjs`);
+    fs.writeFileSync(file, content);
+    return file;
+  }
+
+  function appStackEnvironment(app: App): string {
+    const appStack = app.node.findAll().find((c): c is Stack => Stack.isStack(c) && c.node.id === 'AppStack');
+    assert.ok(appStack, 'the app file should have added AppStack to the stage');
+    return appStack.environment;
+  }
+
+  before(() => {
+    originalCliEnv = cliEnv();
+    originalCwd = process.cwd();
+    // Beside this test file, so the app files resolve the same aws-cdk-lib; an
+    // appFile must also be inside the project root (the working directory).
+    tmpDir = fs.mkdtempSync(path.join(path.dirname(fileURLToPath(import.meta.url)), 'cli-env-app-file-'));
+    process.chdir(tmpDir);
+  });
+
+  after(() => {
+    setCliEnv(...originalCliEnv);
+    process.chdir(originalCwd);
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it("gives the app's stack the stage's environment, not the CLI's", async () => {
+    setCliEnv(CLI_ACCOUNT, CLI_REGION);
+    const app = new App();
+    const pipelineStack = new Stack(app, 'CliEnvPipelineStack', {
+      env: { account: CLI_ACCOUNT, region: CLI_REGION },
+    });
+
+    await Pipeline.create(pipelineStack, 'TestPipeline', {
+      source,
+      crossAccountKeys: true,
+      appFile: writeAppFile(APP_WITH_CLI_ENV),
+      branches: [{ branch: 'main', stages: [{ name: 'beta', env: STAGE_ENV }] }],
+    });
+
+    assert.strictEqual(appStackEnvironment(app), 'aws://222222222222/ap-south-1');
+    assert.deepStrictEqual(cliEnv(), [CLI_ACCOUNT, CLI_REGION], 'the CLI variables are restored after the import');
+  });
+
+  it('synthesizes an environment-agnostic pipeline whose stage has no env', async () => {
+    setCliEnv(CLI_ACCOUNT, CLI_REGION);
+    const app = new App();
+
+    // Without a stage environment the app's stack must stay environment-agnostic:
+    // with the CLI's environment it would make the agnostic pipeline stack
+    // cross-environment (PipelineStackMustHaveExplicitRegion).
+    await Pipeline.create(app, 'AgnosticPipeline', {
+      source,
+      appFile: writeAppFile(APP_WITH_CLI_ENV),
+      branches: [{ branch: 'main', stages: [{ name: 'beta' }] }],
+    });
+
+    assert.doesNotThrow(() => app.synth());
+    assert.strictEqual(appStackEnvironment(app), 'aws://unknown-account/unknown-region');
+    assert.deepStrictEqual(cliEnv(), [CLI_ACCOUNT, CLI_REGION], 'the CLI variables are restored after the import');
+  });
+
+  it('leaves the CLI variables unset after an import that throws, when they were unset before', async () => {
+    setCliEnv(undefined, undefined);
+    const pipelineStack = new Stack(new App(), 'ThrowingAppPipelineStack', {
+      env: { account: CLI_ACCOUNT, region: CLI_REGION },
+    });
+
+    await assert.rejects(
+      Pipeline.create(pipelineStack, 'TestPipeline', {
+        source,
+        crossAccountKeys: true,
+        appFile: writeAppFile(APP_THAT_THROWS),
+        branches: [{ branch: 'main', stages: [{ name: 'beta', env: STAGE_ENV }] }],
+      }),
+      /app file saw 222222222222\/ap-south-1/,
+    );
+
+    assert.deepStrictEqual(cliEnv(), [undefined, undefined]);
+  });
+
+  it('restores the CLI variables after an import that throws, when the stage has no env', async () => {
+    setCliEnv(CLI_ACCOUNT, CLI_REGION);
+
+    await assert.rejects(
+      Pipeline.create(new App(), 'ThrowingAppAgnosticPipeline', {
+        source,
+        appFile: writeAppFile(APP_THAT_THROWS),
+        branches: [{ branch: 'main', stages: [{ name: 'beta' }] }],
+      }),
+      /app file saw undefined\/undefined/,
+    );
+
+    assert.deepStrictEqual(cliEnv(), [CLI_ACCOUNT, CLI_REGION]);
   });
 });
 

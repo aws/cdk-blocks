@@ -28,6 +28,11 @@ export interface DeploymentTarget {
 	 * in the same order for the telemetry opt-out, so a CDK order change moves both.
 	 */
 	bootstrapQualifier?: string;
+	/**
+	 * The `output` setting of `cdk.json` or `~/.cdk.json`, if any: the directory where the
+	 * CDK CLI writes the cloud assembly, instead of its default `cdk.out`.
+	 */
+	assemblyDir?: string;
 }
 
 /** The context key that selects the CDK bootstrap resources for the default stack synthesizer. */
@@ -93,6 +98,35 @@ export function environmentAccessKeys(env: NodeJS.ProcessEnv = process.env): Aws
 	return sessionToken ? { accessKeyId, secretAccessKey, sessionToken } : { accessKeyId, secretAccessKey };
 }
 
+/** The part of an SDK client's configuration that selects its credentials. */
+export interface DeploymentClientCredentials {
+	profile?: string;
+	credentials?: AwsCredentialIdentity;
+}
+
+/**
+ * The credentials configuration for an SDK client that must act as CDK does for
+ * `target` (see {@link resolveDeploymentTarget}), to spread into the client's
+ * configuration next to its Region.
+ *
+ * CDK and SDK v3 clients order the sources differently. CDK uses the profile of
+ * `cdk.json`, then access keys from the environment, then `AWS_PROFILE`. A
+ * default SDK client uses `AWS_PROFILE` before the environment's keys, and
+ * never reads `cdk.json`. With both keys and `AWS_PROFILE` set, a default
+ * client would therefore act in another account than the one CDK deploys to
+ * or destroys in. So the keys are passed explicitly, and so is a profile that
+ * only `env` (not `process.env`, which is all a client reads) names.
+ */
+export function deploymentClientCredentials(
+	target: Pick<DeploymentTarget, 'profile'>,
+	env: NodeJS.ProcessEnv = process.env,
+): DeploymentClientCredentials {
+	if (target.profile) return { profile: target.profile };
+	const credentials = environmentAccessKeys(env);
+	if (credentials) return { credentials };
+	return env.AWS_PROFILE ? { profile: env.AWS_PROFILE } : {};
+}
+
 /**
  * Find the Region and the profile that CDK uses for a deployment.
  *
@@ -134,10 +168,11 @@ export async function resolveDeploymentTarget({
 		contextQualifier(projectContext) ??
 		contextQualifier(userSettings.context);
 	const bootstrapQualifier = qualifier ? { bootstrapQualifier: qualifier } : {};
+	const assemblyDir = typeof settings.output === 'string' && settings.output ? { assemblyDir: settings.output } : {};
 	const cdkRegion = typeof settings.region === 'string' && settings.region ? settings.region : null;
 	const region =
 		cdkRegion || env.AWS_REGION || env.AMAZON_REGION || env.AWS_DEFAULT_REGION || env.AMAZON_DEFAULT_REGION;
-	if (region) return { region, profile, ...bootstrapQualifier };
+	if (region) return { region, profile, ...bootstrapQualifier, ...assemblyDir };
 
 	const { loadSharedConfigFiles } = await import('@smithy/shared-ini-file-loader');
 	const { configFile, credentialsFile } = await loadSharedConfigFiles({
@@ -155,5 +190,6 @@ export async function resolveDeploymentTarget({
 			null,
 		profile,
 		...bootstrapQualifier,
+		...assemblyDir,
 	};
 }

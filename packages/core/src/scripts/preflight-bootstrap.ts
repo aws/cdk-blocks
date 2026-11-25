@@ -126,3 +126,39 @@ export async function cdkBootstrapFailure({
 		`Then re-run \`${invocation}\`.`,
 	].join('\n');
 }
+
+/** A stack of a synthesized app, as far as the bootstrap check reads it. */
+export interface BootstrapStackEnvironment {
+	/** The Region of the stack; unset for an environment-agnostic stack, which CDK deploys to the checked Region. */
+	region?: string;
+	/** The account of the stack; unset for an environment-agnostic stack. */
+	account?: string;
+}
+
+/**
+ * Check that CDK has been bootstrapped in every Region that the stacks of a synthesized
+ * app deploy to, other than the one that `checked` already passed in. An app can deploy
+ * to more than the configured Region: `Hosting` puts the CloudFront alarm of an app
+ * outside `us-east-1` into a second stack in `us-east-1`. CDK deploys the stacks one by
+ * one, so without this check a missing bootstrap there fails the deploy only after the
+ * app stack has deployed.
+ *
+ * Runs {@link cdkBootstrapFailure} once per Region, with the credentials, profile and
+ * qualifier of `checked`. A stack in another account is skipped: these credentials read
+ * only their own account, and CDK deploys there with the bootstrap roles. Resolves to the
+ * messages for the Regions without a bootstrap, and to `undefined` when there is none.
+ * Never rejects.
+ */
+export async function assemblyBootstrapFailure(
+	checked: CdkBootstrapCheckOptions,
+	stacks: readonly BootstrapStackEnvironment[],
+): Promise<string | undefined> {
+	const regions = new Set<string>();
+	for (const stack of stacks) {
+		if (stack.account && stack.account !== checked.account) continue;
+		regions.add(stack.region ?? checked.region);
+	}
+	regions.delete(checked.region);
+	const failures = await Promise.all([...regions].map((region) => cdkBootstrapFailure({ ...checked, region })));
+	return failures.filter((failure) => failure !== undefined).join('\n\n') || undefined;
+}

@@ -576,7 +576,6 @@ describe('destroy output end to end (fake cdk on PATH)', { skip: process.platfor
         npx,
         [
           '#!/bin/sh',
-          'if [ "$2" = "ls" ]; then exit 0; fi',
           ...OUT.map((l) => `printf '%s\\n' ${JSON.stringify(l)}`),
           ...ERR.map((l) => `printf '%s\\n' ${JSON.stringify(l)} >&2`),
           'exit 1',
@@ -592,7 +591,9 @@ describe('destroy output end to end (fake cdk on PATH)', { skip: process.platfor
         harness,
         `const { productionDestroyDeps } = await import(${JSON.stringify(new URL('./destroy.js', import.meta.url).href)});
 const { runDestroyWithRetries } = await import(${JSON.stringify(new URL('./sandbox.js', import.meta.url).href)});
-const deps = productionDestroyDeps({ cdkAppPath: '', projectRoot: process.cwd() }, process.env);
+// No stacks: nothing to list, empty or look up between the attempts, so no AWS client is used.
+const clients = { cfnFor: () => { throw new Error('unused'); }, s3: {} };
+const deps = productionDestroyDeps({ cdkAppPath: '', projectRoot: process.cwd() }, process.env, { assemblyDir: 'destroy.out', stacks: [], account: undefined }, clients);
 try { await runDestroyWithRetries({ ...deps, sleep: async () => {}, retryDelays: [0] }); } catch { process.exitCode = 3; }
 `,
       );

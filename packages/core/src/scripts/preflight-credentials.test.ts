@@ -55,7 +55,7 @@ describe('assertAwsCredentials', () => {
 		return regions;
 	}
 
-	function check(probe: CredentialProbe, command = 'deploy'): Promise<void> {
+	function check(probe: CredentialProbe, command = 'deploy'): Promise<unknown> {
 		return assertAwsCredentials({
 			command,
 			env: { ...env, AWS_REGION: 'us-east-1' },
