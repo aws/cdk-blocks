@@ -172,6 +172,7 @@ describe("upstreamRegistryUrl", () => {
 		["a scoped tarball", "/registry/@aws-cdk-blocks/core/-/core-0.1.0.tgz"],
 		["the unscoped umbrella", "/registry/aws-cdk-blocks"],
 		["the unscoped umbrella's tarball", "/registry/aws-cdk-blocks/-/aws-cdk-blocks-0.1.0.tgz"],
+		["the unscoped umbrella with a query string", "/registry/aws-cdk-blocks?x"],
 	] as const) {
 		it(`never forwards this repo's own packages: ${label}`, () => {
 			assert.equal(upstreamRegistryUrl(url), undefined);

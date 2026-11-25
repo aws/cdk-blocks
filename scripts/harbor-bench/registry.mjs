@@ -68,11 +68,18 @@ createServer(async (request, response) => {
 	// Re-encode each path segment, so the forwarded path is the package path npm asked for and
 	// nothing in it is read as URL structure. `@types%2fnode` goes out as `%40types%2Fnode`,
 	// which the registry treats the same. Any query string is dropped: npm's install GETs do not
-	// send one. Same encoding as scripts/publish/local-registry.ts.
+	// send one. Same encoding as scripts/publish/local-registry.ts. The path comes from the
+	// normalised pathname, the same string the candidate and `..` checks above read, so a `\` or
+	// dot segment cannot make the fetched path differ from the checked one.
+	const pathname = new URL(request.url, 'http://localhost').pathname;
+	if (!pathname.startsWith('/registry/')) {
+		response.writeHead(404).end();
+		return;
+	}
 	let path;
 	try {
-		path = rawPath
-			.split('?')[0]
+		path = pathname
+			.slice('/registry/'.length)
 			.split('/')
 			.map((segment) => encodeURIComponent(decodeURIComponent(segment)))
 			.join('/');
