@@ -298,6 +298,15 @@ Before they deploy, `npm run sandbox` and `npm run deploy` print the deployment 
 - Bootstrapping is needed once per account and Region. It creates the `CDKToolkit` CloudFormation stack, including IAM roles that CDK deploys with, so the commands never bootstrap for you.
 - Any other result of the read, such as a denied read or a timeout, does not stop the deploy.
 
+### Denied deploy requests
+
+- When the CDK output shows that AWS denied a request of the deploy itself, for example a CloudFormation resource that fails with `is not authorized to perform`, `npm run deploy` and `npm run sandbox` (including each deployment of its watch mode) print `⚠️  AWS denied a request during <command>`, naming the command that ran (for example `npm run deploy`). The notice follows as soon as the failure is reported, without waiting for the rollback to finish, and once per deployment.
+- The notice says whether an AWS Organizations policy (a service control policy or a resource control policy) explicitly denied the request, which signing in again or adding IAM permissions does not change. It adds none of the error's account IDs, ARNs or policy IDs, and the command fails as before.
+- The CDK output keeps the details: with `--verbose` it is shown as it arrives; otherwise it is shown condensed (nothing with `--quiet`) and printed in full once the deploy has failed, after the notice.
+- After such a failure, the recovery guidance of `npm run sandbox` never suggests destroying the sandbox, which deletes its data. When the sandbox's output is locked, its stack is still updating, the app failed to synthesize, or no stack is left in a failed state, it prints the same guidance as after any other failure. When a stack is left in a failed state or the stack state cannot be read, it says to run `npm run sandbox` again once the cause is resolved, and not to destroy the sandbox to get past it.
+- The sandbox deploy's CDK output has one line per CloudFormation event, as `npm run deploy` does.
+- When credentials expire or are rejected during `npm run sandbox`, including while its watch mode runs, it prints the sign-in guidance of the credential check before the deploy, for the profile or access keys that it deploys with, once per deployment. It says whether saving a file (IAM Identity Center and `aws login` profiles) or restarting `npm run sandbox` (access keys in the environment or a profile) picks up the new credentials.
+
 ### Deploy progress and signals
 
 - `npm run deploy` streams CloudFormation events as they happen: `npm run -s deploy -- --output text 2>&1 | tee deploy.log` shows live progress.
