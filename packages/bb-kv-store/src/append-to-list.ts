@@ -15,6 +15,7 @@ import { brandBlocksError } from '@aws-cdk-blocks/core';
 import type { StandardSchemaV1 } from '@standard-schema/spec';
 import { blocksError, KVStoreErrors, KVStoreMessages } from './errors.js';
 import {
+	assertStorable,
 	hasUnstorableField,
 	type Item,
 	type KeyModel,
@@ -94,7 +95,8 @@ async function validateField(
  * @throws {KVStoreErrors.ValidationFailed} If a key field is an empty string, the
  *   field starts with `_bkv_` or is `__proto__`, an item has a field named
  *   `__proto__` at any depth, the items would nest lists or maps more than 32
- *   levels deep, or the items fail the schema of the field.
+ *   levels deep, the items fail the schema of the field, or an item holds data
+ *   the AWS SDK cannot send to DynamoDB ({@link assertStorable}).
  */
 export async function planAppendToList(
 	model: KeyModel,
@@ -135,6 +137,8 @@ export async function planAppendToList(
 		throw blocksError(KVStoreErrors.ValidationFailed, KVStoreMessages.nestedTooDeep(MAX_NESTING_DEPTH + 1));
 	}
 	await validateField(model.schema, model, keyAttrs, field, present);
+	// The items as `put` would store them under the field, so the message names the same path.
+	assertStorable({ [field]: present }, 'value');
 	return { keyAttrs, field, items: present };
 }
 

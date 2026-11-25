@@ -1392,12 +1392,22 @@ describe('appendToList', () => {
 		assert.deepEqual(await mock.get('k'), { list: [{ n: 1 }] });
 	});
 
-	test('the mock rejects items the marshaller rejects and leaves the item unchanged', async () => {
+	test('both runtimes reject items the marshaller rejects with the same named error, before any call', async () => {
 		const mock = mockStore('append-marshal');
 		await mock.put('k', { list: ['x'] });
+		const aws = awsStore('append-marshal');
 		for (const bad of [new Set(), new Date(0), Number.NaN, Number.MAX_SAFE_INTEGER + 1]) {
-			await assert.rejects(mock.appendToList('k', 'list', [bad]), `append ${String(bad)}`);
+			const messages: string[] = [];
+			for (const store of [mock, aws.store]) {
+				messages.push(
+					(await rejects(store.appendToList('k', 'list', ['ok', bad]), KVStoreErrors.ValidationFailed))
+						.message,
+				);
+			}
+			assert.equal(messages[0], messages[1], `same message for ${String(bad)}`);
+			assert.match(messages[0], /: value field 'list\[1\]' holds .*, which DynamoDB cannot store$/);
 		}
+		assert.equal(aws.sent.length, 0, 'every rejection happens before a DynamoDB call');
 		assert.deepEqual(await mock.get('k'), { list: ['x'] });
 	});
 

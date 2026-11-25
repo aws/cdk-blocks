@@ -117,7 +117,7 @@ Match an error by name with `isBlocksError`. See the catch in [Rewrite a store o
 - nests lists or maps more than 32 levels deep
 - holds data that the AWS SDK cannot send to DynamoDB, at any depth: `NaN`, an infinite number, a number outside `Number.MIN_SAFE_INTEGER` to `Number.MAX_SAFE_INTEGER`, a `Date`, a symbol, a class instance (including a subclass of `Set` or `Map`), an empty `Set`, a `Set` of values other than numbers, strings or binary data, or an object with a field named `constructor`. The message names the field.
 
-It is also thrown for a bad expiry, for a number key field outside `Number.MIN_SAFE_INTEGER` to `Number.MAX_SAFE_INTEGER`, for an `ifValueEquals` or `ifFieldEquals` operand that holds such data, and for an `appendToList` to a field that is not a list or to a value that is not an object.
+It is also thrown for a bad expiry, for a number key field outside `Number.MIN_SAFE_INTEGER` to `Number.MAX_SAFE_INTEGER`, for an `ifValueEquals` or `ifFieldEquals` operand or `appendToList` items that hold such data, and for an `appendToList` to a field that is not a list or to a value that is not an object.
 
 `InvalidQueryException` is thrown for:
 

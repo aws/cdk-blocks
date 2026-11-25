@@ -341,7 +341,9 @@ export class KVStore<
 	 * @throws {KVStoreErrors.ValidationFailed} If the items fail the schema of the
 	 *   field, an item has a field named `__proto__` at any depth, the field starts
 	 *   with `_bkv_` or is `__proto__`, the field holds a value that is not a list,
-	 *   or the stored value is not an object.
+	 *   or the stored value is not an object. Also if an item holds data the AWS SDK
+	 *   cannot send to DynamoDB (`NaN`, an infinite number, a number outside the
+	 *   safe integer range, a `Date`, a symbol, a class instance, an empty Set).
 	 * @throws {KVStoreErrors.ItemTooLarge} If the item would exceed 400 KB.
 	 *
 	 * @example
