@@ -1,6 +1,6 @@
 ---
-'@aws-blocks/core': minor
-'@aws-blocks/blocks': minor
+'@aws-cdk-blocks/core': minor
+'aws-cdk-blocks': minor
 ---
 
 Add `stableEndpointIds` to the VPC options (`defaults.vpc`). When it is `true`, the logical ids of the Blocks-provisioned VPC endpoints come from each service's short name (`VpcGws3`, `VpcIflogs`, ...). They then change only when the set of endpoints changes. By default the ids come from the service's full name, which embeds CDK token sequence numbers, so an unrelated change or an upgrade can shift them, and CloudFormation then replaces the endpoints.
