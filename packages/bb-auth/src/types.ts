@@ -223,6 +223,13 @@ export interface AuthCommonOptions {
 	 * `BlocksPresets.sandbox` destroys). Set `'retain'` explicitly for any pool
 	 * holding real users.
 	 *
+	 * Leaving it unset is how one `cdk-blocks/index.ts` retains the pool in
+	 * production and destroys it in a sandbox. Synth warns
+	 * (`@aws-cdk-blocks/bb-auth:RemovalPolicyUnset`) only when it is unset, the
+	 * stack default is `RemovalPolicy.DESTROY`, and the deployment is not a
+	 * sandbox (the `sandboxMode` CDK context): there, deleting the stack deletes
+	 * every user.
+	 *
 	 * The session table has one setting for removal and deletion protection
 	 * (`KVStore`'s `protection`). When this option or `deletionProtection` is
 	 * set, the table is retained and protected if deletion protection resolves
@@ -2921,6 +2928,8 @@ export interface LifecycleAdmin<O extends AuthOptions = AuthOptions> {
 	 * new password on first sign-in (`CONFIRM_SIGN_IN_WITH_NEW_PASSWORD_REQUIRED`).
 	 *
 	 * @throws {ApiError} 409 `UsernameExistsException` when the username is taken.
+	 * @throws {ApiError} 400 `InvalidParameterException` for a username Cognito refuses (empty, over 128 characters, or
+	 *   with whitespace or control characters) or a `temporaryPassword` over 256 characters.
 	 * @throws {ApiError} 400 `AliasExistsException` when `attributes` marks an email / phone verified that is already
 	 *   another user's verified sign-in alias (`signInWith` with `'username'`).
 	 */
