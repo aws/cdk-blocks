@@ -3,16 +3,7 @@
 
 /**
  * Runs TLC on every entry of formal/models.json and compares the result with
- * the entry's `expect`. An entry with `expect: "violates"` keeps a known-bad
- * variant of the model in the run, so that an invariant that can no longer
- * fail is noticed.
- *
- * An entry's `covers` maps a source file to the functions the model describes
- * and a digest of each one's text. A function whose text no longer has that
- * digest fails the run: TLC cannot see the code, so the model is unconfirmed
- * until someone compares the two and runs this script with `--confirm`.
- *
- * TLC needs Java 11 or later on the PATH. Set TLA2TOOLS_JAR to use a local jar.
+ * the entry's `expect`.
  */
 
 import { spawnSync } from 'node:child_process';
@@ -72,17 +63,24 @@ export function stateCountOf(output) {
 const SIGNATURE = /^\t*(?:export )?(?:(?:private|protected|public|static|async|function) )*(\w+)\(/;
 
 /**
- * The text of the function or class member `name` in `source`, from its
- * signature to the closing brace at the same indent, or `null` when there is
- * none. Relies on the formatter: a body closes on a line of its own.
+ * The text of the function or class member `name` in `source`, from its JSDoc
+ * (where the promise the model checks is written) to the closing brace at the
+ * same indent. `null` when `source` defines no such member or more than one.
+ * Relies on the formatter: a body closes on a line of its own.
  */
 export function memberText(source, name) {
 	const lines = source.split('\n');
-	const start = lines.findIndex((line) => line.match(SIGNATURE)?.[1] === name);
-	if (start === -1) return null;
-	const close = `${lines[start].match(/^\t*/)[0]}}`;
-	const end = lines.indexOf(close, start);
-	return end === -1 ? null : lines.slice(start, end + 1).join('\n');
+	const signatures = lines.flatMap((line, i) => (line.match(SIGNATURE)?.[1] === name ? [i] : []));
+	if (signatures.length !== 1) return null;
+	const [signature] = signatures;
+	const indent = lines[signature].match(/^\t*/)[0];
+	const end = lines.indexOf(`${indent}}`, signature);
+	if (end === -1) return null;
+	const above = lines[signature - 1] ?? '';
+	let start = signature;
+	if (above.startsWith(`${indent}/**`) && above.endsWith('*/')) start = signature - 1;
+	else if (above === `${indent} */`) start = lines.lastIndexOf(`${indent}/**`, signature);
+	return lines.slice(start === -1 ? signature : start, end + 1).join('\n');
 }
 
 export function digestOf(text) {
@@ -92,7 +90,7 @@ export function digestOf(text) {
 /**
  * The covered functions of `entry` whose text is not the text the model was
  * confirmed against, as `{ file, member, digest }`. `digest` is the digest of
- * the text now, or `null` when the function is gone.
+ * the text now, or `null` when the function is gone or no longer unique.
  */
 export function unconfirmedOf(entry, readSource) {
 	return Object.entries(entry.covers ?? {}).flatMap(([file, members]) => {
@@ -109,12 +107,25 @@ function sha256(bytes) {
 	return createHash('sha256').update(bytes).digest('hex');
 }
 
+async function download(url) {
+	let failure;
+	for (const waitMs of [0, 2000, 8000]) {
+		await new Promise((resolve) => setTimeout(resolve, waitMs));
+		try {
+			const response = await fetch(url);
+			if (response.ok) return Buffer.from(await response.arrayBuffer());
+			failure = new Error(`Downloading ${url} failed with HTTP ${response.status}.`);
+		} catch (error) {
+			failure = new Error(`Downloading ${url} failed: ${error.message}`);
+		}
+	}
+	throw failure;
+}
+
 async function tlaToolsJar() {
 	if (process.env.TLA2TOOLS_JAR) return process.env.TLA2TOOLS_JAR;
 	if (existsSync(JAR_CACHE) && sha256(readFileSync(JAR_CACHE)) === JAR_SHA256) return JAR_CACHE;
-	const response = await fetch(JAR_URL);
-	if (!response.ok) throw new Error(`Downloading ${JAR_URL} failed with HTTP ${response.status}.`);
-	const jar = Buffer.from(await response.arrayBuffer());
+	const jar = await download(JAR_URL);
 	const actual = sha256(jar);
 	if (actual !== JAR_SHA256) {
 		throw new Error(
@@ -128,8 +139,7 @@ async function tlaToolsJar() {
 }
 
 function runTlc(jar, entry) {
-	// TLC writes its state files, and newer versions a trace spec, next to the
-	// model. It runs on a copy so that nothing lands in the repository.
+	// TLC writes a trace spec next to the model, so it runs on a copy.
 	const work = mkdtempSync(join(tmpdir(), 'formal-models-'));
 	try {
 		cpSync(formalRoot, work, { recursive: true });
@@ -150,7 +160,12 @@ function runTlc(jar, entry) {
 			],
 			{ cwd: work, encoding: 'utf8' },
 		);
-		if (run.error) throw new Error(`Could not run java: ${run.error.message}`);
+		if (run.error) {
+			throw new Error(
+				`Could not run java: ${run.error.message}. TLC needs Java 11 or later on the PATH. ` +
+					'Set TLA2TOOLS_JAR to use a local tla2tools.jar.',
+			);
+		}
 		return { status: run.status, output: run.stdout + run.stderr };
 	} finally {
 		rmSync(work, { recursive: true, force: true });
@@ -180,7 +195,8 @@ async function main(argv) {
 			failures++;
 			console.error(`FAIL  ${entry.config}: the code it describes changed`);
 			for (const { file, member, digest } of unconfirmed) {
-				console.error(`      ${file} ${member} ${digest === null ? 'is gone' : 'changed'}`);
+				const state = digest === null ? 'is missing or defined more than once' : 'changed';
+				console.error(`      ${file} ${member} ${state}`);
 			}
 			console.error(
 				`      Compare ${entry.spec} with the code (${entry.guide}), then record the new text with:\n` +

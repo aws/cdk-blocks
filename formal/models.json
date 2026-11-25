@@ -7,20 +7,20 @@
 		"guide": ".agents/skills/verify-auth-session-refresh/SKILL.md",
 		"covers": {
 			"packages/bb-auth/src/auth-base.ts": {
-				"resolveSession": "8a7f33b7df822f02",
-				"sessionAfterLostWrite": "1adb0ad184d50b4b",
-				"refreshRecord": "f9487eeb28b98b87",
-				"signOut": "2817ab5c22a0e09d"
+				"resolveSession": "e5c749d648f56b2d",
+				"sessionAfterLostWrite": "914b2e664ee21226",
+				"refreshRecord": "ec27fe3880e8de1b",
+				"signOut": "107c270f4a2f754a"
 			},
 			"packages/bb-auth/src/sessions.ts": {
-				"versionOf": "6758b71af688785a",
-				"unchangedSince": "9e9f35ff1007e86a",
-				"create": "381185491f98fd48",
-				"lookup": "825bdc6077400a66",
-				"read": "629584ad90f557df",
-				"replaceIfUnchanged": "2f7fd4a31a560207",
-				"deleteIfUnchanged": "38878c903a8d188b",
-				"delete": "70ef501fac7b1639"
+				"versionOf": "02cbd7f429e30816",
+				"unchangedSince": "7067d77626b84d99",
+				"create": "b19911e86d83e078",
+				"lookup": "c98dd7cf74796142",
+				"read": "ec7440356ebf8286",
+				"replaceIfUnchanged": "ee596f5687d45955",
+				"deleteIfUnchanged": "a0d3232bbaf6c340",
+				"delete": "95a213513c41d7c4"
 			}
 		}
 	},

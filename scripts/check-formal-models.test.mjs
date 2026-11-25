@@ -1,8 +1,6 @@
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-// The TLC outputs are shortened from what TLC prints, so the tests need no Java.
-
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
@@ -171,11 +169,16 @@ const SOURCE = [
 ].join('\n');
 
 describe('memberText', () => {
-	it('is a method from its signature to its closing brace, without the JSDoc above it', () => {
+	it('is a method from its JSDoc to its closing brace', () => {
 		const text = memberText(SOURCE, 'replaceIfUnchanged');
-		assert.ok(text.startsWith('\tasync replaceIfUnchanged('));
+		assert.ok(text.startsWith('\t/** Replace only if unchanged. */\n\tasync replaceIfUnchanged('));
 		assert.ok(text.endsWith('\t\t}\n\t}'));
 		assert.ok(!text.includes('delete('));
+	});
+
+	it('includes a multi-line JSDoc and nothing above it', () => {
+		const source = ['const before = 1;', '/**', ' * Promise.', ' */', 'function f() {', '\treturn 1;', '}'].join('\n');
+		assert.equal(memberText(source, 'f'), '/**\n * Promise.\n */\nfunction f() {\n\treturn 1;\n}');
 	});
 
 	it('finds a top-level function and tells delete from deleteIfUnchanged', () => {
@@ -185,6 +188,11 @@ describe('memberText', () => {
 
 	it('is null for a name the source does not define', () => {
 		assert.equal(memberText(SOURCE, 'replace'), null);
+	});
+
+	it('is null when a second member of the same name appears, wherever it is', () => {
+		const twice = `interface Store {\n\tdelete(id: string): Promise<void>;\n}\n\n${SOURCE}`;
+		assert.equal(memberText(twice, 'delete'), null);
 	});
 });
 
@@ -208,8 +216,16 @@ describe('unconfirmedOf', () => {
 		);
 	});
 
+	it('names the function whose promise was reworded in its JSDoc', () => {
+		const changed = SOURCE.replace('Replace only if unchanged.', 'Replace.');
+		assert.deepEqual(
+			unconfirmedOf({ covers: covers(SOURCE) }, () => changed).map(({ member }) => member),
+			['replaceIfUnchanged'],
+		);
+	});
+
 	it('ignores a change outside the covered functions', () => {
-		const changed = SOURCE.replace('Replace only if unchanged.', 'Compare and swap.').replace(': undefined;', ': 0;');
+		const changed = SOURCE.replace(': undefined;', ': 0;');
 		assert.deepEqual(unconfirmedOf({ covers: covers(SOURCE) }, () => changed), []);
 	});
 

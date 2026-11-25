@@ -16,13 +16,13 @@ Each invariant is a sentence the code already states.
 | `SignOutSticks` | `resolveSession`: "a refresh that finishes after sign-out never restores the session" | A user signs out and a copy of the cookie keeps working. |
 | `NoStaleDelete` | `resolveSession`: "a request whose refresh was rejected never deletes the session another request has just refreshed" | A user is signed out at random when two tabs refresh together. |
 | `NoStaleOverwrite` | `replaceIfUnchanged`: "A stale writer therefore never recreates a deleted session or overwrites a newer one." | A deleted session comes back, or newer tokens are lost. |
-| `AnswersComeFromTheStore` | `sessionAfterLostWrite`: "Serve the session a concurrent refresh wrote if it is still live. If the session was deleted (`signOut`, revoke), clear the cookie — it stays signed out." | A request is answered as signed in with tokens the store does not hold. |
+| `AnswersComeFromTheStore` | `sessionAfterLostWrite`: "Serve the session a concurrent refresh wrote if it is still live. If the session was deleted (`signOut`, revoke), clear the cookie — it stays signed out." | A request is answered as signed in with tokens the store did not hold at its last store call: tokens it read before the row changed, or tokens it never stored. |
 
 `formal/models.json` lists the runs. `Head.cfg` is the code as it is and must hold. Each `PreFix.<Invariant>.cfg` sets `ConditionalWrites = FALSE`, which swaps in the writes this path had before #1314 (commit `579c6a826`), and must violate its invariant. Those runs prove that each invariant can still fail.
 
 ## Does your diff touch the covered code?
 
-`npm run check:formal` tells you. `formal/models.json` records, under `covers`, a digest of the text of each function the model describes. When one of them changes, the check fails with `the code it describes changed` and names the function, before it runs TLC.
+`npm run check:formal` tells you. `formal/models.json` records, under `covers`, a digest of the text of each function the model describes, JSDoc included, because the invariants quote it. When one of them changes, the check fails with `the code it describes changed` and names the function, before it runs TLC. A function that is missing, or whose name is defined twice in its file, fails the same way.
 
 A change to a function in this table matters to the model when it adds, removes, reorders or makes conditional a store or engine call, or changes a value written or returned. A change that does none of that (a log line, a rename) still fails the check until you confirm it.
 
@@ -61,9 +61,9 @@ The model does not read the code. A pass says nothing about your change until th
 
 ## Read a result
 
-A pass prints one `ok` line for each run, with TLC's state count. At commit `8fc2801a4`, `Head.cfg` reports `1675 states generated, 761 distinct states found`.
+A pass prints one `ok` line for each run, with TLC's state count. At commit `8fc2801a4`, `Head.cfg` reports `1685 states generated, 769 distinct states found`.
 
-A failure prints `FAIL`, the config, what TLC found and, for a violated invariant, TLC's counterexample. Each state of the counterexample names the action that led to it. The request that took the step is the one whose `pc` entry changed. Read the action names with the table above.
+A failure prints `FAIL`, the config, what TLC found and, for a violated invariant, TLC's counterexample. Each state of the counterexample names the action that led to it. The request that took the step is the one whose `pc` entry changed, and `signOutPc` is the step `signOut` takes next. Read the action names with the table above.
 
 - `Head.cfg: violates <Invariant>`: some ordering breaks that sentence in the model of the current code.
 - `PreFix.<Invariant>.cfg: holds`, or it violates another invariant: the invariant can no longer fail on the bug it was written for, so it no longer guards anything. A changed invariant or a changed pre-fix action causes this.
@@ -120,6 +120,7 @@ Assumptions:
 Left out:
 
 - `SessionStore.isRevoked` and the unconditional delete that follows it in `resolveSession`.
+- A row with no `version`. `unchangedSince` compares such a row field by field; the model compares versions only.
 - The other unconditional deletes of a session row (`deleteUser`, an account call for a user who no longer exists, `admin.revokeUserSessions`, the sign-in rollback, DynamoDB TTL). Each acts on the row as `SignOutDelete` does, but the model runs only one of them.
 - The cookie: which response sets or clears it.
 - Bearer tokens, session creation, more than two requests, a request that refreshes twice.
