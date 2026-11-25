@@ -160,7 +160,7 @@ export type ScopeParent = Scope | { id: string };
  *   join to the same string (`'user-service' > 'sessions'` and `'user' > 'service-sessions'`) share those
  *   resources: constructing the second logs a warning naming both, and a future release will reject it.
  *   Locally the two read and overwrite each other's data; `cdk synth` fails once both create a resource
- *   with one name (a table, queue, bucket, secret or parameter), because that deploy would fail.
+ *   with a name that its service requires to be unique (see the README), because that deploy would fail.
  * - Use lowercase letters, digits and hyphens in scope and block IDs. An ID is part of the name of each
  *   resource under it, unescaped, and every service accepts those characters. The rest depends on the
  *   resource: a DynamoDB table name (`KVStore`, `DistributedTable`) also allows uppercase letters, `_` and

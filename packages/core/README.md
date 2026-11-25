@@ -46,7 +46,9 @@ depends on where the app runs:
   function with a name that already exists in the stack. `cdk synth` fails
   instead, listing the name and the construct paths of the resources that use
   it. Colliding scopes that create no resource with a name still synth, with
-  the warning.
+  the warning. Only names that are literal strings at synth are compared, and
+  a resource behind a CloudFormation `Condition` is skipped, because it may be
+  the only one of its name that deploys.
 
 Use lowercase letters, digits and hyphens in scope and block ids. An id is part
 of the name of each resource created under it, unescaped, and every service

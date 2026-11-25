@@ -120,6 +120,8 @@ interface UniqueNameRule {
 	readonly what: string;
 	/** A property that splits the names into separate sets, and its value when absent (a schedule's group). */
 	readonly within?: { readonly property: string; readonly absent: string };
+	/** The names are unique across all accounts and Regions of a partition (S3 buckets), not per account and Region. */
+	readonly global?: boolean;
 }
 
 const UNIQUE_TABLE_NAME: UniqueNameRule = { property: 'TableName', what: 'DynamoDB table' };
@@ -131,9 +133,17 @@ const UNIQUE_TABLE_NAME: UniqueNameRule = { property: 'TableName', what: 'Dynamo
  * reports that the resource already exists in the stack and rolls back.
  *
  * Two blocks reach this when their scope paths join to the same `fullId`
- * (`'a-b' > 'x'` and `'a' > 'b' > 'x'`), or when one name option is given to
- * two blocks. Types whose service accepts the same name twice, such as a
- * Cognito user pool, are absent.
+ * (`'a-b' > 'x'` and `'a' > 'b' > 'x'`), when a block shortens or suffixes
+ * its `fullId` into a name (`CronJob` cuts schedule names to 64 characters),
+ * or when one name option is given to two blocks. Types whose service accepts
+ * the same name twice, such as a Cognito user pool, are absent.
+ *
+ * Only literal names are compared. A name that is a token at synth, such as
+ * `${AWS::StackName}-x`, is left to the CloudFormation-validate rule E3019
+ * that `aws-cdk-lib` runs by default (a warning, unless the app sets
+ * `@aws-cdk/core:validateAgainstDefaultRules`). A schedule group given as a
+ * `Ref` to a `CfnScheduleGroup` in the same stack is resolved to that group's
+ * name; any other token group is left to E3019 as well.
  */
 const UNIQUE_NAME_RULES: Readonly<Record<string, UniqueNameRule>> = {
 	'AWS::DynamoDB::Table': UNIQUE_TABLE_NAME,
@@ -145,7 +155,7 @@ const UNIQUE_NAME_RULES: Readonly<Record<string, UniqueNameRule>> = {
 		within: { property: 'GroupName', absent: 'default' },
 	},
 	'AWS::SecretsManager::Secret': { property: 'Name', what: 'Secrets Manager secret' },
-	'AWS::S3::Bucket': { property: 'BucketName', what: 'S3 bucket' },
+	'AWS::S3::Bucket': { property: 'BucketName', what: 'S3 bucket', global: true },
 	'AWS::SSM::Parameter': { property: 'Name', what: 'Systems Manager parameter' },
 	'AWS::Logs::LogGroup': { property: 'LogGroupName', what: 'CloudWatch Logs log group' },
 	'AWS::Lambda::Function': { property: 'FunctionName', what: 'Lambda function' },
@@ -196,6 +206,7 @@ const RESOURCE_NAME_CHECK = Symbol.for('blocks:ResourceNameCheck');
 /** A `Scope` as this check reads it: structural, so a second copy of `@aws-cdk-blocks/core` in the tree is recognized too. */
 interface ScopeLike extends IConstruct {
 	readonly id: string;
+	readonly fullId: string;
 	readonly bbName?: string;
 }
 
@@ -298,39 +309,100 @@ function resourceNameErrors(root: Construct): string[] {
  * listing the construct paths that claim it.
  */
 function duplicateNameErrors(root: Construct): string[] {
-	const claimants = new Map<string, { rule: UniqueNameRule; name: string; paths: string[] }>();
-	for (const node of root.node.findAll()) {
+	const nodes = root.node.findAll();
+	const groupNames = scheduleGroupNames(nodes);
+	const claimants = new Map<string, { rule: UniqueNameRule; name: string; paths: string[]; scopes: ScopeLike[] }>();
+	for (const node of nodes) {
 		if (!cdk.CfnResource.isCfnResource(node) || !Object.hasOwn(UNIQUE_NAME_RULES, node.cfnResourceType)) continue;
+		// A resource behind a Condition may be the only one of its name that deploys
+		// (`IsProd` and `Fn::Not(IsProd)`), so only resources that always deploy are compared.
+		if (node.cfnOptions.condition !== undefined) continue;
 		const rule = UNIQUE_NAME_RULES[node.cfnResourceType];
 		const properties = renderedProperties(node);
 		const name = field(properties, rule.property);
-		// A name CloudFormation generates, or that resolves at deploy, is not compared.
+		// A name CloudFormation generates, or that resolves at deploy, is not compared (see UNIQUE_NAME_RULES).
 		if (typeof name !== 'string') continue;
-		const within = rule.within ? (field(properties, rule.within.property) ?? rule.within.absent) : '';
-		if (typeof within !== 'string') continue;
-		// Names are unique per account and Region: two stacks of one backend in different Regions may reuse one.
 		const stack = cdk.Stack.of(node);
-		const key = JSON.stringify([rule.what, stack.account, stack.region, within, name]);
-		const entry = claimants.get(key) ?? { rule, name, paths: [] };
+		const within = rule.within
+			? withinValue(field(properties, rule.within.property), rule.within.absent, stack, groupNames)
+			: '';
+		if (within === undefined) continue;
+		// Names are unique per account and Region: two stacks of one backend in different Regions may reuse one.
+		// S3 bucket names are global, so a bucket is compared across stacks in every account and Region.
+		const where = rule.global ? [] : [stack.account, stack.region];
+		const key = JSON.stringify([rule.what, ...where, within, name]);
+		const entry = claimants.get(key) ?? { rule, name, paths: [], scopes: [] };
 		claimants.set(key, entry);
 		entry.paths.push(node.node.path);
+		const nearest = scopesAbove(node, root)[0];
+		if (nearest) entry.scopes.push(nearest);
 	}
 	const errors: string[] = [];
-	for (const { rule, name, paths } of claimants.values()) {
+	for (const { rule, name, paths, scopes } of claimants.values()) {
 		if (paths.length < 2) continue;
 		errors.push(
 			[
 				`The ${rule.what} name '${name}' is used by ${paths.length} resources, and the deploy would fail ` +
 					'when the second is created because the name already exists:',
 				...paths.map((path) => `  - ${path}`),
-				"A Building Block names its resources from its fullId, the scope ids joined with '-', so scope paths " +
-					"such as 'a-b' > 'x' and 'a' > 'b' > 'x' get the same names (the blocks:scope:fullIdCollision " +
-					'warning names them). Rename one of the scopes so their joined ids differ, or give the blocks ' +
-					'different names.',
+				fromJoinedIds(scopes)
+					? "A Building Block names its resources from its fullId, the scope ids joined with '-', so scope " +
+						"paths such as 'a-b' > 'x' and 'a' > 'b' > 'x' get the same names (the " +
+						'blocks:scope:fullIdCollision warning names them). Rename one of the scopes so their joined ' +
+						'ids differ.'
+					: 'These resources were given the same name: by a name option, or by a block that shortens or ' +
+						'suffixes its fullId into the name. Give one of them another name.',
 			].join('\n'),
 		);
 	}
 	return errors;
+}
+
+/**
+ * Whether two of the blocks that own the resources are different scopes with
+ * one `fullId`, so their names collide because the scope ids were joined with
+ * `-`, rather than because a name was given twice or shortened.
+ */
+function fromJoinedIds(scopes: readonly ScopeLike[]): boolean {
+	const byFullId = new Map<string, Set<ScopeLike>>();
+	for (const scope of scopes) {
+		const owners = byFullId.get(scope.fullId) ?? new Set<ScopeLike>();
+		byFullId.set(scope.fullId, owners.add(scope));
+	}
+	return [...byFullId.values()].some((owners) => owners.size > 1);
+}
+
+/**
+ * The literal names of the schedule groups under the root, by stack and logical
+ * id, so that a schedule whose group is a `Ref` to one of them is compared by
+ * the group's name.
+ */
+function scheduleGroupNames(nodes: readonly IConstruct[]): Map<string, string> {
+	const names = new Map<string, string>();
+	for (const node of nodes) {
+		if (!cdk.CfnResource.isCfnResource(node) || node.cfnResourceType !== 'AWS::Scheduler::ScheduleGroup') continue;
+		const name = field(renderedProperties(node), 'Name');
+		const stack = cdk.Stack.of(node);
+		if (typeof name === 'string') names.set(`${stack.node.path}\n${stack.resolve(node.logicalId)}`, name);
+	}
+	return names;
+}
+
+/**
+ * The set a name is unique within (a schedule's group): the literal value, the
+ * name of a group in the same stack that a `Ref` points to, `absent` when the
+ * property is not set, or `undefined` when it only resolves at deploy.
+ */
+function withinValue(
+	value: unknown,
+	absent: string,
+	stack: cdk.Stack,
+	groupNames: ReadonlyMap<string, string>,
+): string | undefined {
+	if (value === undefined) return absent;
+	if (typeof value === 'string') return value;
+	const ref = field(value, 'Ref');
+	return typeof ref === 'string' ? groupNames.get(`${stack.node.path}\n${ref}`) : undefined;
 }
 
 /**
