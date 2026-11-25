@@ -20,6 +20,7 @@ import { tmpdir } from 'node:os';
 import { delimiter, dirname, join } from 'node:path';
 import { after, afterEach, before, describe, it, mock } from 'node:test';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import type { CloudFormationClient } from '@aws-sdk/client-cloudformation';
 import { attachCdkWatchOutput } from './cdk-output.js';
 import type { CredentialFailureInText } from './credential-guidance.js';
 import type { OutputSink } from './deploy-stream.js';
@@ -31,6 +32,7 @@ import {
 	sandboxDenialRecoveryHint,
 	sandboxDeniedFailureHint,
 	sandboxFailureHint,
+	sandboxFailureKind,
 	sandboxFailureRecoveryHint,
 } from './sandbox.js';
 
@@ -198,23 +200,15 @@ describe('sandbox failure recovery — the Express Mode note only without a deni
 		);
 	});
 
-	it('after a denial that left a failed stack, limits destroy to a first deploy and keeps an existing sandbox', () => {
+	it('after a denial, says to run the sandbox again and suggests no destroy', () => {
 		const hint = sandboxDenialRecoveryHint();
-		assert.match(hint, /first deploy of this sandbox[^\n]*holds no data[^\n]*`npm run sandbox:destroy` removes it/);
-		assert.match(hint, /existed before, do not destroy it \(that deletes its data\)[^\n]*`npm run sandbox` again/);
-		assert.doesNotMatch(hint, /Express Mode|limit|budget|spend|\d{12}|arn:/i);
-		// The blocks CLI names its own commands.
-		const cli = sandboxDenialRecoveryHint('cdk-blocks sandbox', 'cdk-blocks sandbox destroy');
-		assert.match(cli, /`cdk-blocks sandbox destroy` removes it/);
-		assert.match(cli, /run `cdk-blocks sandbox` again/);
-		assert.doesNotMatch(cli, /npm run/);
-	});
-
-	it('after a denial with a stack state that could not be read, suggests no destroy', () => {
-		const hint = sandboxDenialRecoveryHint('npm run sandbox', 'npm run sandbox:destroy', false);
 		assert.match(hint, /Run `npm run sandbox` again once the cause above is resolved/);
-		assert.match(hint, /Do not destroy the sandbox/);
-		assert.doesNotMatch(hint, /sandbox:destroy|first deploy|Express Mode/);
+		assert.match(hint, /Do not destroy the sandbox to get past it: that deletes its data/);
+		assert.doesNotMatch(hint, /sandbox:destroy|removes it|first deploy|Express Mode|limit|budget|spend|\d{12}|arn:/i);
+		// The blocks CLI names its own commands.
+		const cli = sandboxDenialRecoveryHint('cdk-blocks sandbox');
+		assert.match(cli, /Run `cdk-blocks sandbox` again/);
+		assert.doesNotMatch(cli, /npm run/);
 	});
 
 	it('after a denial, keeps the guidance of a known stack state, which suggests no destroy', () => {
@@ -230,23 +224,40 @@ describe('sandbox failure recovery — the Express Mode note only without a deni
 		assert.match(sandboxDeniedFailureHint('in-progress', ...args), /don't destroy the sandbox/);
 	});
 
-	it('after a denial, replaces the unconditional destroy advice by failure kind', () => {
+	it('after a denial, replaces the destroy advice of a failed or unread stack state', () => {
 		const args = [['my-sandbox'], 'cdk-blocks sandbox', 'cdk-blocks sandbox destroy'] as const;
-		// A failed stack: the first deploy or not is unknown, so the destroy is conditional.
-		assert.strictEqual(
-			sandboxDeniedFailureHint('failed-stack', ...args),
-			sandboxDenialRecoveryHint('cdk-blocks sandbox', 'cdk-blocks sandbox destroy'),
-		);
-		assert.match(sandboxDeniedFailureHint('failed-stack', ...args), /If this was the first deploy/);
-		// The state lookup failed: no destroy at all.
-		assert.strictEqual(
-			sandboxDeniedFailureHint('unknown', ...args),
-			sandboxDenialRecoveryHint('cdk-blocks sandbox', 'cdk-blocks sandbox destroy', false),
-		);
-		assert.doesNotMatch(sandboxDeniedFailureHint('unknown', ...args), /`cdk-blocks sandbox destroy`|first deploy/);
 		for (const kind of ['failed-stack', 'unknown'] as const) {
-			assert.doesNotMatch(sandboxDeniedFailureHint(kind, ...args), /Express Mode leaves/, kind);
+			// Without a denial, these kinds get the destroy advice.
+			assert.match(sandboxFailureHint(kind, ...args), /cdk-blocks sandbox destroy/, kind);
+			const hint = sandboxDeniedFailureHint(kind, ...args);
+			assert.strictEqual(hint, sandboxDenialRecoveryHint('cdk-blocks sandbox'), kind);
+			assert.doesNotMatch(hint, /cdk-blocks sandbox destroy|removes it|first deploy|Express Mode leaves/, kind);
 		}
+	});
+
+	it('after a denial, suggests no destroy when one stack failed and another could not be read', async () => {
+		// The destroy command removes every stack of the sandbox, and nothing shows that the unread one is disposable.
+		const statuses: Record<string, string | Error> = {
+			'my-sandbox': 'UPDATE_FAILED',
+			'my-sandbox-edge': new Error('AccessDenied: not authorized to perform: cloudformation:DescribeStacks'),
+		};
+		const kind = await sandboxFailureKind({
+			phase: 'deploy',
+			lines: [],
+			stacks: Object.keys(statuses).map((stackName) => ({ stackName })),
+			cfnFor: async () => () =>
+				({
+					send: async (command: { input: { StackName: string } }) => {
+						const status = statuses[command.input.StackName];
+						if (status instanceof Error) throw status;
+						return { Stacks: [{ StackStatus: status }] };
+					},
+				}) as unknown as CloudFormationClient,
+		});
+		const hint = sandboxDeniedFailureHint(kind, Object.keys(statuses), 'npm run sandbox', 'npm run sandbox:destroy');
+		assert.doesNotMatch(hint, /sandbox:destroy|removes it|first deploy/);
+		assert.match(hint, /Run `npm run sandbox` again once the cause above is resolved/);
+		assert.match(hint, /Do not destroy the sandbox/);
 	});
 });
 

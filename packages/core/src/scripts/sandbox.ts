@@ -590,49 +590,34 @@ function reportSandboxStopped(destroyInvocation = "npm run sandbox:destroy"): vo
 
 /**
  * Recovery guidance for a sandbox deploy that failed because AWS denied a
- * request (explained just before by {@link formatDenialNotice}), when the
- * recovery by failure kind would be the destroy advice of
- * {@link sandboxFailureRecoveryHint}; see {@link sandboxDeniedFailureHint}.
- * Running the deploy again does not get past the denial until its cause is
- * resolved, and destroying a sandbox that existed before deletes its data.
- *
- * - `failedStack` (a stack is left in a failed state): whether this deploy was
- *   the sandbox's first is not known, so both cases are stated, and the destroy
- *   is limited to a first deploy.
- * - Otherwise (the stack state could not be read): no destroy is suggested.
+ * request (explained just before by {@link formatDenialNotice}), printed
+ * instead of the destroy advice of {@link sandboxFailureRecoveryHint}; see
+ * {@link sandboxDeniedFailureHint}. Running the deploy again does not get past
+ * the denial until its cause is resolved. No destroy is suggested: the destroy
+ * removes every stack of the sandbox, and nothing shows that none of them
+ * holds data.
  *
  * Kept pure so it can be asserted in a unit test.
  *
  * @param invocation how the user runs the sandbox, as in {@link sandboxFailureRecoveryHint}.
- * @param destroyInvocation how the user destroys it.
  */
-export function sandboxDenialRecoveryHint(
-  invocation = "npm run sandbox",
-  destroyInvocation = "npm run sandbox:destroy",
-  failedStack = true,
-): string {
-  if (!failedStack) {
-    return [
-      "",
-      `ℹ️  Run \`${invocation}\` again once the cause above is resolved.`,
-      "   Do not destroy the sandbox to get past it: that deletes its data.",
-    ].join("\n");
-  }
+export function sandboxDenialRecoveryHint(invocation = "npm run sandbox"): string {
   return [
     "",
-    `ℹ️  If this was the first deploy of this sandbox, the stack it left holds no data; \`${destroyInvocation}\` removes it.`,
-    `   If the sandbox existed before, do not destroy it (that deletes its data): run \`${invocation}\` again once the cause above is resolved.`,
+    `ℹ️  Run \`${invocation}\` again once the cause above is resolved.`,
+    "   Do not destroy the sandbox to get past it: that deletes its data.",
   ].join("\n");
 }
 
 /**
  * The recovery guidance for a failed sandbox deploy of `kind` during which AWS
- * denied a request. The stack state decides, as in {@link sandboxFailureHint}:
- * - `locked`, `in-progress`, `synth`, `healthy`: that function's guidance,
- *   which never suggests a destroy;
- * - `failed-stack`: {@link sandboxDenialRecoveryHint} with both cases, instead
- *   of the unconditional destroy advice;
- * - `unknown`: {@link sandboxDenialRecoveryHint} without a destroy.
+ * denied a request. It never suggests a destroy:
+ * - `locked`, `in-progress`, `synth`, `healthy`: the guidance of
+ *   {@link sandboxFailureHint}, which suggests none;
+ * - `failed-stack`, `unknown`: {@link sandboxDenialRecoveryHint}, instead of
+ *   that function's destroy advice. A failed stack does not show that every
+ *   stack of the sandbox is disposable: another one may hold data, or its
+ *   status may not have been read.
  *
  * Kept pure so it can be asserted in a unit test.
  */
@@ -642,9 +627,7 @@ export function sandboxDeniedFailureHint(
   invocation = "npm run sandbox",
   destroyInvocation = "npm run sandbox:destroy",
 ): string {
-  if (kind === 'failed-stack' || kind === 'unknown') {
-    return sandboxDenialRecoveryHint(invocation, destroyInvocation, kind === 'failed-stack');
-  }
+  if (kind === 'failed-stack' || kind === 'unknown') return sandboxDenialRecoveryHint(invocation);
   return sandboxFailureHint(kind, stackNames, invocation, destroyInvocation);
 }
 
@@ -1036,7 +1019,7 @@ async function runStartSandbox(options: SandboxOptions, history: SandboxHistory)
       stacks,
       cfnFor: async () => (await destroyRetryClients(process.cwd())).cfnFor,
     });
-    // After a denial, the unconditional destroy advice does not fit: see sandboxDeniedFailureHint.
+    // After a denial, no destroy is suggested: see sandboxDeniedFailureHint.
     const hint = deployOutput.denied() ? sandboxDeniedFailureHint : sandboxFailureHint;
     console.error(hint(kind, stacks.map((s) => s.stackName), invocation, destroyInvocation));
     throw error;
