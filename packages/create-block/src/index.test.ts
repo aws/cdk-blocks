@@ -443,7 +443,7 @@ describe('run() integration — next steps from a subdirectory', () => {
 	function writeMonorepo(dir: string): void {
 		writeFileSync(join(dir, 'package.json'), JSON.stringify({ workspaces: ['packages/blocks'] }));
 		mkdirSync(join(dir, 'packages', 'blocks', 'src'), { recursive: true });
-		writeFileSync(join(dir, 'packages', 'blocks', 'package.json'), JSON.stringify({ name: '@aws-blocks/blocks' }));
+		writeFileSync(join(dir, 'packages', 'blocks', 'package.json'), JSON.stringify({ name: 'aws-cdk-blocks' }));
 		writeFileSync(join(dir, 'packages', 'blocks', 'tsconfig.json'), JSON.stringify({ references: [] }));
 		writeFileSync(join(dir, 'packages', 'blocks', 'src', 'index.ts'), '');
 		writeFileSync(join(dir, 'packages', 'blocks', 'src', 'index.cdk.ts'), '');
