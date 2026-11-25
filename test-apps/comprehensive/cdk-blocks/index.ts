@@ -675,7 +675,8 @@ const validatedJob = new AsyncJob(scope, 'validated-job', {
 
 // AsyncJob whose payload type allows a bigint, which JSON cannot encode: submit()
 // must reject it with a named ValidationFailed error, not a raw TypeError (500).
-// The handler never runs.
+// The handler never runs. A dedicated job on purpose: it shows that a payload type
+// the compiler accepts still fails at runtime, without casting into testJob.
 const bigintJob = new AsyncJob(scope, 'bigint-job', {
   handler: async (_payload: { id: string; count: bigint }) => {},
 });

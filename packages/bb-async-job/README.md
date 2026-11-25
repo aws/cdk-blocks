@@ -81,6 +81,8 @@ try {
 | `AsyncJobErrors.InvalidOption` | `InvalidOptionException` | Synth time: `batchSize` or `maxBatchingWindowSeconds` is outside its range on a Lambda compute, or `maxConcurrencyPerCPU` is set and the compute is not a container. |
 | `AsyncJobErrors.UnsupportedCompute` | `UnsupportedComputeException` | Synth time: the resolved compute is not a Lambda or container compute, or belongs to another backend. |
 
+The payload travels as its JSON form, so a value that JSON can represent only approximately is accepted and reaches the handler changed, in local dev and on AWS: `NaN` and `Infinity` become `null`, a `Map` or `Set` becomes `{}`, a `Date` becomes its ISO 8601 string, and `undefined` or function properties are dropped. Pass a `schema` to refuse such values.
+
 ## submitBatch()
 
 - Returns `{ jobIds, failed: [] }` when every payload is enqueued. `jobIds` is in the order of `payloads`.

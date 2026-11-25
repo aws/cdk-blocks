@@ -202,7 +202,7 @@ export class AsyncJob<T = unknown> extends Scope {
 	 */
 	async submit(payload: T, options?: SubmitOptions): Promise<{ jobId: string }> {
 		validateDelaySeconds(options?.delaySeconds);
-		await this.validatePayload(payload);
+		const body = await this.validatePayload(payload);
 		const jobId = randomUUID().slice(0, 13);
 		const sentAt = new Date().toISOString();
 		const delaySeconds = options?.delaySeconds ?? 0;
@@ -211,7 +211,10 @@ export class AsyncJob<T = unknown> extends Scope {
 
 		const entry: QueueEntry<T> = {
 			jobId,
-			payload,
+			// Hand the handler the JSON round-trip of the payload, as the AWS runtime
+			// does with JSON.parse(record.body): a Date arrives as a string, a nested
+			// undefined is dropped, NaN becomes null, a Map becomes {}.
+			payload: JSON.parse(body) as T,
 			receiveCount: 0,
 			sentAt,
 			delayedUntil: delaySeconds > 0 ? new Date(Date.now() + delaySeconds * 1000).toISOString() : null,
@@ -278,7 +281,8 @@ export class AsyncJob<T = unknown> extends Scope {
 		return { jobIds, failed: [] };
 	}
 
-	private async validatePayload(payload: T): Promise<void> {
+	/** Validate a payload and return its serialized JSON form (the SQS message body on AWS). */
+	private async validatePayload(payload: T): Promise<string> {
 		// StandardSchemaV1 — validate() may return a Promise
 		if (this.schema) {
 			const rawResult = this.schema['~standard'].validate(payload);
@@ -298,6 +302,7 @@ export class AsyncJob<T = unknown> extends Scope {
 			const kb = Math.ceil(bytes / 1024);
 			throw blocksError(AsyncJobErrors.PayloadTooLarge, `Serialized payload is ${kb} KB, exceeds 256 KB limit`);
 		}
+		return serialized;
 	}
 
 	private processEntry(entry: QueueEntry<T>): void {

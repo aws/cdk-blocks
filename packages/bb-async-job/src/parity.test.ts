@@ -202,9 +202,13 @@ interface PayloadCase {
 	body?: string;
 }
 
+/**
+ * A cycle closed by a key named `apiKey`. The engine's error names the closing
+ * property, so a message that quoted it would contain `apiKey`.
+ */
 function circular(): unknown {
-	const o: { self?: unknown } = {};
-	o.self = o;
+	const o: { apiKey?: unknown } = {};
+	o.apiKey = o;
 	return o;
 }
 
@@ -229,6 +233,15 @@ const payloadCases: PayloadCase[] = [
 		payload: () => ({ toJSON: () => undefined }),
 		error: AsyncJobErrors.ValidationFailed,
 	},
+	{
+		label: 'a toJSON that throws',
+		payload: () => ({
+			toJSON() {
+				throw new Error('token=s3cret');
+			},
+		}),
+		error: AsyncJobErrors.ValidationFailed,
+	},
 ];
 
 function assertSamePayloadOutcome(mockOut: Outcome, awsOut: Outcome, expected: string | null): void {
@@ -241,6 +254,10 @@ function assertSamePayloadOutcome(mockOut: Outcome, awsOut: Outcome, expected: s
 			assert.strictEqual(mockOut.name, expected);
 			// Branded, so the name survives the RPC boundary instead of collapsing to a nameless 500.
 			assert.strictEqual(mockOut.wireSafe, true);
+			// The branded message crosses the wire, so it must be fixed text: never the
+			// engine's error (which names the key closing a cycle) or a toJSON()'s own text.
+			assert.ok(!mockOut.message.includes('s3cret'), `message quotes toJSON(): ${mockOut.message}`);
+			assert.ok(!mockOut.message.includes('apiKey'), `message quotes a key: ${mockOut.message}`);
 		}
 	}
 }
@@ -288,4 +305,40 @@ describe('AsyncJob.submitBatch() rejects a payload JSON cannot encode the same w
 			}
 		});
 	}
+});
+
+describe('the mock handler gets the JSON round-trip of the payload, as the AWS handler does', () => {
+	// The AWS handler receives JSON.parse(record.body), so the mock must not hand
+	// over the live object: values JSON changes have to arrive changed locally too.
+	test('a Date, a Map, NaN and a nested undefined arrive as JSON would carry them', async () => {
+		let resolveSeen: (p: unknown) => void = () => {};
+		const seen = new Promise<unknown>((r) => {
+			resolveSeen = r;
+		});
+		const job = new MockAsyncJob<unknown>(new Scope('app'), uniqueId(), {
+			handler: async (p) => {
+				resolveSeen(p);
+			},
+		});
+		const payload = { d: new Date(0), m: new Map([['k', 1]]), x: Number.NaN, u: undefined, n: { a: 1 } };
+		await job.submit(payload);
+		assert.deepStrictEqual(await seen, JSON.parse(JSON.stringify(payload)));
+		assert.deepStrictEqual(await seen, { d: '1970-01-01T00:00:00.000Z', m: {}, x: null, n: { a: 1 } });
+	});
+
+	test('the handler gets a copy, so mutating the payload after submit() does not reach it', async () => {
+		let resolveSeen: (p: unknown) => void = () => {};
+		const seen = new Promise<unknown>((r) => {
+			resolveSeen = r;
+		});
+		const job = new MockAsyncJob<{ n: number }>(new Scope('app'), uniqueId(), {
+			handler: async (p) => {
+				resolveSeen(p);
+			},
+		});
+		const payload = { n: 1 };
+		await job.submit(payload);
+		payload.n = 2;
+		assert.deepStrictEqual(await seen, { n: 1 });
+	});
 });

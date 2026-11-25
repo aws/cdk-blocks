@@ -67,7 +67,10 @@ export function serializePayload(payload: unknown): string {
 	if (serialized === undefined) {
 		throw blocksError(
 			AsyncJobErrors.ValidationFailed,
-			`Payload is not JSON-serializable: a value of type ${typeof payload} has no JSON representation`,
+			// Only a toJSON() that returns undefined gets an object here.
+			typeof payload === 'object'
+				? 'Payload is not JSON-serializable: its toJSON() returned undefined'
+				: `Payload is not JSON-serializable: a value of type ${typeof payload} has no JSON representation`,
 		);
 	}
 	return serialized;
