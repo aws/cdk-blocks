@@ -99,21 +99,24 @@ if (!url) {
 			assert.deepStrictEqual(await ids(), [7]);
 		});
 
-		test('a statement the callback started and did not await runs on its own after the transaction ended', async () => {
-			let transactionEnded = (): void => {};
-			const ended = new Promise<void>((resolve) => {
-				transactionEnded = resolve;
+		for (const outcome of ['commits', 'rolls back'] as const) {
+			test(`a statement the callback started and did not await runs on its own after the transaction ${outcome}`, async () => {
+				let transactionEnded = (): void => {};
+				const ended = new Promise<void>((resolve) => {
+					transactionEnded = resolve;
+				});
+				let late: Promise<unknown> = Promise.resolve();
+				const transaction = core.transaction(async (tx) => {
+					await tx.execute(sql`INSERT INTO entries VALUES (${8})`);
+					late = ended.then(() => core.execute(sql`INSERT INTO entries VALUES (${9})`));
+					if (outcome === 'rolls back') throw new Error('the callback fails');
+				});
+				if (outcome === 'commits') await transaction;
+				else await assert.rejects(transaction);
+				transactionEnded();
+				await late;
+				assert.deepStrictEqual(await ids(), outcome === 'commits' ? [8, 9] : [9]);
 			});
-			let late: Promise<unknown> = Promise.resolve();
-			await assert.rejects(
-				core.transaction(async () => {
-					late = ended.then(() => core.execute(sql`INSERT INTO entries VALUES (${8})`));
-					throw new Error('the callback fails');
-				}),
-			);
-			transactionEnded();
-			await late;
-			assert.deepStrictEqual(await ids(), [8]);
-		});
+		}
 	});
 }
