@@ -172,25 +172,25 @@ export function findOffRegionProblems(assemblyDir, region) {
 /**
  * The modes an app is synthesized in, in the order they run: production,
  * sandbox, and for an app with a `sandbox:preview` script (the templates with
- * `Hosting`) preview and production outside us-east-1. There Hosting adds a
- * second stack in us-east-1 for its CloudFront alarm, which needs an account;
- * that synth reuses the frontend build of the first one.
+ * `Hosting`) production outside us-east-1 and preview. Outside us-east-1
+ * Hosting adds a second stack in us-east-1 for its CloudFront alarm, which
+ * needs an account. That synth reuses the frontend build of the production
+ * synth, so it runs right after it: a preview synth builds the frontend for
+ * another front door and leaves that build behind.
  *
  * @param {string} appDir
  * @returns {SynthMode[]}
  */
 export function synthModes(appDir) {
-	const modes = [
-		{ name: 'production', context: [], region: 'us-east-1' },
-		{ name: 'sandbox', context: ['sandboxMode=true'], region: 'us-east-1' },
+	const production = { name: 'production', context: [], region: 'us-east-1' };
+	const sandbox = { name: 'sandbox', context: ['sandboxMode=true'], region: 'us-east-1' };
+	if (!readJson(join(appDir, 'package.json')).scripts?.['sandbox:preview']) return [production, sandbox];
+	return [
+		production,
+		{ name: 'production-eu-west-1', context: ['reuseFrontendBuild=true'], region: 'eu-west-1', account: '123456789012' },
+		sandbox,
+		{ name: 'preview', context: ['sandboxMode=true', 'previewMode=true'], region: 'us-east-1' },
 	];
-	if (readJson(join(appDir, 'package.json')).scripts?.['sandbox:preview']) {
-		modes.push(
-			{ name: 'preview', context: ['sandboxMode=true', 'previewMode=true'], region: 'us-east-1' },
-			{ name: 'production-eu-west-1', context: ['reuseFrontendBuild=true'], region: 'eu-west-1', account: '123456789012' },
-		);
-	}
-	return modes;
 }
 
 /** `<level> <id> at <construct path>: <start of the message>`, on one line. */

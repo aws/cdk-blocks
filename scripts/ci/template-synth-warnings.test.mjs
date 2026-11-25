@@ -255,13 +255,14 @@ describe('findOffRegionProblems', () => {
 describe('synthModes', () => {
 	const appWithScripts = (scripts) => writeDir({ 'package.json': { name: 'my-app', scripts } });
 
-	it('adds preview and production outside us-east-1 for an app with a sandbox:preview script', () => {
+	it('adds production outside us-east-1, right after production, and preview for an app with a sandbox:preview script', () => {
 		const app = appWithScripts({ sandbox: 'cdk-blocks sandbox', 'sandbox:preview': 'cdk-blocks sandbox preview' });
 		assert.deepEqual(synthModes(app), [
 			{ name: 'production', context: [], region: 'us-east-1' },
+			// Before preview, which rebuilds the frontend for another front door.
+			{ name: 'production-eu-west-1', context: ['reuseFrontendBuild=true'], region: 'eu-west-1', account: '123456789012' },
 			{ name: 'sandbox', context: ['sandboxMode=true'], region: 'us-east-1' },
 			{ name: 'preview', context: ['sandboxMode=true', 'previewMode=true'], region: 'us-east-1' },
-			{ name: 'production-eu-west-1', context: ['reuseFrontendBuild=true'], region: 'eu-west-1', account: '123456789012' },
 		]);
 	});
 
