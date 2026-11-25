@@ -437,6 +437,22 @@ jobs:
       fail-fast: false
       matrix:
         shard: [1, 2, 3]
+    # A real PostgreSQL for the tests that need more than one connection: the
+    # local engine has a single session, so it cannot tell a statement that
+    # joined a transaction from one that ran on another pooled connection.
+    # It holds no data and is discarded with the runner, so it asks for no password.
+    services:
+      postgres:
+        image: public.ecr.aws/docker/library/postgres:16-alpine@sha256:f2f98726820d0342055351c6e9d36e705f5bfffb3dd53ff556325114b08afb6d
+        env:
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -470,6 +486,9 @@ jobs:
           # Fail, rather than skip, the core runtime-guard e2e test when the built
           # BB it imports cannot be resolved, so a rename cannot drop it silently.
           BLOCKS_REQUIRE_RUNTIME_GUARD_E2E: '1'
+          # Fail, rather than skip, the tests that need the PostgreSQL service.
+          BLOCKS_REQUIRE_POSTGRES_TESTS: '1'
+          BLOCKS_TEST_POSTGRES_URL: postgres://postgres@localhost:5432/postgres
           SHARD: ${{ matrix.shard }}
           SHARDS: ${{ strategy.job-total }}
         # npm run test:unit is npm run test --workspaces; this runs the same
