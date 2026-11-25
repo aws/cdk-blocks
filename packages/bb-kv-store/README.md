@@ -379,7 +379,7 @@ export const todoApi = new ApiNamespace(scope, 'todo-api', (context) => ({
 }));
 ```
 
-The block validates a cursor before it uses it. A cursor that does not decode, or that belongs to another store, index, or partition, throws `InvalidQueryException`.
+The block validates a cursor before it uses it. A cursor that does not decode, or that belongs to another store, index, or partition, throws `InvalidQueryException`. A cursor issued by version 1.0.0 does not name its store, so any store with the same key shape accepts it.
 
 A cursor holds key values in a readable encoding. It is not a secret and not a permission. Check on every page that the caller can read the data, as the example does.
 
