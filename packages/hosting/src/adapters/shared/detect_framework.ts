@@ -1,8 +1,11 @@
+// Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * Framework detection from the project's `package.json`.
  *
  * Kept apart from `adapters/index.ts`, which loads every adapter, so
- * `nextjs_compatibility.ts` (the `@aws-blocks/hosting/nextjs-compatibility`
+ * `nextjs_compatibility.ts` (the `@aws-cdk-blocks/hosting/nextjs-compatibility`
  * subpath) can make the same choice `Hosting` makes without loading them.
  * `adapters/index.ts` re-exports these, so its importers are unchanged.
  */

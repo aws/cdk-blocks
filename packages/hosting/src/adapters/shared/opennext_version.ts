@@ -1,8 +1,11 @@
+// Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * The OpenNext the Next.js adapter builds with, and the `next` it builds.
  *
  * Kept apart from `adapters/nextjs.ts` so `nextjs_compatibility.ts` (the
- * `@aws-blocks/hosting/nextjs-compatibility` subpath) shares the one
+ * `@aws-cdk-blocks/hosting/nextjs-compatibility` subpath) shares the one
  * definition without loading the adapter and its build tooling. `nextjs.ts`
  * re-exports the constants and `detectNextVersion`, so its importers and
  * tests are unchanged.

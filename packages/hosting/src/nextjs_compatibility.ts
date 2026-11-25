@@ -1,5 +1,8 @@
+// Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+// SPDX-License-Identifier: Apache-2.0
+
 /**
- * `@aws-blocks/hosting/nextjs-compatibility`: whether a project's Next.js is
+ * `@aws-cdk-blocks/hosting/nextjs-compatibility`: whether a project's Next.js is
  * one the OpenNext that would build it supports.
  *
  * Kept small so a tool can load it without the rest of Hosting: it imports no
@@ -64,7 +67,7 @@ export interface NextjsCompatibility {
  *
  * @example
  * ```ts
- * import { checkNextjsCompatibility } from '@aws-blocks/hosting/nextjs-compatibility';
+ * import { checkNextjsCompatibility } from '@aws-cdk-blocks/hosting/nextjs-compatibility';
  *
  * const result = checkNextjsCompatibility(process.cwd());
  * if (result?.warning) console.warn(result.warning);

@@ -1097,9 +1097,9 @@ describe('create-blocks-app auto-detection', () => {
       writeFileSync(join(pkgDir, 'package.json'), JSON.stringify({ name, version: '0.0.0', type: 'module', ...pkg }));
       for (const [file, text] of Object.entries(files)) writeFileSync(join(pkgDir, file), text);
     };
-    /** An `@aws-blocks/hosting` whose `nextjs-compatibility` module is `source`. */
+    /** An `@aws-cdk-blocks/hosting` whose `nextjs-compatibility` module is `source`. */
     const writeHosting = (dir: string, source: string) =>
-      writePackage(dir, '@aws-blocks/hosting', { exports: { './nextjs-compatibility': './nextjs-compatibility.js' } }, { 'nextjs-compatibility.js': source });
+      writePackage(dir, '@aws-cdk-blocks/hosting', { exports: { './nextjs-compatibility': './nextjs-compatibility.js' } }, { 'nextjs-compatibility.js': source });
     /**
      * A `checkNextjsCompatibility` with an answer of its own: a CLI that asked its own copy of
      * Hosting, or decided anything itself, would print something else. Its warning names the
@@ -1117,10 +1117,10 @@ describe('create-blocks-app auto-detection', () => {
       '}',
     ].join('\n');
     const ACCEPTS = 'export function checkNextjsCompatibility() { return { supported: true }; }';
-    /** The `@aws-blocks/blocks` → `@aws-blocks/core` chain a project's backend imports `Hosting` through. */
+    /** The `aws-cdk-blocks` → `@aws-cdk-blocks/core` chain a project's backend imports `Hosting` through. */
     const writeBlocksAndCore = (dir: string) => {
-      writePackage(dir, '@aws-blocks/blocks', { main: 'index.js' }, { 'index.js': '' });
-      writePackage(dir, '@aws-blocks/core', { main: 'index.js' }, { 'index.js': '' });
+      writePackage(dir, 'aws-cdk-blocks', { main: 'index.js' }, { 'index.js': '' });
+      writePackage(dir, '@aws-cdk-blocks/core', { main: 'index.js' }, { 'index.js': '' });
     };
     /** The part of the warning that is the CLI's own. */
     const NOTE = 'Your `next` was not changed.';
@@ -1145,7 +1145,7 @@ describe('create-blocks-app auto-detection', () => {
         install: (app) => {
           writeBlocksAndCore(app);
           writeHosting(app, ACCEPTS);
-          writeHosting(join(app, 'node_modules', '@aws-blocks', 'core'), WARNS);
+          writeHosting(join(app, 'node_modules', '@aws-cdk-blocks', 'core'), WARNS);
         },
         warns: `fixture Hosting on next@${NEXT}, framework nextjs`,
       },
@@ -1156,7 +1156,7 @@ describe('create-blocks-app auto-detection', () => {
         warns: `fixture Hosting on next@${NEXT}, framework undefined`,
       },
       'its Hosting predates the export': {
-        install: (app) => { writeBlocksAndCore(app); writePackage(app, '@aws-blocks/hosting', { exports: { './adapters': './adapters.js' } }, { 'adapters.js': '' }); },
+        install: (app) => { writeBlocksAndCore(app); writePackage(app, '@aws-cdk-blocks/hosting', { exports: { './adapters': './adapters.js' } }, { 'adapters.js': '' }); },
       },
       // `--skip-install` on a project without Blocks.
       'Hosting is not installed': {},
@@ -1183,7 +1183,7 @@ describe('create-blocks-app auto-detection', () => {
         cwd: app,
         encoding: 'utf-8',
         timeout: 30000,
-        env: { ...process.env, AWS_BLOCKS_DISABLE_TELEMETRY: '1', BLOCKS_TELEMETRY_ENDPOINT: 'http://127.0.0.1:1/noop' },
+        env: { ...process.env, CDK_DISABLE_CLI_TELEMETRY: '1', BLOCKS_TELEMETRY_ENDPOINT: 'http://127.0.0.1:1/noop' },
       });
 
     /** An existing project with `next` installed, outside this repository so nothing resolves the repository's packages. */
@@ -1209,7 +1209,7 @@ describe('create-blocks-app auto-detection', () => {
           install?.(app);
           const result = runExisting(app, template);
           assert.strictEqual(result.status, 0, result.stderr);
-          assert.ok(existsSync(join(app, 'aws-blocks', 'index.ts')), 'the backend is still added');
+          assert.ok(existsSync(join(app, 'cdk-blocks', 'index.ts')), 'the backend is still added');
           // Whatever the project's Hosting printed or threw stays out of the command's output.
           assert.strictEqual(result.stderr, '');
           assert.ok(!result.stdout.includes('fixture noise'), result.stdout);
@@ -1238,8 +1238,8 @@ describe('create-blocks-app auto-detection', () => {
         // next@0.0.1 is only a fixture version; whether there is a warning is Hosting's answer.
         withExistingProject('0.0.1', (app) => {
           // The project installs this repository's Blocks, whose Core and Hosting resolve from there.
-          mkdirSync(join(app, 'node_modules', '@aws-blocks'), { recursive: true });
-          symlinkSync(join(__dirname, '../../blocks'), join(app, 'node_modules', '@aws-blocks', 'blocks'), 'dir');
+          mkdirSync(join(app, 'node_modules'), { recursive: true });
+          symlinkSync(join(__dirname, '../../blocks'), join(app, 'node_modules', 'aws-cdk-blocks'), 'dir');
           const warning: string | undefined = checkNextjsCompatibility(app, { framework })?.warning;
           const result = runExisting(app, template);
           assert.strictEqual(result.status, 0, result.stderr);

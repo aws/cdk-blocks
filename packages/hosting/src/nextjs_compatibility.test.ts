@@ -1,3 +1,6 @@
+// Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+// SPDX-License-Identifier: Apache-2.0
+
 import { afterEach, beforeEach, describe, it } from 'node:test';
 import assert from 'node:assert';
 import { execFileSync } from 'node:child_process';
@@ -136,7 +139,7 @@ void describe('checkNextjsCompatibility', () => {
   });
 });
 
-void describe('@aws-blocks/hosting/nextjs-compatibility', () => {
+void describe('@aws-cdk-blocks/hosting/nextjs-compatibility', () => {
   void it('loads without aws-cdk-lib, the Next.js adapter or its build tooling', () => {
     // A tool such as create-blocks-app loads this subpath from a project, so it
     // must stay as small as its check. Record every module the import resolves.

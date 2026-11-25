@@ -1311,24 +1311,24 @@ function packageRootOf(file: string, name: string): string {
 }
 
 /**
- * The file of `@aws-blocks/hosting/<subpath>` that the project's backend builds with,
- * resolved as Node resolves the backend's own imports: from `aws-blocks/` to
- * `@aws-blocks/blocks`, then the `@aws-blocks/core` that it imports `Hosting` from,
- * then that core's `@aws-blocks/hosting`. Never this CLI's own copy, which can be
+ * The file of `@aws-cdk-blocks/hosting/<subpath>` that the project's backend builds with,
+ * resolved as Node resolves the backend's own imports: from `cdk-blocks/` to
+ * `aws-cdk-blocks`, then the `@aws-cdk-blocks/core` that it imports `Hosting` from,
+ * then that core's `@aws-cdk-blocks/hosting`. Never this CLI's own copy, which can be
  * another release. Throws when any of them is not installed or `subpath` is not exported.
  */
 function resolveProjectHosting(backendDir: string, subpath: string): string {
   let from = join(backendDir, 'index.cdk.ts');
-  for (const name of ['@aws-blocks/blocks', '@aws-blocks/core']) {
+  for (const name of ['aws-cdk-blocks', '@aws-cdk-blocks/core']) {
     from = join(packageRootOf(createRequire(from).resolve(name), name), 'package.json');
   }
-  return createRequire(from).resolve(`@aws-blocks/hosting/${subpath}`);
+  return createRequire(from).resolve(`@aws-cdk-blocks/hosting/${subpath}`);
 }
 
 /**
  * Prints the warning the project's own Hosting has for its installed `next`, so the
  * project hears of it while it is being set up. Everything in it is that Hosting's:
- * `checkNextjsCompatibility` from the `@aws-blocks/hosting/nextjs-compatibility` the
+ * `checkNextjsCompatibility` from the `@aws-cdk-blocks/hosting/nextjs-compatibility` the
  * backend resolves (see resolveProjectHosting) decides whether there is anything to
  * say and what. This CLI carries no version range, no framework detection and no
  * wording of its own for it; it adds only where the warning is from and that `next`
@@ -1363,7 +1363,7 @@ async function printHostingNextjsWarning(targetDir: string, backendDir: string, 
   }
   if (typeof warning !== 'string' || warning === '') return;
   console.log(`⚠️  ${warning}`);
-  console.log('   This is from the @aws-blocks/hosting this project installs. Your `next` was not changed.');
+  console.log('   This is from the @aws-cdk-blocks/hosting this project installs. Your `next` was not changed.');
   console.log('');
 }
 

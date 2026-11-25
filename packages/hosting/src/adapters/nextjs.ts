@@ -1670,7 +1670,7 @@ const warnIfOpenNextOutOfRange = (projectDir: string): void => {
 
 // The fallback OpenNext, its `next` peer range and the installed-version
 // lookups live in `shared/opennext_version.ts`, which the
-// `@aws-blocks/hosting/nextjs-compatibility` subpath shares without loading
+// `@aws-cdk-blocks/hosting/nextjs-compatibility` subpath shares without loading
 // this adapter. Re-exported here for this file's importers and tests.
 export {
   OPENNEXT_FALLBACK_NEXT_PEER_RANGE,
@@ -1686,7 +1686,7 @@ export {
  * may still work, and the fix (upgrade `next` within its major, or pick a
  * different OpenNext) is the user's call. The verdict and the warning's words
  * are {@link checkNextjsCompatibility}'s, which the
- * `@aws-blocks/hosting/nextjs-compatibility` subpath exports.
+ * `@aws-cdk-blocks/hosting/nextjs-compatibility` subpath exports.
  */
 const warnIfNextOutsideOpenNextPeerRange = (
   compatibility: NextjsCompatibility | undefined,
