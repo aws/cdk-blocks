@@ -29,6 +29,8 @@ import {
 	createSandboxDeployObserver,
 	sandboxCredentialFailureMessage,
 	sandboxDenialRecoveryHint,
+	sandboxDeniedFailureHint,
+	sandboxFailureHint,
 	sandboxFailureRecoveryHint,
 } from './sandbox.js';
 
@@ -196,7 +198,7 @@ describe('sandbox failure recovery — the Express Mode note only without a deni
 		);
 	});
 
-	it('after a denial, limits destroy to a first deploy and keeps an existing sandbox', () => {
+	it('after a denial that left a failed stack, limits destroy to a first deploy and keeps an existing sandbox', () => {
 		const hint = sandboxDenialRecoveryHint();
 		assert.match(hint, /first deploy of this sandbox[^\n]*holds no data[^\n]*`npm run sandbox:destroy` removes it/);
 		assert.match(hint, /existed before, do not destroy it \(that deletes its data\)[^\n]*`npm run sandbox` again/);
@@ -206,6 +208,45 @@ describe('sandbox failure recovery — the Express Mode note only without a deni
 		assert.match(cli, /`cdk-blocks sandbox destroy` removes it/);
 		assert.match(cli, /run `cdk-blocks sandbox` again/);
 		assert.doesNotMatch(cli, /npm run/);
+	});
+
+	it('after a denial with a stack state that could not be read, suggests no destroy', () => {
+		const hint = sandboxDenialRecoveryHint('npm run sandbox', 'npm run sandbox:destroy', false);
+		assert.match(hint, /Run `npm run sandbox` again once the cause above is resolved/);
+		assert.match(hint, /Do not destroy the sandbox/);
+		assert.doesNotMatch(hint, /sandbox:destroy|first deploy|Express Mode/);
+	});
+
+	it('after a denial, keeps the guidance of a known stack state, which suggests no destroy', () => {
+		const args = [['my-sandbox'], 'cdk-blocks sandbox', 'cdk-blocks sandbox destroy'] as const;
+		for (const kind of ['locked', 'in-progress', 'synth', 'healthy'] as const) {
+			assert.strictEqual(sandboxDeniedFailureHint(kind, ...args), sandboxFailureHint(kind, ...args), kind);
+		}
+		// A locked output names the destroy command as a possible holder of the lock, not as a recovery.
+		for (const kind of ['in-progress', 'synth', 'healthy'] as const) {
+			assert.doesNotMatch(sandboxDeniedFailureHint(kind, ...args), /`cdk-blocks sandbox destroy`/, kind);
+		}
+		assert.match(sandboxDeniedFailureHint('healthy', ...args), /nothing to destroy/);
+		assert.match(sandboxDeniedFailureHint('in-progress', ...args), /don't destroy the sandbox/);
+	});
+
+	it('after a denial, replaces the unconditional destroy advice by failure kind', () => {
+		const args = [['my-sandbox'], 'cdk-blocks sandbox', 'cdk-blocks sandbox destroy'] as const;
+		// A failed stack: the first deploy or not is unknown, so the destroy is conditional.
+		assert.strictEqual(
+			sandboxDeniedFailureHint('failed-stack', ...args),
+			sandboxDenialRecoveryHint('cdk-blocks sandbox', 'cdk-blocks sandbox destroy'),
+		);
+		assert.match(sandboxDeniedFailureHint('failed-stack', ...args), /If this was the first deploy/);
+		// The state lookup failed: no destroy at all.
+		assert.strictEqual(
+			sandboxDeniedFailureHint('unknown', ...args),
+			sandboxDenialRecoveryHint('cdk-blocks sandbox', 'cdk-blocks sandbox destroy', false),
+		);
+		assert.doesNotMatch(sandboxDeniedFailureHint('unknown', ...args), /`cdk-blocks sandbox destroy`|first deploy/);
+		for (const kind of ['failed-stack', 'unknown'] as const) {
+			assert.doesNotMatch(sandboxDeniedFailureHint(kind, ...args), /Express Mode leaves/, kind);
+		}
 	});
 });
 
@@ -394,7 +435,7 @@ describe('sandboxCredentialFailureMessage — source-aware sign-in guidance', ()
 		noIds(message);
 	});
 
-	const staticKeys = 'aws_access_key_id = AKIAEXAMPLEKEYID0000\naws_secret_access_key = secret-example\n';
+	const staticKeys = 'aws_access_key_id = AKIAEXAMPLE\naws_secret_access_key = secret-example\n';
 	const restart = /stop `npm run sandbox`[^\n]*run it again/;
 
 	it('lets a role profile pick up new credentials on the next saved file', async () => {
@@ -432,7 +473,7 @@ describe('sandboxCredentialFailureMessage — source-aware sign-in guidance', ()
 
 	it('tells environment keys to export new ones and restart, which a running watch needs', async () => {
 		const env = {
-			AWS_ACCESS_KEY_ID: 'AKIAEXAMPLEKEYID0000',
+			AWS_ACCESS_KEY_ID: 'AKIAEXAMPLE',
 			AWS_SECRET_ACCESS_KEY: 'secret-example',
 			AWS_REGION: 'us-east-1',
 		};
@@ -560,9 +601,10 @@ try {
 		rmSync(tmp, { recursive: true, force: true });
 	});
 
-	const DENIAL_RECOVERY = 'If this was the first deploy of this sandbox';
+	// The fixture has no cloud assembly, so the stack state can't be read (`unknown`).
+	const DENIAL_RECOVERY = 'ℹ️  Run `npm run sandbox` again once the cause above is resolved.';
 
-	it('explains a CreateStack deny, replaces the Express Mode note and keeps the failure as it was', {
+	it('explains a CreateStack deny, suggests no destroy with an unread stack state and keeps the failure as it was', {
 		timeout: 90_000,
 	}, () => {
 		const run = runSandbox(CREATE_STACK_DENIED, 1);
@@ -572,7 +614,7 @@ try {
 		assert.ok(at('⚠️  AWS denied a request during `npm run sandbox`') > at(evidence), run.stderr);
 		assert.ok(at('❌ Deployment failed.') > at('AWS denied a request'), 'the explanation comes before the verdict');
 		assert.ok(at(DENIAL_RECOVERY) > at('❌ Deployment failed.'), run.stderr);
-		assert.doesNotMatch(run.stderr, /Express Mode leaves/);
+		assert.doesNotMatch(run.stderr, /Express Mode leaves|sandbox:destroy|first deploy/);
 		// Same error, exit and telemetry as before.
 		assert.match(run.stdout, /THREW npm exec cdk -- deploy .* exited with code 1/);
 		assert.deepStrictEqual(
@@ -581,15 +623,15 @@ try {
 		);
 	});
 
-	it('gives a denied update the same fixed recovery, and an ordinary failure the Express Mode note', {
+	it('gives a denied update the same recovery, and an ordinary failure the Express Mode note', {
 		timeout: 90_000,
 	}, () => {
 		const denied = runSandbox(UPDATE_DENIED, 1);
 		assert.match(
 			denied.stderr,
-			/AWS denied a request[\s\S]*❌ Deployment failed\.\n\nℹ️ {2}If this was the first deploy/,
+			/AWS denied a request[\s\S]*❌ Deployment failed\.\n\nℹ️ {2}Run `npm run sandbox` again once the cause/,
 		);
-		assert.doesNotMatch(denied.stderr, /Express Mode leaves/);
+		assert.doesNotMatch(denied.stderr, /Express Mode leaves|sandbox:destroy|first deploy/);
 		// A stack whose name contains AccessDenied (stackId `AccessDenied`) is not a denial.
 		const namedAccessDenied = [
 			'AccessDenied-prod: deploying... [1/1]',
@@ -621,7 +663,7 @@ try {
 			1,
 			undefined,
 			// Environment keys, and no Region, so the pre-deploy check is skipped as in the other runs.
-			{ AWS_ACCESS_KEY_ID: 'AKIAEXAMPLEKEYID0000', AWS_SECRET_ACCESS_KEY: 'secret-example' },
+			{ AWS_ACCESS_KEY_ID: 'AKIAEXAMPLE', AWS_SECRET_ACCESS_KEY: 'secret-example' },
 		);
 		const at = (needle: string) => run.stderr.indexOf(needle);
 		assert.ok(at('AWS credentials could not be verified for `npm run sandbox` (ExpiredToken).') > 0, run.stderr);
@@ -662,8 +704,26 @@ try {
 			run.stderr.indexOf('AWS denied a request') < run.stderr.indexOf('❌ Deployment failed.'),
 			run.stderr,
 		);
-		assert.match(run.stderr, /❌ Deployment failed\.\n\nℹ️ {2}If this was the first deploy/);
-		assert.doesNotMatch(run.stderr, /Express Mode leaves/);
+		assert.match(run.stderr, /❌ Deployment failed\.\n\nℹ️ {2}Run `npm run sandbox` again once the cause/);
+		assert.doesNotMatch(run.stderr, /Express Mode leaves|sandbox:destroy/);
+	});
+
+	it('keeps the guidance for a locked output after a deny, without the denial recovery', {
+		timeout: 90_000,
+	}, () => {
+		// The lock is read from the retained output, which a curated level keeps.
+		const run = runSandbox(
+			[...CREATE_STACK_DENIED, 'Another CLI (PID=4242) is currently synthing to .cdk-blocks-sandbox/cdk.out', ''],
+			1,
+			undefined,
+			{ BLOCKS_LOG_LEVEL: 'normal' },
+		);
+		assert.strictEqual(run.stderr.split('AWS denied a request').length - 1, 1, run.stderr);
+		assert.ok(
+			run.stderr.includes(`❌ Deployment failed.\n${sandboxFailureHint('locked')}\n`),
+			run.stderr,
+		);
+		assert.doesNotMatch(run.stderr, /once the cause above is resolved|first deploy|Express Mode leaves/);
 	});
 
 	it('at the blocks CLI’s log levels, explains the deny once with its commands, before the verdict', {
@@ -686,9 +746,9 @@ try {
 			assert.ok(at('❌ Deployment failed.') > at(notice), `${level}: the explanation comes before the verdict`);
 			assert.match(
 				run.stderr,
-				/❌ Deployment failed\.\n\nℹ️ {2}If this was the first deploy[^\n]*`cdk-blocks sandbox destroy`/,
+				/❌ Deployment failed\.\n\nℹ️ {2}Run `cdk-blocks sandbox deploy` again once the cause above is resolved/,
 			);
-			assert.doesNotMatch(run.stderr, /Express Mode leaves|npm run sandbox/);
+			assert.doesNotMatch(run.stderr, /Express Mode leaves|npm run sandbox|cdk-blocks sandbox destroy/);
 			// The CDK CLI's evidence is still shown: as it arrives at verbose, and in the
 			// retained output that quiet and normal print once the deploy has failed.
 			assert.ok(run.stderr.includes(CREATE_STACK_DENIED[3]), `${level}: ${run.stderr}`);
