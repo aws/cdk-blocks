@@ -17,4 +17,7 @@ export const blocksStack = await BlocksStack.create(app, stackName, {
   backendHandlerPath: join(__dirname, 'index.handler.ts'),
   backendCDKPath: join(__dirname, 'index.ts'),
   defaults: sandboxMode ? BlocksPresets.sandbox : BlocksPresets.production,
+  // The account and region the CDK CLI deploys to. With a region, Hosting puts
+  // its CloudFront alarm where CloudFront metrics are: us-east-1.
+  env: { account: process.env.CDK_DEFAULT_ACCOUNT, region: process.env.CDK_DEFAULT_REGION },
 });
