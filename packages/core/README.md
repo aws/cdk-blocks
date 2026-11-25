@@ -33,11 +33,22 @@ see the `@aws-cdk-blocks/bb-compute` README for what follows it.
 A block's resource names (its table, bucket or queue, and its local `.cdk-blocks/local/data`
 directory) come from its `fullId`: the scope ids from the root down, joined with
 `-`. Two different scope paths that join to the same string, such as
-`'user-service' > 'sessions'` and `'user' > 'service-sessions'`, share those
-resources and overwrite each other's data. Constructing the second one logs a
-warning naming both paths (a `blocks:scope:fullIdCollision` warning at `cdk
-synth`); rename one of the scopes. Constructing the same path again is
-accepted.
+`'user-service' > 'sessions'` and `'user' > 'service-sessions'`, get the same
+resource names. Constructing the second one logs a warning naming both paths (a
+`blocks:scope:fullIdCollision` warning at `cdk synth`); rename one of the
+scopes. Constructing the same path again is accepted. What happens next
+depends on where the app runs:
+
+- Locally the two blocks share their `.cdk-blocks/local/data` directory and
+  read and overwrite each other's data.
+- On AWS the two cannot both deploy, because CloudFormation rejects a second
+  table, queue, schedule, bucket, secret, parameter, log group or Lambda
+  function with a name that already exists in the stack. `cdk synth` fails
+  instead, listing the name and the construct paths of the resources that use
+  it. Colliding scopes that create no resource with a name still synth, with
+  the warning. Only names that are literal strings at synth are compared, and
+  a resource behind a CloudFormation `Condition` is skipped, because it may be
+  the only one of its name that deploys.
 
 Use lowercase letters, digits and hyphens in scope and block ids. An id is part
 of the name of each resource created under it, unescaped, and every service
@@ -313,7 +324,7 @@ Start `defaults` from `BlocksPresets.sandbox` or `BlocksPresets.production` and 
 | `pointInTimeRecovery` | `boolean \| { retentionDays: number }` | `false` | `true` | Continuous backups on stateful resources that support them (DynamoDB point-in-time recovery: 1–35 days). |
 | `logRetention` | `RetentionDays` | `RetentionDays.ONE_WEEK` | `RetentionDays.ONE_YEAR` | Retention of the CloudWatch log groups CDK Blocks manages. |
 | `throttling` | `BlocksThrottling` (`{ rateLimit: number; burstLimit: number }`) | `{ rateLimit: 200, burstLimit: 400 }` | `{ rateLimit: 1000, burstLimit: 2000 }` | Requests per second and burst on the shared REST API stage; messages per second on the `Realtime` WebSocket stage. |
-| `accessLogging` | `boolean` | `false` | `false` | JSON access logs on the shared REST API and Realtime WebSocket stages. Hosting's CloudFront SSR origin uses `frontDoor.features.serverOrigin.accessLogging` instead. This is also the fallback for `storageAccessLogging`. The API Gateway CloudWatch Logs role is account- and region-wide; enable it in one CDK Blocks stack per account and region. While it is off and `removalPolicy` is not `DESTROY`, synth warns `blocks:apigateway:access-logging-disabled`. |
+| `accessLogging` | `boolean` | `false` | `false` | JSON access logs on the shared REST API and Realtime WebSocket stages. Hosting's CloudFront SSR origin uses `frontDoor.features.serverOrigin.accessLogging` instead. This is also the fallback for `storageAccessLogging`. The API Gateway CloudWatch Logs role is account- and region-wide; enable it in one CDK Blocks stack per account and region. While it is off and `removalPolicy` is not `DESTROY`, synth prints the info `blocks:apigateway:access-logging-disabled` (an info, not a warning: it does not fail `cdk synth --strict`). To hide it, call `Annotations.of(stack).acknowledgeInfo('blocks:apigateway:access-logging-disabled')` on the stack or backend that `create()` returns. |
 | `storageAccessLogging` | `boolean` | unset | unset | S3 server access logs for CDK Blocks-provisioned FileBucket buckets. Unset falls back to `accessLogging`. Configure logging on imported buckets separately. |
 | `secretsStore` | `BlocksSecretsStore` (`'ssm' \| 'secrets-manager'`) | `'ssm'` | `'secrets-manager'` | Where CDK Blocks stores the secrets it generates (the `Auth` session secret, the `Realtime` connection token key). Changing it on a deployed stack creates new keys, which signs every `Auth` user out once. |
 | `vpc` | `BlocksVpcOptions` | unset | unset | A VPC for the app's compute and VPC-resident resources. |
