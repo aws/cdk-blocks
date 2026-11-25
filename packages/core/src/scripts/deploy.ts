@@ -4,12 +4,14 @@
 import {
   cpSync,
   existsSync,
+  linkSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
   readFileSync,
   renameSync,
   rmSync,
+  unlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { join, relative, resolve, dirname } from 'node:path';
@@ -281,6 +283,52 @@ const CDK_READER_LOCK = /^read\.(\d+)\.\d+\.lock$/;
 const CDK_LOCK_FILE = /^(?:synth\.lock|read\..*\.lock)$/;
 
 /**
+ * Take the CDK CLI's writer lock of `outputDir` for this process, as a synth
+ * into it would: `synth.lock`, created exclusively, holding the pid. Returns
+ * the release, which removes the lock only while it is still this process's,
+ * or the holder when a live process (or a lock that names no pid) has it. A
+ * lock of a process that is gone is moved aside and removed only if it is
+ * still the one that was read, so a lock taken meanwhile is never deleted.
+ */
+function claimCdkWriterLock(outputDir: string): { release: () => void } | { holder: string } {
+  const path = join(outputDir, CDK_WRITER_LOCK);
+  const mine = String(process.pid);
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      writeFileSync(path, mine, { flag: 'wx' });
+      return {
+        release: () => {
+          try {
+            if (readFileSync(path, 'utf-8').trim() === mine) unlinkSync(path);
+          } catch {
+            // Already gone.
+          }
+        },
+      };
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+    }
+    let holder: string;
+    try {
+      holder = readFileSync(path, 'utf-8').trim();
+    } catch {
+      continue; // released between the create and the read
+    }
+    if (!/^\d+$/.test(holder) || isPidAlive(Number(holder))) return { holder };
+    const aside = `${path}.${mine}.stale`;
+    try {
+      renameSync(path, aside);
+      // Another process replaced the stale lock before the rename: give it back.
+      if (readFileSync(aside, 'utf-8').trim() !== holder) linkSync(aside, path);
+    } catch {
+      // Gone, or taken again: the next attempt reads it.
+    }
+    rmSync(aside, { force: true });
+  }
+  return { holder: '' };
+}
+
+/**
  * Copy the assembly a deploy synthesized into `synthesizedDir` to `outputDir`,
  * the directory the CDK CLI writes to (`output` in cdk.json, else `cdk.out`),
  * so that it holds the last synth as it did when `cdk deploy` synthesized on
@@ -291,9 +339,14 @@ const CDK_LOCK_FILE = /^(?:synth\.lock|read\..*\.lock)$/;
  * or a directory shared with other files. So it is written as a synth into it
  * would write it, and never removed or replaced: each entry of the assembly
  * replaces the entry of the same name, and everything else stays. The CLI's
- * lock files are not copied, and those in `outputDir` are left alone. While
- * another CDK process synthesizes into `outputDir`, or deploys from it (it
- * reads templates and assets as it goes), nothing is copied.
+ * lock files are not copied.
+ *
+ * The copy holds the CLI's writer lock of `outputDir` (see
+ * {@link claimCdkWriterLock}), so two deploys that end together never mix
+ * their files there, and a CDK CLI does not read half a copy. While another
+ * process holds that lock (a synth into `outputDir`, another deploy's copy),
+ * or a CDK process reads the assembly there (`cdk deploy --app cdk.out` reads
+ * templates and assets as it goes), nothing is copied.
  *
  * A synth that failed before it wrote `manifest.json` copies only the IAM
  * reports it did write: a synth that fails on an app-isolation violation names
@@ -302,9 +355,10 @@ const CDK_LOCK_FILE = /^(?:synth\.lock|read\..*\.lock)$/;
  * Never throws: a failure here is a warning, and must not replace the result
  * of the deploy. `synthesizedDir` is only read; its owner removes it.
  *
+ * @param whileLocked test seam: called once the writer lock is held, before the copy
  * @internal
  */
-export function publishAssembly(synthesizedDir: string, outputDir: string): void {
+export function publishAssembly(synthesizedDir: string, outputDir: string, whileLocked?: () => void): void {
   // The synth printed paths inside `synthesizedDir` (the IAM report); say where the files are now.
   const shown = relative(process.cwd(), outputDir) || '.';
   try {
@@ -314,36 +368,36 @@ export function publishAssembly(synthesizedDir: string, outputDir: string): void
     );
     if (entries.length === 0) return;
     mkdirSync(outputDir, { recursive: true });
-    let writer: string | undefined;
+    const lock = claimCdkWriterLock(outputDir);
+    if ('holder' in lock) {
+      log.warn(
+        `⚠️  Not copying the synthesized cloud assembly to ${shown}: another process (pid ${lock.holder || 'unknown'}) is ` +
+          `writing a cloud assembly there (${CDK_WRITER_LOCK}). The deploy's result is not affected; ${shown} holds that process's synth.`,
+      );
+      return;
+    }
     try {
-      writer = readFileSync(join(outputDir, CDK_WRITER_LOCK), 'utf-8').trim();
-    } catch {
-      // No CDK process is synthesizing there.
+      // Read after the lock is held: a reader that came before it is seen, and none starts under it.
+      const reader = readdirSync(outputDir)
+        .map((name) => CDK_READER_LOCK.exec(name)?.[1])
+        .find((pid) => pid !== undefined && isPidAlive(Number(pid)));
+      if (reader !== undefined) {
+        log.warn(
+          `⚠️  Not copying the synthesized cloud assembly to ${shown}: another CDK process (pid ${reader}) is reading the ` +
+            `assembly there. The deploy's result is not affected; ${shown} holds the earlier synth.`,
+        );
+        return;
+      }
+      whileLocked?.();
+      // Copied over what is there, as a synth into `outputDir` writes: nothing else in it is removed.
+      for (const entry of entries) {
+        cpSync(join(synthesizedDir, entry), join(outputDir, entry), { recursive: true });
+        if (!synthesized) log.progress(`   IAM report of the failed synth: ${join(shown, entry)}`);
+      }
+      if (synthesized) log.detail(`   Cloud assembly of this deploy (templates, IAM report): ${shown}`);
+    } finally {
+      lock.release();
     }
-    // A lock whose process is gone is stale; one that names no pid counts as held.
-    if (writer !== undefined && (!/^\d+$/.test(writer) || isPidAlive(Number(writer)))) {
-      log.warn(
-        `⚠️  Not copying the synthesized cloud assembly to ${shown}: another CDK process (pid ${writer || 'unknown'}) is ` +
-          `synthesizing there (${CDK_WRITER_LOCK}). The deploy's result is not affected; ${shown} holds that process's synth.`,
-      );
-      return;
-    }
-    const reader = readdirSync(outputDir)
-      .map((name) => CDK_READER_LOCK.exec(name)?.[1])
-      .find((pid) => pid !== undefined && isPidAlive(Number(pid)));
-    if (reader !== undefined) {
-      log.warn(
-        `⚠️  Not copying the synthesized cloud assembly to ${shown}: another CDK process (pid ${reader}) is reading the ` +
-          `assembly there. The deploy's result is not affected; ${shown} holds the earlier synth.`,
-      );
-      return;
-    }
-    // Copied over what is there, as a synth into `outputDir` writes: nothing in it is ever removed.
-    for (const entry of entries) {
-      cpSync(join(synthesizedDir, entry), join(outputDir, entry), { recursive: true });
-      if (!synthesized) log.progress(`   IAM report of the failed synth: ${join(shown, entry)}`);
-    }
-    if (synthesized) log.detail(`   Cloud assembly of this deploy (templates, IAM report): ${shown}`);
   } catch (error) {
     log.warn(
       `⚠️  Could not copy the synthesized cloud assembly to ${outputDir}, which may hold an earlier synth or part ` +

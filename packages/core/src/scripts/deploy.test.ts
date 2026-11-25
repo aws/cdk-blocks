@@ -590,19 +590,19 @@ describe('publishAssembly — the synthesized assembly in the CDK output directo
     assert.strictEqual(read(join(synthesized, 'manifest.json')), 'new manifest');
   });
 
-  it('copies no CDK lock file, and leaves those of the output directory', (t) => {
+  it('copies no CDK lock file, leaves a reader lock of a process that is gone, and takes over such a writer lock', (t) => {
     const { root, synthesized } = project(t, { ...ASSEMBLY, 'synth.lock': '4242', 'read.4242.1.lock': '4242' });
     const output = join(root, 'cdk.out');
-    // A reader of the output directory (a `cdk diff` of the last synth), and a writer that is gone.
     write(output, { 'read.999999999.1.lock': '999999999', 'synth.lock': '999999999' });
     publishAssembly(synthesized, output);
     assert.strictEqual(read(join(output, 'manifest.json')), 'new manifest');
     assert.ok(!existsSync(join(output, 'read.4242.1.lock')));
-    assert.strictEqual(read(join(output, 'synth.lock')), '999999999');
     assert.strictEqual(read(join(output, 'read.999999999.1.lock')), '999999999');
+    // The copy held the writer lock in place of the stale one, and released it.
+    assert.deepStrictEqual(readdirSync(output).filter((name) => name.startsWith('synth.lock')), []);
   });
 
-  it('copies nothing while another CDK process synthesizes into the output directory, and says so', (t) => {
+  it('copies nothing while another process holds the writer lock of the output directory, and says so', (t) => {
     const { root, synthesized, warnings } = project(t, ASSEMBLY);
     const output = join(root, 'cdk.out');
     for (const pid of [String(process.pid), 'not a pid']) {
@@ -610,9 +610,31 @@ describe('publishAssembly — the synthesized assembly in the CDK output directo
       publishAssembly(synthesized, output);
       assert.deepStrictEqual(readdirSync(output).sort(), ['manifest.json', 'synth.lock']);
       assert.strictEqual(read(join(output, 'manifest.json')), 'their manifest');
+      // Their lock is theirs still.
+      assert.strictEqual(read(join(output, 'synth.lock')), pid);
     }
     assert.strictEqual(warnings().length, 2);
-    assert.match(warnings()[0], /Not copying the synthesized cloud assembly .*another CDK process \(pid \d+\) is synthesizing there/);
+    assert.match(warnings()[0], /Not copying the synthesized cloud assembly .*another process \(pid \d+\) is writing a cloud assembly there/);
+  });
+
+  it('holds the writer lock while it copies, so a second deploy that ends meanwhile does not mix its files in', (t) => {
+    const first = project(t, ASSEMBLY);
+    const second = project(t, { 'manifest.json': 'second manifest', 'app.template.json': 'second template' });
+    const output = join(first.root, 'cdk.out');
+    let lockDuringCopy: string | undefined;
+    publishAssembly(first.synthesized, output, () => {
+      lockDuringCopy = read(join(output, 'synth.lock'));
+      // The second deploy ends while the first one copies.
+      publishAssembly(second.synthesized, output);
+    });
+    assert.strictEqual(lockDuringCopy, String(process.pid));
+    assert.strictEqual(read(join(output, 'manifest.json')), 'new manifest');
+    assert.strictEqual(read(join(output, 'app.template.json')), 'new template');
+    assert.strictEqual(second.warnings().length, 1);
+    // Released afterwards, and the second deploy's refusal did not remove the first one's lock.
+    assert.ok(!existsSync(join(output, 'synth.lock')));
+    publishAssembly(second.synthesized, output);
+    assert.strictEqual(read(join(output, 'manifest.json')), 'second manifest');
   });
 
   it('copies nothing while another CDK process reads the assembly of the output directory, and says so', (t) => {
