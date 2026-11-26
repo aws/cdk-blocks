@@ -454,3 +454,46 @@ describe('public names: data-testid contract and log redaction', () => {
 		}
 	});
 });
+
+describe("createApi() with a type: 'verified' provider", () => {
+	test('a verified session signs out through setAuthState: no sign-out route is mounted for it', async () => {
+		const h = makeAuth({ store: 'builtin', providers: { appleNative: { type: 'verified' } } });
+		const api = h.auth.createApi();
+		const b = new Browser();
+		assert.deepStrictEqual(names(await rpc(b, api, (a) => a.getAuthState())), []);
+		await b.request((ctx) => h.auth.signInVerified('appleNative', { subject: 'u-1' }, ctx));
+		const signedInState = await rpc(b, api, (a) => a.getAuthState());
+		assert.strictEqual(signedInState.user?.userId, 'verified:appleNative:u-1');
+		assert.deepStrictEqual(signedInState.actions, [{ name: 'signOut', label: 'Sign Out', fields: [] }]);
+		const out = await rpc(b, api, (a) => a.setAuthState({ action: 'signOut' }));
+		assert.strictEqual(out.state, 'signedOut');
+		assert.ok(!b.jar.has(h.cookieName));
+	});
+
+	test('a session from a redirect provider that was removed signs out through setAuthState when only verified providers remain', async () => {
+		const before = makeAuth({
+			store: 'builtin',
+			providers: { okta: { type: 'oidc', issuer: 'https://okta.example.com', clientId: 'c' } },
+		});
+		const okta = before.federation.get('okta');
+		assert.ok(okta);
+		okta.identity = {
+			kind: 'direct',
+			issuer: 'https://okta.example.com',
+			subject: 'u-1',
+			claims: { sub: 'u-1', iss: 'https://okta.example.com' },
+			groups: [],
+			expiresAt: Date.now() + 3600_000,
+		};
+		const b = new Browser();
+		await b.request((ctx) => before.auth.completeFederated(ctx, 'okta'));
+
+		const after = makeAuth(
+			{ store: 'builtin', providers: { appleNative: { type: 'verified' } } },
+			{ rootId: before.auth.parent.id },
+		);
+		const state = await rpc(b, after.auth.createApi(), (a) => a.getAuthState());
+		assert.strictEqual(state.user?.userId, 'https://okta.example.com:u-1');
+		assert.deepStrictEqual(state.actions, [{ name: 'signOut', label: 'Sign Out', fields: [] }]);
+	});
+});

@@ -76,6 +76,7 @@ Choose this first, once per block, with `store`. It decides which sign-in method
 | `type: 'saml'` | Yes | No |
 | `type: 'oidc'` | Yes, federated through Cognito; `clientSecret` required | Yes, verified by your backend; `clientSecret` optional, `groupsClaim` for roles |
 | `type: 'oauth2'` (`github()`, `customOauth2()`) and `type: 'stub'` (`stubIdp()`) | No | Yes |
+| `type: 'verified'` (an identity your own code verified; [recipe](#sign-in-an-identity-your-own-code-verified)) | No | Yes |
 | `users` | The full user-pool shape (`signInWith`, `attributes`, `groups`, …) | `users.groups` only |
 | `userPool` (wrap an existing pool), `admin`, `hostedUi`, `featurePlan` | Yes | No |
 | `allowBearerAuth` | `true` (Cognito access tokens) or `{ clientIds }` (other app clients of the pool) | `true` (the provider's access token) |
@@ -129,6 +130,7 @@ Two blocks that both have `providers` (say Google on the default store and Okta 
 | **Generic OIDC, verified by your backend** | `store: 'builtin'` with `type: 'oidc'` entries (plus `github()`, `customOauth2()`, `stubIdp()`) | Okta, Entra ID, Auth0, GitHub or any other OIDC / OAuth 2.0 provider, verified by your own backend | No Cognito charge: these users never touch Cognito | Yes: with `stubIdp()`, a real OIDC provider served by the dev server | No pool record: `requireRole()` reads groups from the provider's `groupsClaim`; `auth.admin` does not apply | The provider's | Yes: omit `clientSecret` |
 | **Generic OIDC, through Cognito** | `type: 'oidc'` entry on the default store | The same providers, when you need their users in your Cognito user pool | Separate federated meter: 50 free MAUs, then $0.015 per MAU on every feature plan | No: `501` locally, like social | Yes: the user becomes a user-pool user | Handled by the provider; Cognito never challenges a federated user | No: Cognito requires a client secret |
 | **SAML** | `type: 'saml'` entry (default store) | Enterprise IdPs that only speak SAML 2.0 | Same separate meter as OIDC through Cognito: 50 free MAUs, then $0.015 per MAU | No: `501` locally, like social | Yes: the user becomes a user-pool user | Handled by the provider; Cognito never challenges a federated user | Not applicable (SAML has no PKCE) |
+| **Verified by your own code** | `store: 'builtin'` with a `type: 'verified'` entry, then `auth.signInVerified()` | A sign-in the block has no engine for: a native Sign in with Apple identity token, a magic link, a wallet signature | No Cognito charge | Yes | No pool record: groups are the ones you pass; `auth.admin` does not apply | Yours to implement | Not applicable |
 
 MAU = monthly active user. Prices are from [Amazon Cognito pricing](https://aws.amazon.com/cognito/pricing/) as read on 4 October 2026; check it before you ship. The feature-plan rate depends on `featurePlan`:
 
@@ -339,6 +341,7 @@ export const authApi = auth.createApi();
 | Option | Default | What it does |
 |---|---|---|
 | `ttlSeconds` | 30 days | How long a session may sit unused before its row and cookie expire. |
+| | | A session opened with `signInVerified()` has nothing to refresh, so for it `ttlSeconds` is a fixed limit counted from sign-in. |
 | `refreshTokenValiditySeconds` | `ttlSeconds` | When the Cognito refresh token ends the session, counted from sign-in. Neither a refresh nor rotation extends it, so the user signs in again after this long however active they were. Whole minutes, 3600 to 315,360,000. |
 | `accessTokenValiditySeconds`, `idTokenValiditySeconds` | 1 hour | How long a token works before the block refreshes it. Whole minutes, 300 to 86,400, and not above the refresh token's lifetime. |
 | `refreshTokenRotation` | `true` | Cognito issues a new refresh token on each refresh and revokes the old one, after a 10-second grace period that lets a concurrent request retry. |
@@ -542,6 +545,84 @@ A `type: 'oidc'` entry of a `store: 'builtin'` block also works in `npm run dev`
 - Default store: the Cognito domain's URL ([step 2 of the social sign-in recipe](#social-sign-in-the-client-secret-and-the-callback-url)). The block registers its own callback and sign-out URLs on the Cognito app client.
 
 A `store: 'builtin'` user's `userId` is `` `${issuer}:${sub}` ``, and `requireRole()` reads their groups from the provider's `groupsClaim`.
+
+### Sign in an identity your own code verified
+
+Some sign-ins have no redirect for the block to run: a native app that gets an identity token from Sign in with Apple, a magic link, a wallet signature. Your backend checks the credential, and `signInVerified()` opens the session: the same cookie, session record, `validateUser`, `onSignIn` and audit records as any other sign-in.
+
+Declare a `type: 'verified'` provider on a `store: 'builtin'` block, and call `signInVerified()` from a method once the check has passed. This backend signs in a native Sign in with Apple user. It issues the nonce the app sends to Apple, and consumes it before it opens the session, so an identity token works once:
+
+```ts
+// cdk-blocks/index.ts
+import { randomBytes } from 'node:crypto';
+import { ApiError, ApiNamespace, Auth, AuthErrors, KVStore, KVStoreErrors, Scope, isBlocksError } from 'aws-cdk-blocks';
+import { createRemoteJWKSet, jwtVerify } from 'jose';
+
+const scope = new Scope('my-app');
+const auth = new Auth(scope, 'auth', {
+  store: 'builtin',
+  session: { ttlSeconds: 7 * 86_400 },
+  providers: { appleNative: { type: 'verified' } },
+});
+export const authApi = auth.createApi();
+
+const appleNonces = new KVStore(scope, 'apple-nonces');
+const appleKeys = createRemoteJWKSet(new URL('https://appleid.apple.com/auth/keys'));
+const notValid = () => new ApiError('The identity token is not valid', 401, { name: AuthErrors.NotAuthorized });
+
+export const api = new ApiNamespace(scope, 'api', (context) => ({
+  async startAppleSignIn() {
+    const nonce = randomBytes(32).toString('base64url');
+    await appleNonces.put(nonce, 'issued', { ttlSeconds: 300 });
+    return { nonce };
+  },
+
+  async signInWithApple({ identityToken }: { identityToken: string }) {
+    const { payload } = await jwtVerify(identityToken, appleKeys, {
+      issuer: 'https://appleid.apple.com',
+      audience: 'com.example.myapp',
+      requiredClaims: ['exp', 'sub', 'nonce'],
+    }).catch(() => {
+      throw notValid();
+    });
+    const nonce = payload.nonce;
+    if (!payload.sub || typeof nonce !== 'string' || (await appleNonces.get(nonce)) === null) throw notValid();
+    try {
+      await appleNonces.delete(nonce, { ifExists: true });
+    } catch (e) {
+      if (isBlocksError(e, KVStoreErrors.ConditionalCheckFailed)) throw notValid();
+      throw e;
+    }
+    const user = await auth.signInVerified(
+      'appleNative',
+      { subject: payload.sub, claims: { email: payload.email } },
+      context,
+    );
+    return { userId: user.userId };
+  },
+
+  async whoAmI() {
+    const user = await auth.requireAuth(context);
+    return { userId: user.userId, email: user.attributes.email ?? null };
+  },
+}));
+```
+
+What the example checks, and what your own scheme must check in its place:
+
+1. **The credential is genuine and current.** `jwtVerify` checks the signature against Apple's keys, the issuer and the audience (your app's bundle id). `requiredClaims` makes a token without `exp` fail: `jose` checks an expiry only when the token has one.
+2. **The credential was made for this sign-in.** The app calls `startAppleSignIn()` and passes the nonce to Apple, which puts it in the token. A token whose nonce this backend did not issue, or issued more than five minutes ago, is refused (`get` hides an expired item).
+3. **The credential is used once.** The conditional `delete` is atomic: of two requests with the same token, one deletes the nonce and the other is refused. It runs before `signInVerified()`.
+4. **The credential stays out of the logs.** The method takes the token as a named field, `{ identityToken }`, not as a bare argument: request logging masks values by field name (`token`, `secret`, `password`, …), and a positional string has no name to match.
+
+Then:
+
+- **The block verifies nothing here.** It trusts the identity you pass. A method that passes client input straight to `signInVerified()` lets anyone sign in as anyone.
+- **`userId` is `` `verified:${providerId}:${subject}` ``**, here `verified:appleNative:<sub>`. It can never equal another provider's `userId`, so the same person signing in through a redirect provider is a different user. The provider id must not contain `:` (the block refuses it at construction); the subject may.
+- **String-valued `claims` become the user's `attributes`**, and `groups` (optional) are narrowed to `users.groups`, so `requireRole()` works. `iss`, `sub` and `auth_time` in `claims` are ignored: the block sets them, and the user counts as signed in at the time of the call (`requireAuth(context, { fresh: true })`).
+- **The session lasts `session.ttlSeconds` from sign-in.** There is no token to refresh, so neither use nor `getAuthSession({ forceRefresh: true })` extends it; the user signs in again when it ends.
+- **Removing the provider ends its sessions.** A session of a `type: 'verified'` provider that is no longer in `providers` (removed or renamed) is signed out on its next request.
+- **No route or UI action.** A `type: 'verified'` provider mounts no sign-in route, has no `signIn:<id>` action, and `getSignInUrl()` does not accept its id. A block may mix it with redirect providers.
 
 ### End-to-end tests: emailed codes and two users at once
 
@@ -833,12 +914,13 @@ Use `state.retriable`, not `errorName` alone, to decide whether to keep the form
 
 - With `emailPassword: false`, or on a `store: 'builtin'` block, the email + password methods (`signUp`, `signIn`, `resetPassword`, …) are compile errors, and the error names the cause: `ERROR_emailPassword_is_disabled_on_this_Auth_instance`.
 - With no federated provider configured, `getSignInUrl` is a compile error (`ERROR_no_federated_provider_is_configured`), and its `provider` argument only accepts configured provider ids.
+- With no `type: 'verified'` provider configured, `signInVerified` is a compile error (`ERROR_no_verified_provider_is_configured`), and its `provider` argument only accepts the ids of `type: 'verified'` entries. Those ids are not accepted by `getSignInUrl`.
 - When the options set `mfa` to anything but `'optional'` / `'required'` (or omit it), the MFA methods (`setUpTotp`, `verifyTotpSetup`, `updateMfaPreference`, `getMfaPreference`) are compile errors (`ERROR_mfa_is_off_on_this_Auth_instance`); when they configure no `passkeys` options object, so are the passkey methods (`ERROR_passkeys_are_not_enabled_on_this_Auth_instance`). With `mfa.types` listed inline, `updateMfaPreference` rejects a factor it leaves out (`ERROR_SMS_is_not_in_mfa_types`, and the same for `TOTP` / `EMAIL`).
 - `auth.admin` is unusable unless the options include `admin: {}`: its methods are compile errors (`ERROR_admin_is_not_enabled__construct_Auth_with_admin_options`). With `admin: { actions: ['groups'] }`, the lifecycle methods are compile errors (`ERROR_admin_action_not_granted`), and vice versa.
 - `signIn`, `confirmSignIn` and `autoSignIn` return only the `nextStep` values the configuration can produce, so a `switch` on `nextStep.name` handles just those: the MFA steps need `mfa` on (and each factor's steps that factor in `mfa.types`), `CONFIRM_SIGN_IN_WITH_WEB_AUTHN` needs `passkeys`, and the first-factor steps need `users.authFlow: 'USER_AUTH'`. With `userPool: Auth.fromExisting(…)` every step stays, since the wrapped pool's own settings decide them. The full list is in `SignInNextStep`'s documentation.
 - The same gates apply to the input of `authApi.setAuthState(…)` and `submitAuthAction(authApi, …)` (`AuthActionInputOf<O>`), in the frontend too: with `emailPassword: false`, `authApi.setAuthState({ action: 'signIn', … })` and `submitAuthAction(authApi, { action: 'signIn', … })` are compile errors.
 - As actions, `setUpTotp` / `verifyTotpSetup` also need `'TOTP'` in `mfa.types`, and `confirmSignIn` takes only the challenges that answer the steps above (`mfaType` one of `mfa.types`).
-- A narrowly configured instance is still assignable to the plain `Auth` type, so helpers typed `(auth: Auth)` keep working. On the plain type, federation and `auth.admin` are closed (type such a helper with the instance's own type, `typeof auth`), while the email + password, MFA and passkey methods stay callable and are checked at runtime. That includes `new Auth(scope, 'auth')` with no options, which the compiler cannot tell apart from the plain type.
+- A narrowly configured instance is still assignable to the plain `Auth` type, so helpers typed `(auth: Auth)` keep working. On the plain type, federation, `signInVerified` and `auth.admin` are closed (type such a helper with the instance's own type, `typeof auth`), while the email + password, MFA and passkey methods stay callable and are checked at runtime. That includes `new Auth(scope, 'auth')` with no options, which the compiler cannot tell apart from the plain type.
 
 The gates are TypeScript-only. A native client (Swift, Kotlin, Dart) gets the types from the OpenRPC spec in their wide form, whatever the options:
 
@@ -887,7 +969,7 @@ The compiler checks the option combinations:
 
 - With `store: 'builtin'`, `emailPassword` (other than `false`), `mfa`, `passkeys`, `admin`, `userPool`, `users.signInWith` and the other user-pool options are compile errors whose type names the fix (`ERROR_needs_store_cognito<'emailPassword'>`). So is a `type: 'google'` or `type: 'saml'` entry.
 - On the default store, `stubIdp()`, `github()` and a `type: 'oidc'` entry without `clientSecret` are compile errors.
-- With `store` set, autocomplete for `type:` lists only that store's types. With `store` omitted it lists every type, and the compiler rejects `'oauth2'` / `'stub'`.
+- With `store` set, autocomplete for `type:` lists only that store's types. With `store` omitted it lists every type, and the compiler rejects `'oauth2'` / `'stub'` / `'verified'`.
 
 The constructor checks the same rules again (in `npm run dev`, at synth and in Lambda) with a readable message. It also rejects what the compiler cannot see:
 
@@ -1065,7 +1147,7 @@ new Auth(scope, 'auth', {
 
 - **Session and `baseUrl`.** The session is the block's usual `HttpOnly` cookie. No token is stored in JavaScript or put in a URL. The provider's `redirect_uri` is `<baseUrl><callbackPath>`, so `baseUrl` must be the origin your providers have registered (for providers federated through Cognito, the app origin the block registers on its managed-login client).
 - **Local development.** A frontend at `http://127.0.0.1:<port>` is always allowed, and the dev server's CORS already admits it. Open both the frontend and the dev server at `127.0.0.1` (not `localhost`), so they are the same site and the session cookie needs no `crossDomain`.
-- **Which providers.** Every `providers` entry, on either store, since each signs in by redirect: `type: 'oidc'`, `github()` / `customOauth2()` and `stubIdp()` (locally) on a `store: 'builtin'` block; social, SAML and `type: 'oidc'` on the default store. Email and password sign-in keeps using `authApi` (`getAuthState` / `setAuthState`), which works across origins with the same CORS and cookie settings.
+- **Which providers.** Every `providers` entry that signs in by redirect, on either store: `type: 'oidc'`, `github()` / `customOauth2()` and `stubIdp()` (locally) on a `store: 'builtin'` block; social, SAML and `type: 'oidc'` on the default store. A `type: 'verified'` entry has no redirect and is not one of them. Email and password sign-in keeps using `authApi` (`getAuthState` / `setAuthState`), which works across origins with the same CORS and cookie settings.
 - **Sign-out.** `signOut()` ends the block's session. When the provider keeps its own session (Cognito managed login, or an OIDC provider with an `end_session_endpoint`), it also returns `logoutUrl`; `endProviderSession: true` navigates there. The provider then returns the browser to `redirects.postSignOutPath` on the API's origin.
 - **Names.** The methods follow Amplify JS v6 (`signInWithRedirect`, `fetchAuthSession`, `getCurrentUser`, `signOut`); the user and the errors are the block's own (for example, `isBlocksError(e, 'InvalidRelayException')`). `user.userId` is the block's id; the Cognito `sub` that Amplify's `getCurrentUser().userId` returns is `user.userSub`.
 

@@ -78,6 +78,9 @@ export class Auth {
 	getSignInUrl(): never {
 		throw serverSide('getSignInUrl');
 	}
+	signInVerified(): never {
+		throw serverSide('signInVerified');
+	}
 	signUp(): never {
 		throw serverSide('signUp');
 	}

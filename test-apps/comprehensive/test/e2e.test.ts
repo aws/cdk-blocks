@@ -38,6 +38,7 @@ import { withAuthAnonymousTests } from './with-auth-anonymous.test.js';
 import { authTotpEnrolmentTests, type AuthTotpApis } from './auth-totp-enrolment.test.js';
 import { browserClientTests } from './browser-client.test.js';
 import { authValidateUserTests } from './auth-validate-user.test.js';
+import { authVerifiedTests } from './auth-verified.test.js';
 import { databaseBlockTests } from './database-block.test.js';
 import { cronJobTests } from './cron-job.test.js';
 import { fileBucketTests } from './file-bucket.test.js';
@@ -391,6 +392,8 @@ authAdminScanFilterTests();
 
 // Auth validateUser: one policy for every sign-up and sign-in
 authValidateUserTests(() => api);
+
+authVerifiedTests(() => api);
 
 // CronJob tests (separate file)
 cronJobTests(() => api);

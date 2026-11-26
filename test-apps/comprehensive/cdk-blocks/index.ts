@@ -501,6 +501,12 @@ new Auth(scope, 'auth-gated-idp', {
   validateUser: gatedPolicy,
 });
 
+const authVerified = new Auth(scope, 'auth-verified', {
+  store: 'builtin',
+  session: { ttlSeconds: 3600 },
+  providers: { ticket: { type: 'verified' } },
+});
+
 /**
  * The `sub` and `iss` claims of a federated session's ID token, read back
  * independently of `userId` so the e2e can check `userId === ${iss}:${sub}`.
@@ -1824,6 +1830,15 @@ export const api = new ApiNamespace(scope, 'api', (context) => ({
 
   async oidcGetProviders() {
     return Object.keys(oidcAuthProviders);
+  },
+
+  async verifiedCurrentUser() {
+    const user = await authVerified.getCurrentUser(context);
+    return user ? { userId: user.userId, email: user.attributes.email ?? null, provider: user.signInProvider } : null;
+  },
+
+  async verifiedSignOut() {
+    await authVerified.signOut(context);
   },
 
   // ------------------------------------------------------------------------
@@ -3468,12 +3483,27 @@ function secretMatches(provided: unknown, expected: string): boolean {
  * delivered codes — that must never be reachable on a normal build.
  */
 export const testSupport = testSupportSecret
-  ? new ApiNamespace(scope, 'testSupport', () => {
+  ? new ApiNamespace(scope, 'testSupport', (context) => {
       /** Reject a caller without this build's secret (403) before any work. */
       const requireSecret = async (secret: unknown): Promise<void> => {
         if (!secretMatches(secret, testSupportSecret)) throw new ApiError('Forbidden', 403);
       };
       return {
+        /**
+         * Open an `auth-verified` session for `subject`, standing in for the
+         * check an app runs before `signInVerified()`. The secret is that check:
+         * never expose a method that signs a caller in as the subject they name.
+         */
+        async verifiedSignIn(secret: string, subject: string) {
+          await requireSecret(secret);
+          const user = await authVerified.signInVerified(
+            'ticket',
+            { subject, claims: { email: `${subject}@verified.example` } },
+            context,
+          );
+          return { userId: user.userId, provider: user.signInProvider };
+        },
+
         /**
          * Create a confirmed user with a permanent password on `auth`, or on the
          * cookie instance named by `options.instance`. Cognito emails the sign-up

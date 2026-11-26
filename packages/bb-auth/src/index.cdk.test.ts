@@ -32,6 +32,7 @@ const RUNTIME_METHODS = [
 	'getAuthSession',
 	'signOut',
 	'getSignInUrl',
+	'signInVerified',
 	'signUp',
 	'confirmSignUp',
 	'resendSignUpCode',

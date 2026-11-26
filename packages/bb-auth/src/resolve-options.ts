@@ -94,6 +94,8 @@ export interface ResolvedAuthOptions
 	socialProviders?: SocialProviders;
 	oidcProviders?: Record<string, OidcProviderOptions>;
 	samlProviders?: Record<string, SamlProviderOptions>;
+	/** The `type: 'verified'` entries of a `'builtin'` block: ids only, served by `signInVerified()`. */
+	verifiedProviders?: readonly string[];
 }
 
 /** The options `providers` replaced. */
@@ -143,8 +145,9 @@ function untag<P extends { type: unknown; federateVia?: unknown }>(entry: P): Un
  * - `store` omitted or `'cognito'`: social entries go to `socialProviders`,
  *   SAML to `samlProviders`, OIDC to `oidcProviders` with
  *   `federateVia: 'cognito'`.
- * - `store: 'builtin'`: every entry goes to `oidcProviders` with
- *   `federateVia: 'direct'`, and `emailPassword` is `false`.
+ * - `store: 'builtin'`: every redirect entry goes to `oidcProviders` with
+ *   `federateVia: 'direct'`, a `type: 'verified'` entry's id to
+ *   `verifiedProviders`, and `emailPassword` is `false`.
  *
  * Provider keys pass through unchanged. A social entry must be keyed by its
  * `type` (`google: { type: 'google', … }`): Cognito registers social providers
@@ -219,12 +222,23 @@ export function resolveOptions(input: AuthOptions, blockId?: string): ResolvedAu
 			...rest
 		} = options;
 		const oidcProviders: Record<string, OidcProviderOptions> = {};
+		const verifiedProviders: string[] = [];
 		for (const [id, entry] of Object.entries(providers ?? {})) {
 			if (!entry) continue;
+			if (entry.type === 'verified') {
+				if (id.includes(':')) {
+					throw new Error(
+						`${auth} ${join('providers', id)} has \`type: 'verified'\`, so its key must not contain ':'. ` +
+							"Its users' ids are `verified:<key>:<subject>`, and a ':' in the key would let two providers produce the same id.",
+					);
+				}
+				verifiedProviders.push(id);
+				continue;
+			}
 			if (entry.type !== 'oidc' && entry.type !== 'oauth2' && entry.type !== 'stub') {
 				const type: unknown = Reflect.get(entry, 'type');
 				const accepted =
-					"A `store: 'builtin'` block accepts `type: 'oidc'`, `'oauth2'` (`github()`, `customOauth2()`) and `'stub'` (`stubIdp()`).";
+					"A `store: 'builtin'` block accepts `type: 'oidc'`, `'oauth2'` (`github()`, `customOauth2()`), `'stub'` (`stubIdp()`) and `'verified'`.";
 				throw new Error(
 					COGNITO_TYPES.includes(type)
 						? `${auth} ${join('providers', id)} has ${describeType(type)}, which needs \`store: 'cognito'\` (the default). ${accepted}`
@@ -234,7 +248,9 @@ export function resolveOptions(input: AuthOptions, blockId?: string): ResolvedAu
 			}
 			oidcProviders[id] = { ...untag(entry), federateVia: 'direct' };
 		}
-		if (Object.keys(oidcProviders).length === 0) throw new Error(builtinNeedsAProvider(blockId));
+		if (Object.keys(oidcProviders).length === 0 && verifiedProviders.length === 0) {
+			throw new Error(builtinNeedsAProvider(blockId));
+		}
 		return {
 			...rest,
 			...(users ? { users: { groups: users.groups } } : {}),
@@ -242,7 +258,8 @@ export function resolveOptions(input: AuthOptions, blockId?: string): ResolvedAu
 			...(typeof allowBearerAuth === 'boolean' ? { allowBearerAuth } : {}),
 			store,
 			emailPassword: false,
-			oidcProviders,
+			...(Object.keys(oidcProviders).length > 0 ? { oidcProviders } : {}),
+			...(verifiedProviders.length > 0 ? { verifiedProviders } : {}),
 		};
 	}
 
@@ -283,10 +300,13 @@ export function resolveOptions(input: AuthOptions, blockId?: string): ResolvedAu
 				const accepted =
 					"The default store accepts `type: 'google'`, `'facebook'`, `'amazon'`, `'apple'`, `'saml'` and `'oidc'`.";
 				throw new Error(
-					type === 'oauth2' || type === 'stub'
-						? `${auth} ${join('providers', id)} has ${describeType(type)}, which a Cognito user pool cannot federate. ` +
+					type === 'verified'
+						? `${auth} ${join('providers', id)} has ${describeType(type)}, which needs \`store: 'builtin'\`: ` +
+								`a session for an identity your own code verified has no user pool record. ${accepted}`
+						: type === 'oauth2' || type === 'stub'
+							? `${auth} ${join('providers', id)} has ${describeType(type)}, which a Cognito user pool cannot federate. ` +
 								`\`type: 'oauth2'\` (\`github()\`, \`customOauth2()\`) and \`'stub'\` (\`stubIdp()\`) need \`store: 'builtin'\`. ${accepted}`
-						: `${auth} ${join('providers', id)} has ${describeType(type)}, which is not a provider type. ${accepted} ` +
+							: `${auth} ${join('providers', id)} has ${describeType(type)}, which is not a provider type. ${accepted} ` +
 								"For GitHub or another OAuth 2.0 provider, use `github()` / `customOauth2()` in a `store: 'builtin'` block.",
 				);
 			}

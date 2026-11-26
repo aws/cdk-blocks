@@ -61,6 +61,10 @@ const probes = {
 		const auth = new Auth(scope, 'nofed', { users: { groups: ['admins'] } });
 		void auth.getSignInUrl(context, 'okta' as never);
 	`,
+	verifiedOff: `
+		const auth = new Auth(scope, 'noverified', { store: 'builtin', providers: { okta: { type: 'oidc', ...okta } } });
+		void auth.signInVerified('okta' as never, { subject: 'u-1' }, context);
+	`,
 	mfaOff: `
 		const auth = new Auth(scope, 'nomfa', { mfa: 'off' });
 		void auth.setUpTotp(context);
@@ -202,6 +206,7 @@ describe('mode-gate diagnostics', () => {
 		['adminOff', 'ERROR_admin_is_not_enabled__construct_Auth_with_admin_options'],
 		['adminOffNoArguments', 'ERROR_admin_is_not_enabled__construct_Auth_with_admin_options'],
 		['mfaFactorNotInTypes', 'ERROR_SMS_is_not_in_mfa_types'],
+		['verifiedOff', 'ERROR_no_verified_provider_is_configured'],
 	] as const) {
 		test(`${probe}: the diagnostic names the gate error`, () => {
 			const diagnostics = diagnose(probe);

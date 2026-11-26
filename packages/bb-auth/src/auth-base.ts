@@ -166,6 +166,9 @@ import type {
 	StartPasskeyRegistrationResult,
 	UpdateAttributeOutcome,
 	UserCandidate,
+	VerifiedGate,
+	VerifiedIdentity,
+	VerifiedProviderIdOf,
 } from './types.js';
 import { BB_NAME, BB_VERSION } from './version.js';
 
@@ -281,6 +284,41 @@ const STANDARD_ATTRIBUTES = new Set([
  * `extractUserAttributes`).
  */
 const OIDC_PROTOCOL_CLAIMS = new Set(['nonce', 'at_hash', 'c_hash', 's_hash', 'azp', 'sid', 'acr', 'amr']);
+
+/** The issuer of a `type: 'verified'` provider's sessions is this plus the provider id, so their `userId` is `verified:<id>:<subject>`. */
+const VERIFIED_ISSUER_PREFIX = 'verified:';
+
+/** An OIDC `sub` is at most 255 characters; the same bound keeps a session row small. */
+const MAX_VERIFIED_SUBJECT_LENGTH = 255;
+
+/**
+ * The identity given to `signInVerified()`, checked as an untyped caller could
+ * pass it (the backend module is plain JavaScript once compiled).
+ *
+ * @throws {ApiError} 400 `InvalidParameterException`.
+ */
+function checkedVerifiedIdentity(identity: unknown): {
+	subject: string;
+	claims: Record<string, unknown>;
+	groups: string[];
+} {
+	const invalid = (what: string) =>
+		new ApiError(`signInVerified: ${what}.`, 400, { name: AuthErrors.InvalidParameter });
+	if (typeof identity !== 'object' || identity === null) throw invalid('the identity must be an object');
+	const subject: unknown = Reflect.get(identity, 'subject');
+	if (typeof subject !== 'string' || subject.length === 0 || subject.length > MAX_VERIFIED_SUBJECT_LENGTH) {
+		throw invalid(`\`subject\` must be a string of 1 to ${MAX_VERIFIED_SUBJECT_LENGTH} characters`);
+	}
+	const claims: unknown = Reflect.get(identity, 'claims') ?? {};
+	if (typeof claims !== 'object' || claims === null || Array.isArray(claims)) {
+		throw invalid('`claims` must be an object');
+	}
+	const groups: unknown = Reflect.get(identity, 'groups') ?? [];
+	if (!Array.isArray(groups) || !groups.every((group): group is string => typeof group === 'string')) {
+		throw invalid('`groups` must be an array of strings');
+	}
+	return { subject, claims: { ...claims }, groups: [...groups] };
+}
 
 /** A session resolved from the request cookie. */
 interface ResolvedSession {
@@ -406,6 +444,8 @@ export class AuthBase<const O extends AuthOptions = AuthOptions> extends Scope i
 	/** Verifies pool bearer access tokens; only with `allowBearerAuth` and a user pool. */
 	private readonly poolBearer?: PoolBearerVerifier;
 	private readonly providers: ReadonlyMap<string, { provider: ResolvedProvider; engine: FederationEngine }>;
+	/** The ids of the `type: 'verified'` providers, which `signInVerified()` serves; they have no engine. */
+	private readonly verifiedProviders: ReadonlySet<string>;
 	private readonly declaredGroups?: ReadonlySet<string>;
 	/** Per-request dedupe of live group reads (see `memoizePerContext`). */
 	private readonly liveGroupsMemo = new WeakMap<BlocksContext, Map<string, Promise<string[]>>>();
@@ -479,6 +519,7 @@ export class AuthBase<const O extends AuthOptions = AuthOptions> extends Scope i
 			providers.set(provider.id, { provider, engine: layer.federation(host, provider) });
 		}
 		this.providers = providers;
+		this.verifiedProviders = new Set(config.verifiedProviders);
 		// The federation HTTP routes: only when a provider is configured,
 		// and only by a layer that serves them (the runtime entries do).
 		if (providers.size > 0) layer.routes?.(this.federationRouteHost());
@@ -928,6 +969,58 @@ export class AuthBase<const O extends AuthOptions = AuthOptions> extends Scope i
 		} catch (e) {
 			throw this.mapError(e);
 		}
+	}
+
+	/**
+	 * Open a session for an identity **your own code verified**, on a
+	 * `type: 'verified'` provider of a `store: 'builtin'` block. The session
+	 * cookie, the session record, `validateUser`, `onSignIn` and the audit
+	 * records are those of any other sign-in.
+	 *
+	 * ⚠️ The block does not verify anything here. Call this only from backend
+	 * code, after you checked the credential yourself (signature, issuer,
+	 * audience, expiry, and a single-use nonce where the scheme has one). A
+	 * method that passes client input straight through lets anyone sign in as
+	 * anyone.
+	 *
+	 * The session lasts `session.ttlSeconds` from this call, a fixed limit:
+	 * nothing extends it, and the user signs in again when it ends.
+	 *
+	 * @param provider - The id of a `type: 'verified'` entry in `providers`.
+	 * @param identity - Who you verified; see {@link VerifiedIdentity}.
+	 * @param context - The request context; the session cookie is set on its response.
+	 * @returns The signed-in user; `userId` is `` `verified:${provider}:${identity.subject}` ``.
+	 * @throws {ApiError} 400 `ProviderNotConfiguredException` when `provider` is not a `type: 'verified'` entry.
+	 * @throws {ApiError} 400 `InvalidParameterException` for an empty `subject`, or `claims` / `groups` of the wrong shape.
+	 * @throws Whatever `validateUser` or `onSignIn` throws; no session is left behind.
+	 */
+	async signInVerified(
+		provider: VerifiedProviderIdOf<O>,
+		identity: VerifiedIdentity,
+		context: BlocksContext,
+		...ERROR_no_verified_provider_is_configured: VerifiedGate<O>
+	): Promise<AuthenticatedUser<O>> {
+		void ERROR_no_verified_provider_is_configured;
+		if (!this.verifiedProviders.has(provider)) {
+			throw new ApiError(
+				`Sign-in provider '${provider}' is not a \`type: 'verified'\` provider of this Auth instance.`,
+				400,
+				{ name: AuthErrors.ProviderNotConfigured },
+			);
+		}
+		const { subject, claims: given, groups } = checkedVerifiedIdentity(identity);
+		const { auth_time: _authTime, ...claims } = given;
+		const issuer = `${VERIFIED_ISSUER_PREFIX}${provider}`;
+		const idpClaims = { ...claims, iss: issuer, sub: subject };
+		const record = this.recordFromFederated(provider, {
+			kind: 'direct',
+			issuer,
+			subject,
+			claims: idpClaims,
+			groups,
+			expiresAt: Date.now() + this.sessionTtlSeconds * 1000,
+		});
+		return this.issueSession(context, record, idpClaims);
 	}
 
 	// ── Email + password ────────────────────────────────────────────────────
@@ -2124,7 +2217,13 @@ export class AuthBase<const O extends AuthOptions = AuthOptions> extends Scope i
 			return null;
 		}
 		const identity = identityOf(record);
-		if (!forceRefresh && identity.expiresAt > Date.now()) return { sessionId, record, identity };
+		const verifiedRow = 'kind' in record && record.issuer.startsWith(VERIFIED_ISSUER_PREFIX);
+		if (verifiedRow && !this.verifiedProviders.has(record.provider)) {
+			await this.sessions.delete(sessionId);
+			clearSessionCookie(context, this.fullId, this.crossDomain);
+			return null;
+		}
+		if (identity.expiresAt > Date.now() && (!forceRefresh || verifiedRow)) return { sessionId, record, identity };
 
 		let refreshed: SessionRecord | null;
 		try {
@@ -2656,9 +2755,13 @@ export class AuthBase<const O extends AuthOptions = AuthOptions> extends Scope i
 
 	private signedInState(user: AuthenticatedUser<O>): AuthState<AuthStateUser<O>> {
 		const federated = user.signInProvider !== 'password';
+		const redirectSignOut =
+			federated && this.providers.size > 0 && !this.verifiedProviders.has(user.signInProvider);
 		return signedIn(this.stateUser(user), {
 			passkeys: !federated && this.config.passkeys !== undefined && this.config.passkeys !== false,
-			...(federated ? { federatedSignOutUrl: this.config.redirects?.signOutPath ?? DEFAULT_SIGN_OUT_PATH } : {}),
+			...(redirectSignOut
+				? { federatedSignOutUrl: this.config.redirects?.signOutPath ?? DEFAULT_SIGN_OUT_PATH }
+				: {}),
 		});
 	}
 

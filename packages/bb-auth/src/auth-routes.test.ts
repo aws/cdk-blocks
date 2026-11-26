@@ -57,6 +57,10 @@ const CASES: Array<{ name: string; options: AuthOptions }> = [
 		options: { store: 'builtin', providers: { google: stubIdp(), github2: stubIdp() } },
 	},
 	{
+		name: 'builtin: a stub next to a verified provider, which has no route',
+		options: { store: 'builtin', providers: { corp: stubIdp(), appleNative: { type: 'verified' } } },
+	},
+	{
 		name: 'builtin: unusual but valid paths (double slash, trailing slash)',
 		options: {
 			store: 'builtin',

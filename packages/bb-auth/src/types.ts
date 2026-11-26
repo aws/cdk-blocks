@@ -38,7 +38,9 @@ import type { ApiNamespaceOptions, BlocksContext, ScopeParent } from '@aws-cdk-b
  *   (`github()`, `customOauth2()`) and the local stub IdP (`stubIdp()`) — and
  *   keeps only the session. No Cognito charge, works offline in `npm run dev`,
  *   and supports public (PKCE-only) clients. A user's `userId` is
- *   `` `${issuer}:${sub}` ``.
+ *   `` `${issuer}:${sub}` ``. It also accepts `type: 'verified'`: an identity
+ *   your own backend code verified, signed in with `signInVerified()`
+ *   ({@link VerifiedProvider}).
  *
  * Every sign-in provider goes in one `providers` map, keyed by the provider id
  * you use in `getSignInUrl(context, '<id>')` and in the `signIn:<id>` UI
@@ -544,6 +546,8 @@ export interface BuiltinAuthOptions extends AuthCommonOptions {
 	 *   `customOauth2()` ({@link OAuth2Provider}).
 	 * - `'stub'` — the local stub IdP, built with `stubIdp()`
 	 *   ({@link StubProvider}).
+	 * - `'verified'` — an identity your own backend code verified, signed in
+	 *   with `signInVerified()` ({@link VerifiedProvider}).
 	 *
 	 * An `undefined` entry is skipped, so a map picked per environment
 	 * (`isProd ? { okta: … } : { local: … }`) keeps both ids narrow.
@@ -887,7 +891,59 @@ export interface AppleProvider extends AppleCredentials, ProviderCommon {
 export type CognitoProvider = SocialProvider | SamlProvider | CognitoOidcProvider;
 
 /** A `providers` entry of a `'builtin'` block ({@link BuiltinAuthOptions.providers}). */
-export type BuiltinProvider = DirectOidcProvider | OAuth2Provider | StubProvider;
+export type BuiltinProvider = DirectOidcProvider | OAuth2Provider | StubProvider | VerifiedProvider;
+
+/**
+ * A provider whose users **your own backend code verifies**: a
+ * `type: 'verified'` entry of a `store: 'builtin'` block
+ * ({@link BuiltinAuthOptions.providers}). Use it for a sign-in this block has
+ * no engine for — a native Sign in with Apple identity token, a magic link, a
+ * wallet signature — and open the session with `auth.signInVerified()`.
+ *
+ * It has no redirect flow: no sign-in route is mounted for it, it has no
+ * `signIn:<id>` action, and `getSignInUrl()` does not accept its id. Its users'
+ * `userId` is `` `verified:${providerId}:${subject}` ``, so they can never be
+ * mistaken for another provider's users. For that to hold, the provider id
+ * (the key in `providers`) must not contain `:`; the subject may.
+ *
+ * @example
+ * ```ts
+ * const auth = new Auth(scope, 'auth', {
+ *   store: 'builtin',
+ *   providers: { appleNative: { type: 'verified' } },
+ * });
+ * ```
+ */
+export interface VerifiedProvider {
+	/** An identity verified by your own backend code. */
+	type: 'verified';
+}
+
+/**
+ * The identity passed to `auth.signInVerified()`: who your backend code
+ * verified. The block trusts every field, so build it only from values your
+ * code checked — never from request input as it arrived.
+ */
+export interface VerifiedIdentity {
+	/**
+	 * The user's stable, unique id at the identity source (an ID token's `sub`,
+	 * a wallet address). The session's `userId` is
+	 * `` `verified:${providerId}:${subject}` ``.
+	 */
+	subject: string;
+	/**
+	 * What is known about the user. `validateUser` receives the whole object.
+	 * Only its string-valued claims are kept with the session: they become
+	 * the user's `attributes` (`email`, `name`, …) and, with `iss` and `sub`,
+	 * `AuthenticatedUser.claims`. `iss`, `sub` and `auth_time` are set by the
+	 * block; values given here for them are ignored. The session counts as
+	 * signed in at the time of the call, which is what
+	 * `requireAuth(context, { fresh: true })` measures.
+	 */
+	claims?: Record<string, unknown>;
+	/** The user's groups, narrowed to the declared `users.groups` as for any provider. */
+	groups?: readonly string[];
+}
 
 /** Client credentials for an OAuth 2.0 / OIDC provider. */
 export interface OAuthCredentials {
@@ -1453,6 +1509,10 @@ export interface SessionOptions {
 	 * its Cognito refresh token does ({@link SessionOptions.refreshTokenValiditySeconds}),
 	 * which is counted from sign-in.
 	 *
+	 * A session opened with `signInVerified()` has nothing to refresh, so for it
+	 * this is a fixed limit counted from sign-in: neither use nor
+	 * `getAuthSession({ forceRefresh: true })` extends it.
+	 *
 	 * @default 2_592_000 (30 days; it was 400 days before)
 	 */
 	ttlSeconds?: number;
@@ -1651,7 +1711,10 @@ export interface BearerAuthOptions {
 // instance. That covariance is load-bearing — `types-test.ts` pins it.
 
 /**
- * The union of configured federated provider ids — the keys of `providers`.
+ * The union of configured federated provider ids — the keys of `providers`,
+ * without the `type: 'verified'` entries ({@link VerifiedProviderIdOf}), which
+ * have no redirect flow. A key whose entry is `undefined` stays, as it did
+ * before `type: 'verified'` existed.
  *
  * `never` when `O` configures no provider; `string` for the wide
  * `AuthOptions` (any id may be configured).
@@ -1659,7 +1722,31 @@ export interface BearerAuthOptions {
 export type ProviderIdOf<O extends AuthOptions> = O extends { providers?: infer P }
 	? [P] extends [undefined]
 		? never
-		: keyof NonNullable<P> & string
+		: {
+				[K in keyof NonNullable<P> & string]: [NonNullable<NonNullable<P>[K]>] extends [never]
+					? K
+					: [Exclude<NonNullable<NonNullable<P>[K]>, VerifiedProvider>] extends [never]
+						? never
+						: K;
+			}[keyof NonNullable<P> & string]
+	: never;
+
+/**
+ * The union of configured `type: 'verified'` provider ids — the ids
+ * `signInVerified()` accepts.
+ *
+ * `never` when `O` configures none; `string` for the wide `AuthOptions`.
+ */
+export type VerifiedProviderIdOf<O extends AuthOptions> = O extends { providers?: infer P }
+	? [P] extends [undefined]
+		? never
+		: {
+				[K in keyof NonNullable<P> & string]: [
+					Extract<NonNullable<NonNullable<P>[K]>, VerifiedProvider>,
+				] extends [never]
+					? never
+					: K;
+			}[keyof NonNullable<P> & string]
 	: never;
 
 /**
@@ -1810,6 +1897,26 @@ export type HasFederatedProvider<O extends AuthOptions> = [ProviderIdOf<O>] exte
 export type FederationGate<O extends AuthOptions, T extends unknown[] = []> = [HasFederatedProvider<O>] extends [true]
 	? T
 	: [ERROR_no_federated_provider_is_configured: never];
+
+/**
+ * Whether options `O` configure at least one `type: 'verified'` provider.
+ * `false` for the wide `AuthOptions`, as {@link HasFederatedProvider}.
+ */
+export type HasVerifiedProvider<O extends AuthOptions> = [VerifiedProviderIdOf<O>] extends [never]
+	? false
+	: AuthOptions extends O
+		? false
+		: true;
+
+/**
+ * Compile-time gate for `signInVerified()`, used as its trailing rest
+ * parameter. Resolves to `T` when `O` configures at least one
+ * `type: 'verified'` provider, and to
+ * `[ERROR_no_verified_provider_is_configured: never]` otherwise.
+ */
+export type VerifiedGate<O extends AuthOptions, T extends unknown[] = []> = [HasVerifiedProvider<O>] extends [true]
+	? T
+	: [ERROR_no_verified_provider_is_configured: never];
 
 /** The {@link MfaMode} that options `O` select (`'off'` when `mfa` is omitted). A union when not a literal. */
 export type MfaModeOf<O extends AuthOptions> = O extends { mfa?: infer M } ? MfaModeOfOption<M> : 'off';
@@ -2108,8 +2215,10 @@ export interface AuthStateUser<O extends AuthOptions = AuthOptions> extends Omit
 	groups: GroupOf<O>[];
 	/** The user's attributes, keyed by the declared ones (see {@link AuthenticatedUser.attributes}). */
 	attributes: Partial<Record<ReadAttrOf<O>, string>>;
-	/** `'password'` for email + password sign-in, otherwise the federated provider id (only the latter on a `store: 'builtin'` block). */
-	signInProvider: O extends { store: 'builtin' } ? ProviderIdOf<O> : 'password' | ProviderIdOf<O>;
+	/** `'password'` for email + password sign-in, otherwise the provider id (only the latter on a `store: 'builtin'` block). */
+	signInProvider: O extends { store: 'builtin' }
+		? ProviderIdOf<O> | VerifiedProviderIdOf<O>
+		: 'password' | ProviderIdOf<O>;
 	/** The name the sign-in UI shows ("Signed in as …"): see `AuthUser.displayName`. */
 	displayName: string;
 }
@@ -2224,6 +2333,7 @@ export interface OidcClientApiOf<O extends AuthOptions> {
  * |---|---|---|
  * | a `'cognito'` block: email + password, social, SAML or OIDC | the username — on a pool whose `users.signInWith` omits `'username'`, the one Cognito generates, equal to `userSub` | the Cognito `sub` (a UUID) |
  * | a `store: 'builtin'` block: OIDC, OAuth 2.0 or the stub IdP (no pool record) | `` `${issuer}:${sub}` `` | `` `${issuer}:${sub}` `` |
+ * | a `store: 'builtin'` block: `signInVerified()` on a `type: 'verified'` provider | `` `verified:${providerId}:${subject}` `` | the same |
  *
  * Key your own data on `userSub`: it is stable for the user's lifetime.
  *
@@ -2264,7 +2374,9 @@ export interface AuthenticatedUser<O extends AuthOptions = AuthOptions> extends 
 	 * A `store: 'builtin'` block has no password users, so its type is the
 	 * provider ids alone.
 	 */
-	signInProvider: O extends { store: 'builtin' } ? ProviderIdOf<O> : 'password' | ProviderIdOf<O>;
+	signInProvider: O extends { store: 'builtin' }
+		? ProviderIdOf<O> | VerifiedProviderIdOf<O>
+		: 'password' | ProviderIdOf<O>;
 	/**
 	 * The provider's verified identity claims, for a user who signed in
 	 * through a `providers` entry of a `store: 'builtin'` block — what `AuthOIDC`'s user carried as `claims`. `sub` and `iss`
@@ -3440,6 +3552,48 @@ export interface AuthShape<O extends AuthOptions = AuthOptions> extends BlocksAu
 		provider: ProviderIdOf<O>,
 		...ERROR_no_federated_provider_is_configured: FederationGate<O, [options?: SignInUrlOptions]>
 	): Promise<string>;
+
+	/**
+	 * Open a session for an identity **your own code verified**, on a
+	 * `type: 'verified'` provider of a `store: 'builtin'` block. The session
+	 * cookie, the session record, `validateUser`, `onSignIn` and the audit
+	 * records are those of any other sign-in.
+	 *
+	 * ⚠️ The block does not verify anything here. Call this only from backend
+	 * code, after you checked the credential yourself (signature, issuer,
+	 * audience, expiry, and a single-use nonce where the scheme has one). A
+	 * method that passes client input straight through lets anyone sign in as
+	 * anyone.
+	 *
+	 * The session lasts `session.ttlSeconds` from this call, a fixed limit:
+	 * nothing extends it, and the user signs in again when it ends.
+	 *
+	 * @param provider - The id of a `type: 'verified'` entry in `providers`.
+	 * @param identity - Who you verified; see {@link VerifiedIdentity}.
+	 * @param context - The request context; the session cookie is set on its response.
+	 * @returns The signed-in user; `userId` is `` `verified:${provider}:${identity.subject}` ``.
+	 * @throws {ApiError} 400 `ProviderNotConfiguredException` when `provider` is not a `type: 'verified'` entry.
+	 * @throws {ApiError} 400 `InvalidParameterException` for an empty `subject`, or `claims` / `groups` of the wrong shape.
+	 * @throws Whatever `validateUser` or `onSignIn` throws; no session is left behind.
+	 *
+	 * @example
+	 * ```ts
+	 * export const api = new ApiNamespace(scope, 'api', (context) => ({
+	 *   // A named field, so request logging masks the token (it masks by field name).
+	 *   async signInWithApple({ identityToken }: { identityToken: string }) {
+	 *     const claims = await verifyAppleIdentityToken(identityToken); // your code, with a single-use nonce
+	 *     const user = await auth.signInVerified('appleNative', { subject: claims.sub, claims: { email: claims.email } }, context);
+	 *     return { userId: user.userId };
+	 *   },
+	 * }));
+	 * ```
+	 */
+	signInVerified(
+		provider: VerifiedProviderIdOf<O>,
+		identity: VerifiedIdentity,
+		context: BlocksContext,
+		...ERROR_no_verified_provider_is_configured: VerifiedGate<O>
+	): Promise<AuthenticatedUser<O>>;
 
 	// ── Email + password ────────────────────────────────────────────────────
 
