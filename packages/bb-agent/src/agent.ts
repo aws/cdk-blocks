@@ -1134,7 +1134,7 @@ export class AgentBase<TContext = DefaultToolContext> extends Scope {
 		// back; an untyped RPC caller's string was coerced. Checked before the ownership
 		// lookup so the error doesn't depend on whose conversation it is.
 		if (options.limit !== undefined && !Number.isInteger(options.limit)) {
-			throw blocksAgentError(AgentErrors.InvalidUsage, 'getConversation() limit must be an integer. Omit limit to return all messages.');
+			throw blocksAgentError(AgentErrors.InvalidUsage, `getConversation() limit must be an integer, got ${String(options.limit)}. Omit limit to return all messages.`);
 		}
 		if (!(await this.ownsConversation(id, userId))) return [];
 		// A limit of 0 means "zero messages", and a negative limit is nonsensical

@@ -1731,6 +1731,14 @@ describe('CannedProvider', () => {
 			(err: any) => err.name === AgentErrors.InvalidUsage,
 			'a string limit should throw InvalidUsage',
 		);
+		// JSON has no `undefined`, so a caller may send `null` meaning "no limit". It used to
+		// return [] (null <= 0); it now throws rather than guessing. Omit limit instead.
+		const nullLimit: { userId: string; limit?: number } = JSON.parse('{"userId":"test-user","limit":null}');
+		await assert.rejects(
+			() => agent.getConversation(convId, nullLimit),
+			(err: any) => err.name === AgentErrors.InvalidUsage && /got null/.test(err.message),
+			'a null limit should throw InvalidUsage',
+		);
 		// The same check applies whether or not the caller owns the conversation.
 		await assert.rejects(
 			() => agent.getConversation(convId, { userId: 'someone-else', limit: 1.5 }),
