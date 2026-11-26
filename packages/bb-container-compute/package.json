@@ -1,8 +1,8 @@
 {
   "name": "@aws-cdk-blocks/bb-container-compute",
-  "version": "1.0.0-rc.0",
+  "version": "1.0.0",
   "keywords": [
-    "aws-blocks",
+    "cdk-blocks",
     "compute",
     "container",
     "fargate",
@@ -49,7 +49,7 @@
     "test": "node --conditions=cdk --test dist/index.cdk.test.js"
   },
   "dependencies": {
-    "@aws-cdk-blocks/core": "^1.0.0-rc.0",
+    "@aws-cdk-blocks/core": "^1.0.0",
     "esbuild": "^0.28.2"
   },
   "devDependencies": {

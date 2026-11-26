@@ -79,6 +79,27 @@ const CJS_BANNER =
 	'if(f.existsSync(pk)){var m=JSON.parse(f.readFileSync(pk,"utf8")).main||"index.js";return p.resolve(dp,m)}' +
 	'return p.resolve(dp,"index.js")}throw e}};})();';
 
+/** Escapes for the characters `JSON.stringify` leaves raw but that can end a script or a line. */
+const UNSAFE_JS_CHARS: Record<string, string> = {
+	'<': '\\u003C',
+	'>': '\\u003E',
+	'/': '\\u002F',
+	'\u2028': '\\u2028',
+	'\u2029': '\\u2029',
+};
+
+/**
+ * Quote `value` as a JavaScript string literal for generated source.
+ *
+ * `JSON.stringify` handles quotes, backslashes and control characters; this also escapes
+ * `<`, `>`, `/` and the U+2028/U+2029 line separators, so the literal cannot close a
+ * surrounding `<script>` or split a line. The escapes decode to the same string, so a path
+ * quoted this way still resolves to the same file.
+ */
+export function toJsStringLiteral(value: string): string {
+	return JSON.stringify(value).replace(/[<>/\u2028\u2029]/g, (ch) => UNSAFE_JS_CHARS[ch] ?? ch);
+}
+
 /** Copy each dynamic-require package into `<outDir>/_deps/<pkg>`, resolving via bb-agent's
  * module graph so hoisted (monorepo) and nested installs both work. */
 function copyDynamicDeps(outDir: string): void {
@@ -110,21 +131,15 @@ function copyDynamicDeps(outDir: string): void {
  *   matches the official @aws/agentcore CLI's convention and passes.
  */
 export function bundleAgentCoreAsset(backendModulePath: string, outDir: string): string {
-	// Generated entry: load config, import the backend (constructs + registers the Agent),
-	// then serve. `resolveDir` = bb-agent package root so `@aws-cdk-blocks/*` and this package's
-	// own `serve` resolve via node_modules; the backend is imported by absolute PATH (esbuild
-	// resolves paths, not file:// URLs) so it's bundled into the SAME graph and its
-	// `@aws-cdk-blocks/*` deps dedupe to one instance.
-	// Wrapped in an async IIFE (not top-level await) because the bundle is emitted as CJS,
-	// which does not support top-level await.
+	// Generated entry: start the harness; `serveBackend` loads the config and then imports the
+	// backend (constructs + registers the Agent), and repeats that on the next invocation while
+	// the config is not readable. `resolveDir` = bb-agent package root so `@aws-cdk-blocks/*` and
+	// this package's own `serveBackend` resolve via node_modules; the backend is imported by
+	// absolute PATH (esbuild resolves paths, not file:// URLs) so it's bundled into the SAME
+	// graph and its `@aws-cdk-blocks/*` deps dedupe to one instance.
 	const entrySource = [
-		"import { loadConfigToProcessEnv } from '@aws-cdk-blocks/core';",
-		"import { serve } from '@aws-cdk-blocks/bb-agent/agentcore';",
-		'(async () => {',
-		'  await loadConfigToProcessEnv();',
-		`  await import(${JSON.stringify(backendModulePath)});`,
-		'  serve();',
-		'})();',
+		"import { serveBackend } from '@aws-cdk-blocks/bb-agent/agentcore';",
+		`serveBackend(() => import(${toJsStringLiteral(backendModulePath)}));`,
 	].join('\n');
 
 	mkdirSync(outDir, { recursive: true });
