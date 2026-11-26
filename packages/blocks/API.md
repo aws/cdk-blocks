@@ -128,6 +128,9 @@ import { MetricsOptions } from '@aws-cdk-blocks/bb-metrics';
 import { MetricsSource } from '@aws-cdk-blocks/bb-dashboard';
 import { MetricUnit } from '@aws-cdk-blocks/bb-metrics';
 import { ModelConfig } from '@aws-cdk-blocks/bb-agent';
+import { ObjectCreatedContext } from '@aws-cdk-blocks/bb-file-bucket';
+import { ObjectCreatedEvent } from '@aws-cdk-blocks/bb-file-bucket';
+import { ObjectCreatedOptions } from '@aws-cdk-blocks/bb-file-bucket';
 import { ObjectLockOptions } from '@aws-cdk-blocks/bb-file-bucket';
 import { OllamaModels } from '@aws-cdk-blocks/bb-agent';
 import { PutBatchEntry } from '@aws-cdk-blocks/bb-kv-store';
@@ -508,6 +511,12 @@ export { MetricsSource }
 export { MetricUnit }
 
 export { ModelConfig }
+
+export { ObjectCreatedContext }
+
+export { ObjectCreatedEvent }
+
+export { ObjectCreatedOptions }
 
 export { ObjectLockOptions }
 
