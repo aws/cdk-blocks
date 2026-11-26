@@ -310,7 +310,7 @@ const authCMfa = new Auth(scope, 'authCMfa', {
     selfSignUp: true,
     passwordPolicy: { minLength: 8, requireDigits: true },
   },
-  mfa: { mode: 'optional', types: ['TOTP'], totpIssuer: 'AWS Blocks e2e' },
+  mfa: { mode: 'optional', types: ['TOTP'], totpIssuer: 'AWS CDK Blocks e2e' },
   totpVerification: 'rfc6238',
   codeDelivery: async (username, code, purpose) => {
     await recordDeliveredCode('authCMfa', { username, code, purpose });
@@ -671,6 +671,14 @@ const validatedJob = new AsyncJob(scope, 'validated-job', {
       jobId: ctx.jobId,
     }));
   },
+});
+
+// AsyncJob whose payload type allows a bigint, which JSON cannot encode: submit()
+// must reject it with a named ValidationFailed error, not a raw TypeError (500).
+// The handler never runs. A dedicated job on purpose: it shows that a payload type
+// the compiler accepts still fails at runtime, without casting into testJob.
+const bigintJob = new AsyncJob(scope, 'bigint-job', {
+  handler: async (_payload: { id: string; count: bigint }) => {},
 });
 
 // AsyncJob with trackStatus - exercises the status table (DynamoDB when deployed).
@@ -2696,6 +2704,16 @@ export const api = new ApiNamespace(scope, 'api', (context) => ({
     return { jobIds };
   },
 
+  async asyncJobSubmitBigint(id: string) {
+    const { jobId } = await bigintJob.submit({ id, count: 1n });
+    return { jobId };
+  },
+
+  async asyncJobSubmitBatchBigint(id: string) {
+    const { jobIds } = await bigintJob.submitBatch([{ id, count: 1n }]);
+    return { jobIds };
+  },
+
   async asyncJobGetValidatedResult(jobId: string) {
     const raw = await jobResults.get(`validated:${jobId}`);
     return raw ? JSON.parse(raw) : null;
@@ -3646,6 +3664,11 @@ export const testSupport = testSupportSecret
           const versions = await apiKeySecret.listVersions();
           // Return client-safe metadata (versionId + stages count), never values.
           return versions.map((v) => ({ versionId: v.versionId, stages: v.stages }));
+        },
+
+        async secretGetApiKeyVersion(secret: string, versionId: string) {
+          await requireSecret(secret);
+          return { value: await apiKeySecret.get({ version: { versionId } }) };
         },
 
         // Unset secret: never written, so get() must return null (not a random

@@ -54,6 +54,7 @@ import type {
 	UpdateAttributeOutcome,
 } from '../types.js';
 import { signUpNotPermitted } from './attribute-write-rules.js';
+import { enforcePasswordLength, enforceUsernameConstraints } from './cognito-input-constraints.js';
 import { MockAttributeSchema } from './mock-attribute-schema.js';
 import { mockAdminEngine } from './native-mock-admin.js';
 import {
@@ -243,6 +244,14 @@ export class MockNativeEngine implements NativeEngine {
 		if (!selfSignUpEnabled(this.host.options)) throw signUpNotPermitted();
 		// As Cognito does: an unknown or non-string attribute is refused, not stored.
 		this.attributeSchema.check(input.attributes, 'signUp');
+		// Cognito checks the `Password` member's format before the username or
+		// the policy (`InvalidParameterException`). After the attribute rules,
+		// so a write breaking both gets the same error name as on AWS, where the
+		// schema-independent attribute rules run before the SDK call.
+		this.store.enforcePasswordFormat(password);
+		// Cognito's model constraints on `Password`, checked before the user is
+		// looked up (`newUser` checks the `Username` ones first thing).
+		enforcePasswordLength(password);
 		const { username, userSub, attributes } = this.newUser(
 			input.username,
 			{ ...input.attributes },
@@ -821,6 +830,9 @@ export class MockNativeEngine implements NativeEngine {
 	}
 
 	async confirmResetPassword(input: { username: string; code: string; newPassword: string }): Promise<void> {
+		// Cognito validates the `Password` member before it looks at the user or the code.
+		this.store.enforcePasswordFormat(input.newPassword);
+		enforcePasswordLength(input.newPassword);
 		const found = this.store.resolve(input.username);
 		// `AuthBase` answers an unknown user exactly like a wrong code.
 		if (!found) throw userNotFound();
@@ -842,6 +854,13 @@ export class MockNativeEngine implements NativeEngine {
 	}
 
 	async updatePassword(input: { accessToken: string; oldPassword: string; newPassword: string }): Promise<void> {
+		// Cognito validates `PreviousPassword` and `ProposedPassword` before the
+		// token or the comparison. An empty old password (a passwordless user) is skipped.
+		this.store.enforcePasswordFormat(input.oldPassword);
+		this.store.enforcePasswordFormat(input.newPassword);
+		// Both are a `PasswordType`, so both are length-checked (an empty old password passes).
+		enforcePasswordLength(input.oldPassword, 'previousPassword');
+		enforcePasswordLength(input.newPassword, 'proposedPassword');
 		const { user } = this.store.userForAccessToken(input.accessToken);
 		if (user.password !== input.oldPassword) {
 			throw serviceError(AuthErrors.NotAuthorized, 'Incorrect username or password.');
@@ -1175,6 +1194,10 @@ export class MockNativeEngine implements NativeEngine {
 	 * - **Otherwise**: the username is `login`, which must not exist and, on an
 	 *   alias pool, must not be in the format of an alias attribute.
 	 *
+	 * Before any of that, `login` must meet Cognito's `UsernameType` constraints
+	 * (1–128 letters, marks, symbols, numbers or punctuation), on every pool:
+	 * nothing is looked up or stored for a username Cognito would refuse.
+	 *
 	 * @throws `UsernameExistsException` (with `existsMessage`) or `InvalidParameterException`.
 	 */
 	private newUser(
@@ -1182,6 +1205,7 @@ export class MockNativeEngine implements NativeEngine {
 		attributes: Record<string, string>,
 		existsMessage: string,
 	): { username: string; userSub: string; attributes: Record<string, string> } {
+		enforceUsernameConstraints(login);
 		const userSub = crypto.randomUUID();
 		const { usernameAttributes, aliasAttributes } = this.signInMode;
 		if (usernameAttributes.length > 0) {

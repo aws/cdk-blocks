@@ -6,8 +6,6 @@ Background job processing backed by SQS, run on Lambda or a container.
 
 **When NOT to use:** Work that runs on a schedule: use `CronJob`.
 
-**Keywords:** queue, job, background, async, worker, submit, batch, retry, status, transitions, SQS
-
 > Design & mock parity details: [DESIGN.md](./DESIGN.md)
 
 ## Quick start
@@ -35,7 +33,7 @@ const { jobId } = await emailJob.submit({ to: 'alice@example.com', subject: 'Wel
 
 | Method | Returns | Description |
 |--------|---------|-------------|
-| `submit(payload, { delaySeconds? })` | `Promise<{ jobId }>` | Enqueues one job and returns as soon as it is queued. `delaySeconds` (0–900, default 0) delays processing. |
+| `submit(payload, { delaySeconds? })` | `Promise<{ jobId }>` | Enqueues one job and returns as soon as it is queued. `delaySeconds` (an integer from 0 to 900, default 0) delays processing. |
 | `submitBatch(payloads, { delaySeconds? })` | `Promise<{ jobIds, failed }>` | Enqueues 1 to 10,000 jobs. See [submitBatch()](#submitbatch). |
 | `getStatus(jobId)` | `Promise<AsyncJobStatus \| null>` | Reads a job's recorded state and transition history. `null` for a job id it has never seen. Requires `trackStatus: true`. |
 | `waitUntilComplete(jobId, { timeoutMs?, pollIntervalMs?, signal? })` | `Promise<AsyncJobStatus>` | Waits until the job reaches `complete` or `failed` and returns the final status. Requires `trackStatus: true`. See [Job status](#job-status-trackstatus). |
@@ -72,7 +70,7 @@ try {
 | Constant | `error.name` | Thrown when |
 |----------|--------------|-------------|
 | `AsyncJobErrors.PayloadTooLarge` | `PayloadTooLargeException` | `submit()` or `submitBatch()`: a serialized payload exceeds 256 KB. |
-| `AsyncJobErrors.ValidationFailed` | `ValidationFailedException` | `submit()` or `submitBatch()`: a payload fails `schema`. |
+| `AsyncJobErrors.ValidationFailed` | `ValidationFailedException` | `submit()` or `submitBatch()`: a payload fails `schema` or cannot be encoded as JSON (`undefined`, a function, a symbol, a bigint anywhere in it, or a circular reference), or `delaySeconds` is not an integer from 0 to 900. Nothing is queued. |
 | `AsyncJobErrors.BatchEmpty` | `BatchEmptyException` | `submitBatch([])`. |
 | `AsyncJobErrors.BatchTooLarge` | `BatchTooLargeException` | `submitBatch()` with more than 10,000 payloads. |
 | `AsyncJobErrors.BatchSubmitFailed` | `BatchSubmitFailedException` | `submitBatch()` on AWS: one or more messages failed to enqueue. See [submitBatch()](#submitbatch). |
@@ -80,6 +78,8 @@ try {
 | `AsyncJobErrors.StatusNotTracked` | `StatusNotTrackedException` | `getStatus()` or `waitUntilComplete()` on a job created without `trackStatus: true`. |
 | `AsyncJobErrors.InvalidOption` | `InvalidOptionException` | Synth time: `batchSize` or `maxBatchingWindowSeconds` is outside its range on a Lambda compute, or `maxConcurrencyPerCPU` is set and the compute is not a container. |
 | `AsyncJobErrors.UnsupportedCompute` | `UnsupportedComputeException` | Synth time: the resolved compute is not a Lambda or container compute, or belongs to another backend. |
+
+The payload travels as its JSON form, so a value that JSON can represent only approximately is accepted and reaches the handler changed, in local dev and on AWS: `NaN` and `Infinity` become `null`, a `Map` or `Set` becomes `{}`, a `Date` becomes its ISO 8601 string, and `undefined` or function properties are dropped. Pass a `schema` to refuse such values.
 
 ## submitBatch()
 

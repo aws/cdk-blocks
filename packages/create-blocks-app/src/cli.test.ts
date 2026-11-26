@@ -13,7 +13,7 @@ import { generateStackId, SAFE_TO_SCAFFOLD_ENTRIES, SAFE_TO_SCAFFOLD_PATTERN, TE
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const CLI_PATH = join(__dirname, '../dist/index.js');
 
-const task = (args: string) => `node --input-type=module -e "import 'aws-cdk-blocks/run'" -- ${args}`;
+const task = (args: string) => `cdk-blocks ${args}`;
 
 // Tasks available both in a standalone app and alongside an Amplify-owned backend.
 const discoveryTasks = {
@@ -234,7 +234,7 @@ describe('create-blocks-app template metadata', () => {
     assert.deepStrictEqual(missing, [], `Deployable templates missing "build": ${missing.join(', ')}`);
   });
 
-  it('every standalone template wires its npm tasks to the installed package runner', () => {
+  it('every standalone template wires its npm tasks to the cdk-blocks bin of the installed package', () => {
     const templatesDir = join(__dirname, '..', 'templates');
     const checked: string[] = [];
     for (const entry of readdirSync(templatesDir, { withFileTypes: true })) {
@@ -249,15 +249,8 @@ describe('create-blocks-app template metadata', () => {
         assertTasks(scripts, { 'dev:server': 'dev', 'sandbox:preview': 'sandbox preview' }, entry.name);
       }
       for (const [name, value] of Object.entries(scripts)) {
-        // Anchored so the legacy binary name is matched standalone: a `\b` alone matches
-        // inside `aws-cdk-blocks` (the `-` is a word boundary) and rejects the package.
-        // `(?!\/)` keeps the scaffolded `cdk-blocks/` folder legitimate; the second arm
-        // still bans the generated wrapper directory.
-        assert.doesNotMatch(
-          value,
-          /(?<![\w.-])cdk-blocks\b(?!\/)|(?<![\w.-])cdk-blocks\/scripts\//,
-          `${entry.name}: ${name}`,
-        );
+        // New apps get the short form, not the 1.0.0 `node -e` entry, and no generated wrapper directory.
+        assert.doesNotMatch(value, /aws-cdk-blocks\/run|(?<![\w.-])cdk-blocks\/scripts\//, `${entry.name}: ${name}`);
       }
       assert.ok(!existsSync(join(templatesDir, entry.name, 'cdk-blocks', 'scripts')), entry.name);
       checked.push(entry.name);
@@ -546,7 +539,7 @@ describe('create-blocks-app auto-detection', () => {
     }
   });
 
-  it('detects Amplify Gen 2 project over plain project, and keeps its Blocks dev server backend-only', async () => {
+  it('detects Amplify Gen 2 project over plain project, and keeps its CDK Blocks dev server backend-only', async () => {
     const tmpDir = join(__dirname, '../.test-autodetect-amplify');
     mkdirSync(join(tmpDir, 'amplify'), { recursive: true });
     // An Amplify app usually has its own frontend dependency, which the dev task would otherwise start.
@@ -572,9 +565,9 @@ describe('create-blocks-app auto-detection', () => {
       assert.strictEqual(packageJson.scripts['generate-client'], packageJson.scripts['blocks:generate-client']);
       for (const command of Object.values<string>(packageJson.scripts)) {
         // In particular, an alias or prebuild must not replace the Cognito-aware client.
-        assert.doesNotMatch(command, /aws-cdk-blocks\/run.* -- (?:sandbox|deploy|destroy|generate client)(?: |$)/);
+        assert.doesNotMatch(command, /(?<![\w.-])cdk-blocks (?:sandbox|deploy|destroy|generate client)(?: |$)/);
       }
-      // The Blocks dev server stays backend-only on :3001, as the removed server.ts set it,
+      // The CDK Blocks dev server stays backend-only on :3001, as the removed server.ts set it,
       // even with vite and next installed: the Amplify app runs its own frontend.
       // generateClient: false keeps the overlay's own cdk-blocks/client.js (Cognito token,
       // amplify_outputs.json API URL) instead of the dev server's generic one.
@@ -594,10 +587,12 @@ describe('create-blocks-app auto-detection', () => {
       assert.match(result.stdout, /leave your Next\.js tsconfig\.json as it is/);
       assert.match(result.stdout, /npm run sandbox\b/);
       assert.match(result.stdout, /npm run blocks:dev\b/);
+      // The one script value the steps print: what to put in the sandbox script to run it through AWS CDK Blocks.
+      const sandboxScript = `script with:\n   ${task('sandbox')}\n   Then use \`npm run sandbox\`.`;
+      assert.ok(result.stdout.includes(sandboxScript), result.stdout);
       // The CLI name as a command, not the `.cdk-blocks*` directories or the `/cdk-blocks/` URL path the rebrand
       // introduced: a next step must say `npm run <task>`, never invoke the binary.
-      assert.doesNotMatch(result.stdout, /(?<![\w.-])cdk-blocks\b(?![-/])/);
-      assert.ok(result.stdout.includes(task('sandbox')), result.stdout);
+      assert.doesNotMatch(result.stdout.replace(sandboxScript, ''), /(?<![\w.-])cdk-blocks\b(?![-/])/);
     } finally {
       rmSync(tmpDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
     }
@@ -674,7 +669,7 @@ describe('create-blocks-app auto-detection', () => {
     try {
       const result = run([tmpDir, '-y', '--skip-install']);
       assert.strictEqual(result.exitCode, 0);
-      // A fresh Blocks app was scaffolded into the directory.
+      // A fresh CDK Blocks app was scaffolded into the directory.
       assert.ok(existsSync(join(tmpDir, 'cdk-blocks')), 'expected cdk-blocks/ to be scaffolded');
       assert.ok(existsSync(join(tmpDir, 'package.json')), 'expected root package.json to be created');
       // The original seed file is preserved.
@@ -839,7 +834,7 @@ describe('create-blocks-app auto-detection', () => {
     }
   });
 
-  it('routes scaffolded docs tasks through a hoisted Blocks package and returns JSON', () => {
+  it('routes scaffolded docs tasks through a hoisted CDK Blocks package and returns JSON', () => {
     const root = mkdtempSync(join(tmpdir(), 'blocks-hoisted-docs-'));
     const app = join(root, 'apps', 'web');
     try {
@@ -847,8 +842,16 @@ describe('create-blocks-app auto-detection', () => {
       assert.strictEqual(result.exitCode, 0, result.stderr);
       // The umbrella is unscoped, so a hoisted copy sits directly in node_modules.
       const hoisted = join(root, 'node_modules');
-      mkdirSync(hoisted, { recursive: true });
+      mkdirSync(join(hoisted, '.bin'), { recursive: true });
       symlinkSync(join(__dirname, '../../blocks'), join(hoisted, 'aws-cdk-blocks'), 'junction');
+      // And its cdk-blocks bin in node_modules/.bin, where `npm run` in the app finds it. npm links it at
+      // install time; a shim does the same here without depending on the file mode of the build.
+      const bin = join(hoisted, 'aws-cdk-blocks', 'dist', 'cli', 'bin.js');
+      if (process.platform === 'win32') {
+        writeFileSync(join(hoisted, '.bin', 'cdk-blocks.cmd'), `@"${process.execPath}" "${bin}" %*\r\n`);
+      } else {
+        writeFileSync(join(hoisted, '.bin', 'cdk-blocks'), `#!/bin/sh\nexec "${process.execPath}" "${bin}" "$@"\n`, { mode: 0o755 });
+      }
       const docs = (command: string) => JSON.parse(execSync(command, {
         cwd: app, encoding: 'utf-8', timeout: 30_000,
         // Same guard as run(): the scaffolded task calls trackCommand, so opt out and
@@ -1044,6 +1047,48 @@ describe('create-blocks-app auto-detection', () => {
     }
   });
 
+  it('refuses an existing SvelteKit 3 project before it writes anything', () => {
+    // Hosting deploys SvelteKit 2 only; `npx sv create` scaffolds SvelteKit 3.
+    const tmpDir = mkdtempSync(join(tmpdir(), 'create-blocks-app-kit3-'));
+    const pkg = JSON.stringify({ name: 'my-svelte-app', version: '0.0.1', devDependencies: { '@sveltejs/kit': '^3.2.0', vite: '^8.0.0' } });
+    writeFileSync(join(tmpDir, 'package.json'), pkg);
+    try {
+      const result = run(['.', '-y', '--skip-install'], tmpDir);
+      assert.strictEqual(result.exitCode, 1, result.stdout);
+      assert.match(result.stderr, /SvelteKit 3 is not supported yet/);
+      assert.ok(result.stderr.includes('@sveltejs/kit@^2 @sveltejs/adapter-node@^5 @sveltejs/vite-plugin-svelte@^5 vite@^6'), result.stderr);
+      assert.match(result.stderr, /^SvelteKit 3 support is tracked in https:\/\/github\.com\/aws\/cdk-blocks\/issues\/984\. /m, result.stderr);
+      assert.match(result.stderr, /Nothing was written/);
+      assert.strictEqual(readFileSync(join(tmpDir, 'package.json'), 'utf-8'), pkg);
+      assert.deepStrictEqual(readdirSync(tmpDir), ['package.json'], 'nothing is written');
+    } finally {
+      rmSync(tmpDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+    }
+  });
+
+  it('reads the installed SvelteKit version over the package.json range', () => {
+    const tmpDir = mkdtempSync(join(tmpdir(), 'create-blocks-app-kit-installed-'));
+    const kitDir = join(tmpDir, 'node_modules', '@sveltejs', 'kit');
+    mkdirSync(kitDir, { recursive: true });
+    try {
+      // A non-semver range: the installed 3.x decides.
+      writeFileSync(join(tmpDir, 'package.json'), JSON.stringify({ name: 'kit-latest', devDependencies: { '@sveltejs/kit': 'latest' } }));
+      writeFileSync(join(kitDir, 'package.json'), JSON.stringify({ name: '@sveltejs/kit', version: '3.3.1' }));
+      const refused = run(['.', '-y', '--skip-install'], tmpDir);
+      assert.strictEqual(refused.exitCode, 1, refused.stdout);
+      assert.match(refused.stderr, /SvelteKit 3 is not supported yet \(installed: 3\.3\.1\)/);
+      assert.ok(!existsSync(join(tmpDir, 'cdk-blocks')));
+
+      // SvelteKit 2 installed: the backend is added as usual.
+      writeFileSync(join(kitDir, 'package.json'), JSON.stringify({ name: '@sveltejs/kit', version: '2.70.3' }));
+      const added = run(['.', '-y', '--skip-install'], tmpDir);
+      assert.strictEqual(added.exitCode, 0, added.stderr);
+      assert.ok(existsSync(join(tmpDir, 'cdk-blocks', 'index.ts')));
+    } finally {
+      rmSync(tmpDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+    }
+  });
+
   it('gives an Amplify app without Next.js the default template\'s backend tsconfig', () => {
     const tmpDir = join(__dirname, '../.test-amplify-tsconfig');
     mkdirSync(join(tmpDir, 'amplify'), { recursive: true });
@@ -1193,7 +1238,7 @@ describe('create-blocks-app auto-detection', () => {
         NPM_CONFIG_REGISTRY: 'http://127.0.0.1:9',
       });
       assert.strictEqual(result.exitCode, 0);
-      assert.match(result.stdout, /AWS CDK Blocks app created/);
+      assert.match(result.stdout, /✓ CDK Blocks app created!/);
       assert.doesNotMatch(result.stdout, /Installing dependencies/);
       assert.match(result.stdout, /\n  npm install\n/);
       assert.strictEqual(existsSync(join(targetDir, 'node_modules')), false);
@@ -1251,7 +1296,7 @@ describe('create-blocks-app auto-detection', () => {
       const result = run([join(tmpDir, 'app'), '-y'], undefined, { PATH: `${bin}:${process.env.PATH}` });
       assert.strictEqual(result.exitCode, 1, result.stdout);
       assert.match(result.stderr, /Error: Command failed: npm install/);
-      assert.doesNotMatch(result.stdout, /AWS CDK Blocks app created/);
+      assert.doesNotMatch(result.stdout, /✓ CDK Blocks app created!/);
     } finally {
       rmSync(tmpDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
     }

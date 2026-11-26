@@ -1,12 +1,21 @@
 {
   "name": "@aws-cdk-blocks/bb-async-job",
-  "version": "1.0.0-rc.1",
+  "version": "1.0.0",
   "keywords": [
-    "aws-blocks",
+    "cdk-blocks",
     "background-jobs",
     "queue",
     "sqs",
-    "lambda"
+    "lambda",
+    "job",
+    "background",
+    "async",
+    "worker",
+    "submit",
+    "batch",
+    "retry",
+    "status",
+    "transitions"
   ],
   "repository": {
     "type": "git",
@@ -49,11 +58,11 @@
     "test": "node --test --test-force-exit dist/**/*.test.js"
   },
   "dependencies": {
-    "@aws-cdk-blocks/bb-logger": "^1.0.0-rc.1",
-    "@aws-cdk-blocks/bb-kv-store": "^1.0.0-rc.1",
-    "@aws-cdk-blocks/bb-lambda-compute": "^1.0.0-rc.0",
-    "@aws-cdk-blocks/bb-container-compute": "^1.0.0-rc.0",
-    "@aws-cdk-blocks/core": "^1.0.0-rc.1",
+    "@aws-cdk-blocks/bb-logger": "^1.0.0",
+    "@aws-cdk-blocks/bb-kv-store": "^1.0.0",
+    "@aws-cdk-blocks/bb-lambda-compute": "^1.0.0",
+    "@aws-cdk-blocks/bb-container-compute": "^1.0.0",
+    "@aws-cdk-blocks/core": "^1.0.0",
     "@aws-sdk/client-sqs": "^3.1156.0"
   },
   "devDependencies": {

@@ -220,7 +220,7 @@ export function rejectsDevRequestOrigin(
  * `text/plain`, `application/x-www-form-urlencoded` or `multipart/form-data`
  * body, or one with no `Content-Type`, to another origin without a CORS
  * preflight, so refusing them keeps a cross-site page from running an RPC call
- * at all. Every AWS Blocks client sends `application/json`.
+ * at all. Every CDK Blocks client sends `application/json`.
  */
 export function isJsonRpcContentType(contentType: string | undefined): boolean {
   return (contentType ?? '').split(';')[0].trim().toLowerCase() === 'application/json';
@@ -364,7 +364,7 @@ export interface DevServerOptions {
   frontendPort?: number;
   /**
    * Interface the dev server binds. Default: `127.0.0.1` (loopback only). The dev
-   * server proxies your whole Blocks API — with local mock auth, which
+   * server proxies your whole CDK Blocks API — with local mock auth, which
    * authenticates nothing — against the local mock datastore, so it must not be
    * reachable from other machines by default. Set a wider host (e.g. `0.0.0.0`)
    * only for container / remote-devbox setups where you control who can reach the
@@ -1022,7 +1022,7 @@ export async function startDevServer(options: DevServerOptions) {
   const host = resolveDevHost(options.host);
   if (!isLoopbackHost(host)) {
     console.warn(
-      `\n⚠️  AWS Blocks dev server is binding ${host}, not loopback. Anyone who can reach this ` +
+      `\n⚠️  AWS CDK Blocks dev server is binding ${host}, not loopback. Anyone who can reach this ` +
         'machine on that interface can call every API method against your local mock data ' +
         '(local auth authenticates nothing). Use this only in a container or devbox whose ' +
         'port you control.' +
@@ -1417,7 +1417,7 @@ export async function startDevServer(options: DevServerOptions) {
     if (!isAllowedDevRequestHost(req.headers.host, host)) {
       res.writeHead(403, { 'Content-Type': 'text/plain; charset=utf-8', 'Connection': 'close' });
       res.end(
-        'Forbidden: the AWS Blocks dev server only answers requests addressed to localhost, 127.0.0.1, [::1] ' +
+        'Forbidden: the AWS CDK Blocks dev server only answers requests addressed to localhost, 127.0.0.1, [::1] ' +
           'or the host set in BLOCKS_DEV_HOST.\n',
       );
       return;
@@ -1437,7 +1437,7 @@ export async function startDevServer(options: DevServerOptions) {
       return;
     }
 
-    // ── Blocks runtime config ──────────────────────────────────────────
+    // ── CDK Blocks runtime config ──────────────────────────────────────────
     // Reserved path: serve it from the front door so it works for every
     // framework (Next/Nuxt/Astro/SPA all proxy through this :3000 server),
     // mirroring production where CloudFront serves `${BLOCKS_SANDBOX_PREFIX}/*`
@@ -1462,6 +1462,19 @@ export async function startDevServer(options: DevServerOptions) {
         apiProxy.web(req, res);
         return;
       }
+      // API Gateway answers a path holding a `%` not followed by two hex digits
+      // with a 400 before the Lambda runs. Do the same here, so a local handler
+      // never receives that text as if it were a literal parameter value. The
+      // status matches API Gateway; the body follows the dispatcher's
+      // `{"error": ...}` shape. Only matched API paths reach this check: a
+      // malformed path that matches no route still gets the 404 below, where an
+      // API-only deployment would answer 400. (The sandbox branch above
+      // forwards to the real API Gateway, which gives its own answer.)
+      if (hasMalformedPercentEncoding(url.pathname)) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Bad Request' }));
+        return;
+      }
       handleApiRequest(req, res, url, method, dispatch, bound);
       return;
     }
@@ -1470,8 +1483,10 @@ export async function startDevServer(options: DevServerOptions) {
     if (frontendProxy) {
       frontendProxy.web(req, res);
     } else {
-      res.writeHead(404);
-      res.end();
+      // No frontend and no matching route: answer with the same JSON 404 the
+      // deployed dispatcher gives an unmatched request (see dispatch.ts).
+      res.writeHead(404, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Not Found' }));
     }
   });
 
@@ -1569,7 +1584,7 @@ export async function startDevServer(options: DevServerOptions) {
     console.log(`AWS CDK Blocks local server running on ${frontDoor}`);
     buildAndSendEvent({ command: 'dev', state: 'SUCCESS', duration: Date.now() - devStartTime });
 
-    // Spawn frontend dev server after Blocks server is ready
+    // Spawn frontend dev server after CDK Blocks server is ready
     if (frontendCommand) {
       const child = spawnFrontend(frontendCommand);
       await announceFrontendReady(child);
@@ -2283,10 +2298,21 @@ function createDevDispatcher(backend: unknown, bound: DevServerAddress): Dispatc
 function unsupportedMediaTypeResponse(): string {
   return errorResponse(
     415,
-    'Unsupported Media Type: the AWS Blocks JSON-RPC API expects Content-Type: application/json',
+    'Unsupported Media Type: the AWS CDK Blocks JSON-RPC API expects Content-Type: application/json',
     null,
     { name: 'UnsupportedMediaType' },
   );
+}
+
+/**
+ * Whether `pathname` holds a `%` that isn't followed by two hex digits
+ * (e.g. `/users/%E0%A4%A`, `/users/100%`). API Gateway refuses such a request
+ * with a 400 before it reaches the Lambda, so the dev server refuses it too.
+ * Well-formed escapes that aren't valid UTF-8 (`%FF`) reach the Lambda
+ * deployed, so they are not refused here.
+ */
+function hasMalformedPercentEncoding(pathname: string): boolean {
+  return /%(?![0-9A-Fa-f]{2})/.test(pathname);
 }
 
 /**
@@ -2406,8 +2432,8 @@ function handleApiRequest(
   // path was right but the method wasn't, say so explicitly.
   const wrongMethodOnApi = isRpcPath(url.pathname);
   const message = wrongMethodOnApi
-    ? `The AWS Blocks JSON-RPC API expects POST, not ${method}.`
-    : 'Not found. The AWS Blocks JSON-RPC API is served at POST /cdk-blocks/api.';
+    ? `The AWS CDK Blocks JSON-RPC API expects POST, not ${method}.`
+    : 'Not found. The AWS CDK Blocks JSON-RPC API is served at POST /cdk-blocks/api.';
   res.writeHead(404, { 'Content-Type': 'application/json' });
   res.end(
     JSON.stringify({

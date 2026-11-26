@@ -1,11 +1,21 @@
 // GENERATED CODE — DO NOT MODIFY BY HAND
 // Generator: blocks-codegen
 // Source: test v1.0.0
-// Requires blocks_runtime 0.2.0 or later.
+// Requires blocks_runtime 1.0.0 or later.
 // ignore_for_file: constant_identifier_names
+// dart format width=80
 
 import 'package:blocks_runtime/blocks_runtime.dart';
-export 'package:blocks_runtime/blocks_runtime.dart' show ApiException, BlocksClient, BlocksException, ClientClosedException, InMemorySessionStore, SessionStore, TransportException, isBlocksError;
+export 'package:blocks_runtime/blocks_runtime.dart'
+    show
+        ApiException,
+        BlocksClient,
+        BlocksException,
+        ClientClosedException,
+        InMemorySessionStore,
+        SessionStore,
+        TransportException,
+        isBlocksError;
 
 // --- Models ---
 
@@ -20,10 +30,7 @@ class Api {
   }
 
   Future<void> remember({required String note, String? tag}) async {
-    final params = <dynamic>[
-      note,
-      if (tag != null) tag,
-    ];
+    final params = <dynamic>[note, if (tag != null) tag];
     await _client.call('api.remember', params);
   }
 
@@ -33,8 +40,7 @@ class Api {
   }
 }
 
-
-// --- Blocks Client ---
+// --- CDK Blocks Client ---
 
 class Blocks {
   late final Api api;
@@ -51,4 +57,3 @@ class Blocks {
   /// does nothing more.
   void close() => _client.close();
 }
-
