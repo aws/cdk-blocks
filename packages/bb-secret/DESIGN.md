@@ -282,7 +282,10 @@ path, change `fullId`, and rename the SSM parameter. The function creates the
   plain options object can never turn it on. In this mode the `Secret` has no
   `Name` (CloudFormation generates a unique one), a `GenerateSecretString` of 64
   characters from `[A-Za-z0-9]` (about 381 bits), `removalPolicy: 'destroy'`,
-  and only `secretsmanager:GetSecretValue` for the app role. Its ARN goes into
+  and only `secretsmanager:GetSecretValue` for the app role. If the secret ends
+  up with a customer-managed key that this block did not set (for example from a
+  CDK property injector), the role also gets `kms:Decrypt` on that key through
+  Secrets Manager (`kms:ViaService`), as `grantRead` would add. Its ARN goes into
   config through `registerConfig()`, as for any `Secret`. A `Secret` declared
   through the public API keeps its defaults (fixed name, empty value, removal
   policy from `defaults`, read and list grants).

@@ -28,7 +28,9 @@ export { type FrameworkKey, SSM_SECRETS_STORE_WARNING_ID } from './internal-shar
  * - `'secrets-manager'`: a bb-secret `Secret` with a CloudFormation-generated
  *   name, a CloudFormation-generated 64-character value
  *   (`GenerateSecretString`), `DeletionPolicy: Delete`, and only
- *   `secretsmanager:GetSecretValue` for the app's execution role. The ARN
+ *   `secretsmanager:GetSecretValue` for the app's execution role (plus
+ *   `kms:Decrypt` through Secrets Manager when the secret has a
+ *   customer-managed key). The ARN
  *   reaches the runtime through config, as for any `Secret`.
  * - `'ssm'`: exactly `new AppSetting(scope, id, { secret: true })`, the
  *   SecureString the blocks created before this option existed. A synth-time

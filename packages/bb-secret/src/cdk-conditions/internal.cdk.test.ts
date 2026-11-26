@@ -72,6 +72,22 @@ function allStatements(template: Template): { Action: string | string[]; Resourc
 	);
 }
 
+/** Every statement granting kms:Decrypt, from IAM policies and KMS key policies. */
+function decryptStatements(template: Template): Record<string, unknown>[] {
+	const keyStatements = Object.values(template.findResources('AWS::KMS::Key')).flatMap(
+		(k) =>
+			(k as { Properties: { KeyPolicy: { Statement: { Action: string | string[] }[] } } }).Properties.KeyPolicy
+				.Statement,
+	);
+	// Skip the account-root statements the Secrets Manager L2 adds to its key on
+	// its own; they delegate to IAM and grant the app role nothing by themselves.
+	return [...allStatements(template), ...keyStatements].filter(
+		(s) =>
+			(Array.isArray(s.Action) ? s.Action : [s.Action]).includes('kms:Decrypt') &&
+			!JSON.stringify((s as { Principal?: unknown }).Principal ?? '').includes(':root'),
+	) as Record<string, unknown>[];
+}
+
 function actionsOf(statements: { Action: string | string[] }[]): string[] {
 	return statements.flatMap((s) => (Array.isArray(s.Action) ? s.Action : [s.Action]));
 }
@@ -112,6 +128,60 @@ test('production preset: the app role gets only GetSecretValue on the key', () =
 	frameworkKey(parent, 'signing-key');
 	const actions = actionsOf(allStatements(Template.fromStack(stack)));
 	assert.deepStrictEqual(actions, ['secretsmanager:GetSecretValue']);
+});
+
+/**
+ * A property injector that gives every `secretsmanager.Secret` without an
+ * `encryptionKey` its own customer-managed key, the way an organization-wide
+ * CDK blueprint can. `bb-secret` never sets the key itself.
+ */
+class SecretCmkInjector implements cdk.IPropertyInjector {
+	readonly constructUniqueId = cdk.aws_secretsmanager.Secret.PROPERTY_INJECTION_ID;
+	inject(
+		originalProps: cdk.aws_secretsmanager.SecretProps,
+		context: cdk.InjectionContext,
+	): cdk.aws_secretsmanager.SecretProps {
+		if (originalProps.encryptionKey) return originalProps;
+		return { ...originalProps, encryptionKey: new cdk.aws_kms.Key(context.scope, `${context.id}-cmk`) };
+	}
+}
+
+test('production preset: a customer-managed key set from outside bb-secret is decryptable by the app role', () => {
+	const app = new cdk.App({ propertyInjectors: [new SecretCmkInjector()] });
+	const stack = new StubBlocksStack(app, 'TestStack', BlocksPresets.production);
+	frameworkKey(new Scope('app'), 'signing-key');
+	const template = Template.fromStack(stack);
+	template.resourceCountIs('AWS::KMS::Key', 1);
+
+	// CDK puts a same-stack key grant on the key policy, so look there too.
+	const decrypt = decryptStatements(template);
+	assert.strictEqual(decrypt.length, 1, 'the app role must get kms:Decrypt on the secret key');
+	assert.deepStrictEqual(decrypt[0], {
+		Effect: 'Allow',
+		Action: 'kms:Decrypt',
+		Principal: {
+			AWS: { 'Fn::GetAtt': [stack.getLogicalId(stack.executionRole.node.defaultChild as cdk.CfnElement), 'Arn'] },
+		},
+		Resource: '*',
+		// Same scoping as `Secret.grantRead`: the key is usable only through Secrets Manager.
+		Condition: {
+			StringEquals: {
+				'kms:ViaService': { 'Fn::Join': ['', ['secretsmanager.', { Ref: 'AWS::Region' }, '.amazonaws.com']] },
+			},
+		},
+	});
+	// Still no DescribeSecret or ListSecretVersionIds for the framework key.
+	assert.deepStrictEqual(
+		actionsOf(allStatements(template)).filter((a) => a.startsWith('secretsmanager:')),
+		['secretsmanager:GetSecretValue'],
+	);
+});
+
+test('a customer Secret with a key set from outside bb-secret is decryptable by the app role', () => {
+	const app = new cdk.App({ propertyInjectors: [new SecretCmkInjector()] });
+	const stack = new StubBlocksStack(app, 'TestStack', BlocksPresets.production);
+	new Secret(new Scope('app'), 'stripe-key');
+	assert.strictEqual(decryptStatements(Template.fromStack(stack)).length, 1);
 });
 
 test('production preset: no environment variable is added to the compute (the ARN travels in config only)', () => {
