@@ -1,9 +1,9 @@
 # AGENTS.md — AWS CDK Blocks (contributor guide)
 
-> **AWS CDK Blocks** is an Infrastructure-from-Code TypeScript monorepo. One `cdk-blocks/` directory defines an entire backend; each **Building Block (BB)** bundles a CDK construct + an AWS-runtime SDK client + a local mock behind one strongly-typed API. Frontends import the backend's types directly — no client generation step. Everything runs locally with no AWS account; deploy with `cdk deploy`.
+> **CDK Blocks** is an Infrastructure-from-Code TypeScript monorepo. One `cdk-blocks/` directory defines an entire backend; each **Building Block (BB)** bundles a CDK construct + an AWS-runtime SDK client + a local mock behind one strongly-typed API. Frontends import the backend's types directly — no client generation step. Everything runs locally with no AWS account; deploy with `cdk deploy`.
 
 ## How to work here
-You're an engineer working **on AWS CDK Blocks itself** — the framework and its Building Blocks. (If the task is building an app *with* AWS CDK Blocks, this is the wrong doc → run `npm create @aws-cdk-blocks/blocks-app@latest my-app`.) You serve the project, its users, and its maintainers — not only the request in front of you.
+You're an engineer working **on CDK Blocks itself** — the framework and its Building Blocks. (If the task is building an app *with* CDK Blocks, this is the wrong doc → run `npm create @aws-cdk-blocks/blocks-app@latest my-app`.) You serve the project, its users, and its maintainers — not only the request in front of you.
 
 - **Default to making the change** — implement it, don't just describe it.
 - **Definition of done = the "Before you open a PR" checklist passes** (build, lint, tests, changeset, docs).
@@ -27,7 +27,7 @@ You're an engineer working **on AWS CDK Blocks itself** — the framework and it
 10. Every change to a published package **ships a changeset** covering all changed packages (its text becomes the public changelog).
 11. Keep docs **runnable** — every README/JSDoc snippet, command, package name, and relative link is correct at HEAD; a dead link in a published `packages/*/README.md` is a defect. Without this → users copy-paste broken code and lose trust in the framework.
 12. **No root `/` route**, and a route wildcard must be the last path segment. Violating this → API Gateway rejects the route or swallows all traffic into one handler.
-13. Refer to the project as **"AWS CDK Blocks"** (no article — "built with AWS CDK Blocks"). Inconsistent naming → confuses search, docs, and brand recognition.
+13. Naming: **AWS CDK Blocks** on first mention on a customer-facing surface (docs, app UI, CLI output), **CDK Blocks** after that and everywhere else, including code comments. No article ("built with CDK Blocks"; "a CDK Blocks app" is fine). "Block" in a block's name or as a common noun or identifier (**Auth Block**, **KVStore Block**, "blocks on one cluster") is not the product name.
 
 ---
 
@@ -200,7 +200,7 @@ get(..._a: unknown[]): never { return synthGuard('Thing', 'get'); }      // stub
 3. Root `README.md` — how conditional exports work
 
 ### Discovering Building Block Documentation
-When working in an AWS CDK Blocks application (not this monorepo), Building Block documentation ships in `aws-cdk-blocks`, and `npm run docs` prints it for the installed version: `npm run docs` lists all Building Blocks with their package names, and `npm run docs <Block>...` prints their docs (`npm run docs -- --help` for more). Use `npm run docs:search <term>` to search or `npm run docs:api <Block>` for signatures. Structured tasks print text on a terminal and JSON when piped; use `npm run -s docs KVStore` in pipelines to suppress npm’s banner.
+When working in a CDK Blocks application (not this monorepo), Building Block documentation ships in `aws-cdk-blocks`, and `npm run docs` prints it for the installed version: `npm run docs` lists all Building Blocks with their package names, and `npm run docs <Block>...` prints their docs (`npm run docs -- --help` for more). Use `npm run docs:search <term>` to search or `npm run docs:api <Block>` for signatures. Structured tasks print text on a terminal and JSON when piped; use `npm run -s docs KVStore` in pipelines to suppress npm’s banner.
 
 ---
 
@@ -214,6 +214,7 @@ When working in an AWS CDK Blocks application (not this monorepo), Building Bloc
 | Schema validation | When a BB accepts a user-provided validation schema, type it as **`StandardSchemaV1`** (Zod/Valibot/ArkType) — don't pull a schema lib into the BB's runtime deps (it's the consumer's choice); if your own tests use `zod`, keep it a `devDependency`. (A BB may take a schema lib as a real `dependency` only for its *own* internal needs, e.g. `bb-agent`.) Validate via `schema['~standard'].validate(value)`, before conditional checks. |
 | Tests | **`node:test` + `node:assert`** (not Jest/Vitest), run on compiled `dist/`. Reset `.cdk-blocks/local/data` between tests. Mock tests can't catch AWS-path serialization bugs — serialization/behavior changes also need a sandbox e2e. |
 | Async | `async/await` only; prefer **`Array.fromAsync()`** over `for await` push-loops. |
+| Synth annotations | A **warning** (`Annotations.addWarningV2`, always with a stable id) is about the app: something its own configuration or deploy target makes wrong or risky. A tradeoff that comes from a preset or a block's defaults is an **info** (`addInfoV2`). An app scaffolded from a template and left unchanged synthesizes with **no warning**; `scripts/ci/template-synth-warnings.mjs` checks every template in production, sandbox and preview mode (E2E Templates and the daily canary) and lists the few warnings a template is meant to show. Never acknowledge an annotation in a template to pass that check. See D-033 in `docs/DECISIONS.md`. |
 
 ---
 
@@ -333,4 +334,4 @@ Check correctness/security, mock↔aws↔cdk↔browser consistency + conditional
 - `packages/hosting/README.md` — SPA/SSR frontend hosting
 - `packages/bb-database/README.md` — DB migrations
 - `native/*` — Kotlin/Swift/Dart client codegen
-- per-template `AGENTS.md` (via `npm create @aws-cdk-blocks/blocks-app@latest my-app`) — building an app *with* AWS CDK Blocks.
+- per-template `AGENTS.md` (via `npm create @aws-cdk-blocks/blocks-app@latest my-app`) — building an app *with* CDK Blocks.
