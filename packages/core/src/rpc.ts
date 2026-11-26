@@ -11,7 +11,7 @@
  */
 
 import { BLOCKS_RPC_PREFIX, canonicalBlocksPath, rpcNamespaceFromPath } from './constants.js';
-import { ApiError, DEFAULT_API_ERROR_NAME, isApiErrorLike, isWireSafeError } from './errors.js';
+import { ApiError, DEFAULT_API_ERROR_NAME, isApiErrorLike, isWireSafeError, toHttpErrorStatus } from './errors.js';
 
 /**
  * The `.name` a plain `new Error(...)` carries. A throw whose name is still this
@@ -141,8 +141,8 @@ export function decodeRpcResponse(body: unknown, httpStatus?: number): unknown {
   if (rpc.error) {
     const { code, message, data } = rpc.error;
     // Application error codes use the HTTP status directly (e.g. 409).
-    // Reserved JSON-RPC codes (-32xxx) map to 500.
-    const status = code > 0 ? code : 500;
+    // Reserved JSON-RPC codes (-32xxx), and any code outside 100-599, map to 500.
+    const status = toHttpErrorStatus(code);
     throw new ApiError(
       message,
       status,
@@ -340,7 +340,9 @@ export function sanitizeCaughtError(error: unknown): SanitizedError {
   // and its HTTP status / name / retriable survive — a plain `instanceof` would
   // miss it and collapse a deliberate 409 into a nameless 500 (branch 3).
   if (isApiErrorLike(error)) {
-    const safe: SanitizedError = { status: error.status, message: error.message };
+    // Range-check again: a foreign-copy ApiError or a branded error with a
+    // hand-set `status` never ran this copy's constructor.
+    const safe: SanitizedError = { status: toHttpErrorStatus(error.status), message: error.message };
     if (error.name && error.name !== DEFAULT_API_ERROR_NAME) safe.name = error.name;
     if (error.retriable) safe.retriable = true;
     return safe;
