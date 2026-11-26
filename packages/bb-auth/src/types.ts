@@ -38,7 +38,9 @@ import type { ApiNamespaceOptions, BlocksContext, ScopeParent } from '@aws-cdk-b
  *   (`github()`, `customOauth2()`) and the local stub IdP (`stubIdp()`) — and
  *   keeps only the session. No Cognito charge, works offline in `npm run dev`,
  *   and supports public (PKCE-only) clients. A user's `userId` is
- *   `` `${issuer}:${sub}` ``.
+ *   `` `${issuer}:${sub}` ``. It also accepts `type: 'verified'`: an identity
+ *   your own backend code verified, signed in with `signInVerified()`
+ *   ({@link VerifiedProvider}).
  *
  * Every sign-in provider goes in one `providers` map, keyed by the provider id
  * you use in `getSignInUrl(context, '<id>')` and in the `signIn:<id>` UI
@@ -933,8 +935,10 @@ export interface VerifiedIdentity {
 	 * What is known about the user. `validateUser` receives the whole object.
 	 * Only its string-valued claims are kept with the session: they become
 	 * the user's `attributes` (`email`, `name`, …) and, with `iss` and `sub`,
-	 * `AuthenticatedUser.claims`. `iss` and `sub` are set by the block; values
-	 * given here for them are ignored.
+	 * `AuthenticatedUser.claims`. `iss`, `sub` and `auth_time` are set by the
+	 * block; values given here for them are ignored. The session counts as
+	 * signed in at the time of the call, which is what
+	 * `requireAuth(context, { fresh: true })` measures.
 	 */
 	claims?: Record<string, unknown>;
 	/** The user's groups, narrowed to the declared `users.groups` as for any provider. */
@@ -2329,6 +2333,7 @@ export interface OidcClientApiOf<O extends AuthOptions> {
  * |---|---|---|
  * | a `'cognito'` block: email + password, social, SAML or OIDC | the username — on a pool whose `users.signInWith` omits `'username'`, the one Cognito generates, equal to `userSub` | the Cognito `sub` (a UUID) |
  * | a `store: 'builtin'` block: OIDC, OAuth 2.0 or the stub IdP (no pool record) | `` `${issuer}:${sub}` `` | `` `${issuer}:${sub}` `` |
+ * | a `store: 'builtin'` block: `signInVerified()` on a `type: 'verified'` provider | `` `verified:${providerId}:${subject}` `` | the same |
  *
  * Key your own data on `userSub`: it is stable for the user's lifetime.
  *

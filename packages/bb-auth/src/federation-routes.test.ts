@@ -151,6 +151,9 @@ describe('route table', () => {
 		clearRouteRegistry();
 		new Auth(unique(), 'auth');
 		assert.deepStrictEqual(table(), []);
+		clearRouteRegistry();
+		new Auth(unique(), 'auth', { store: 'builtin', providers: { appleNative: { type: 'verified' } } });
+		assert.deepStrictEqual(table(), [], 'a block with only verified providers mounts no route');
 	});
 
 	test('a legacy /aws-blocks/auth/ callbackPath is still accepted and mounted under the canonical prefix', () => {

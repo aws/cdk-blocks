@@ -971,8 +971,6 @@ export class AuthBase<const O extends AuthOptions = AuthOptions> extends Scope i
 		}
 	}
 
-	// ── App-verified sign-in ────────────────────────────────────────────────
-
 	/**
 	 * Open a session for an identity **your own code verified**, on a
 	 * `type: 'verified'` provider of a `store: 'builtin'` block. The session
@@ -1010,7 +1008,8 @@ export class AuthBase<const O extends AuthOptions = AuthOptions> extends Scope i
 				{ name: AuthErrors.ProviderNotConfigured },
 			);
 		}
-		const { subject, claims, groups } = checkedVerifiedIdentity(identity);
+		const { subject, claims: given, groups } = checkedVerifiedIdentity(identity);
+		const { auth_time: _authTime, ...claims } = given;
 		const issuer = `${VERIFIED_ISSUER_PREFIX}${provider}`;
 		const idpClaims = { ...claims, iss: issuer, sub: subject };
 		const record = this.recordFromFederated(provider, {
@@ -2218,8 +2217,13 @@ export class AuthBase<const O extends AuthOptions = AuthOptions> extends Scope i
 			return null;
 		}
 		const identity = identityOf(record);
-		const fixedDeadline = 'kind' in record && this.verifiedProviders.has(record.provider);
-		if (identity.expiresAt > Date.now() && (!forceRefresh || fixedDeadline)) return { sessionId, record, identity };
+		const verifiedRow = 'kind' in record && record.issuer.startsWith(VERIFIED_ISSUER_PREFIX);
+		if (verifiedRow && !this.verifiedProviders.has(record.provider)) {
+			await this.sessions.delete(sessionId);
+			clearSessionCookie(context, this.fullId, this.crossDomain);
+			return null;
+		}
+		if (identity.expiresAt > Date.now() && (!forceRefresh || verifiedRow)) return { sessionId, record, identity };
 
 		let refreshed: SessionRecord | null;
 		try {
@@ -2751,7 +2755,8 @@ export class AuthBase<const O extends AuthOptions = AuthOptions> extends Scope i
 
 	private signedInState(user: AuthenticatedUser<O>): AuthState<AuthStateUser<O>> {
 		const federated = user.signInProvider !== 'password';
-		const redirectSignOut = federated && !this.verifiedProviders.has(user.signInProvider);
+		const redirectSignOut =
+			federated && this.providers.size > 0 && !this.verifiedProviders.has(user.signInProvider);
 		return signedIn(this.stateUser(user), {
 			passkeys: !federated && this.config.passkeys !== undefined && this.config.passkeys !== false,
 			...(redirectSignOut

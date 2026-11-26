@@ -42,7 +42,7 @@ All four entries export the same names (`Auth`, `AuthErrors`, `isAuthError`, the
 The public options (`AuthOptions` in `src/types.ts`) are a union discriminated on `store`:
 
 - **`CognitoAuthOptions`** — `store?: 'cognito'`, the default. Users are records in a Cognito user pool. `providers` entries are `type: 'google' | 'facebook' | 'amazon' | 'apple' | 'saml' | 'oidc'` (`CognitoProvider`); `oidc` here is `CognitoOidcProvider`, with a required `clientSecret`.
-- **`BuiltinAuthOptions`** — `store: 'builtin'`. No user pool. `providers` (required) entries are `type: 'oidc' | 'oauth2' | 'stub'` (`BuiltinProvider`); `github()` / `customOauth2()` return `oauth2` and `stubIdp()` returns `stub`. `users` is `BuiltinUserOptions` (`groups` only), and `allowBearerAuth` is `boolean`.
+- **`BuiltinAuthOptions`** — `store: 'builtin'`. No user pool. `providers` (required) entries are `type: 'oidc' | 'oauth2' | 'stub' | 'verified'` (`BuiltinProvider`); `github()` / `customOauth2()` return `oauth2` and `stubIdp()` returns `stub`; `verified` is an identity the app's own code verified ([App-verified providers](#app-verified-providers-type-verified-signinverified)). `users` is `BuiltinUserOptions` (`groups` only), and `allowBearerAuth` is `boolean`.
 
 `Auth` captures the options literal as a generic (`const O`), and TypeScript does no excess-property check on an inferred type parameter. So each arm declares the other store's keys with a value type nothing can satisfy: `ERROR_needs_store_cognito<'emailPassword'>` (and `mfa`, `passkeys`, `hostedUi`, `admin`, `userPool`, `featurePlan`, `email`, `codeDelivery`, `totpVerification`, `users.<anything but groups>`), and, on both arms, `ERROR_replaced_by_providers` for `socialProviders` / `oidcProviders` / `samlProviders` and `ERROR_federateVia_replaced_by_store` for an OIDC entry's `federateVia`. The type name is what the compiler prints, so the error names the fix. `AuthOptions` lists the `'builtin'` arm first so that a literal with no `store` is reported against the Cognito arm. The gates follow the store: `EmailPasswordEnabled` / `PasswordGate` treat `'builtin'` as disabled, `auth.admin` needs the Cognito arm, and `ProviderIdOf<O>` is the `providers` keys.
 
@@ -54,6 +54,7 @@ The public options (`AuthOptions` in `src/types.ts`) are a union discriminated o
 | `store: 'cognito'`; `type: 'saml'` | `samlProviders.<id>` |
 | `store: 'cognito'`; `type: 'oidc'` | `oidcProviders.<id>` with `federateVia: 'cognito'` |
 | `store: 'builtin'`; `type: 'oidc' \| 'oauth2' \| 'stub'` | `oidcProviders.<id>` with `federateVia: 'direct'`, and `emailPassword: false` |
+| `store: 'builtin'`; `type: 'verified'` | the id in `verifiedProviders` (no entry in `oidcProviders`), and `emailPassword: false` |
 | everything else (`session`, `redirects`, `users`, hooks, …) | unchanged; `store` is kept (`undefined` reads as `'cognito'`) |
 
 It also backstops the compiler for options it never saw (plain JavaScript, a cast, a variable annotated `: AuthOptions`, JSON-built config): an unknown `store`; a leftover old key (which the option validation, running first, already reports with what replaced it); a user-pool option on `store: 'builtin'` (`emailPassword: false` is accepted: it is what the block is anyway); a `'builtin'` block with no provider; a `type` the store does not accept (or none); and a social entry keyed differently from its `type`, which is also what keeps one entry per social type. The messages name the fix, as the type names do.
@@ -319,14 +320,18 @@ A `type: 'verified'` entry of a `store: 'builtin'` block is a provider with **no
 
 **The block verifies nothing.** That is the contract, stated on the method and in the README: the identity is trusted as passed. `checkedVerifiedIdentity()` only checks shape (a `subject` of 1 to 255 characters, the OIDC bound for `sub`; `claims` an object; `groups` strings), answering 400 `InvalidParameterException` before anything is stored.
 
+**`auth_time` is the block's, like `iss` and `sub`.** `recordFromFederated` reads a numeric `auth_time` claim as the session's `authTime`, which decides `requireAuth(ctx, { fresh: true })`. For a redirect provider that claim comes from an ID token the engine verified. Here it would be whatever the caller passed: a value in milliseconds would keep the session fresh until it ends, and the stale `auth_time` of a forwarded token payload would make a session opened a second ago never fresh. So `signInVerified()` drops `auth_time` from the claims, and the session is fresh from the call.
+
 **Lifetime: a fixed deadline.** The row is a `kind: 'direct'` row with no tokens and `expiresAt = sign-in + session.ttlSeconds`. `resolveSession` re-stamps a cookie and a row only after a successful refresh, and there is nothing upstream to refresh, so nothing extends the session: the cookie's `Max-Age` and the row's DynamoDB TTL, both written once at sign-in, end at the same moment. Two cases need care, and `resolveSession` handles both:
 
 - `getAuthSession({ forceRefresh: true })` enters the refresh path while the session is still valid. With no engine, `refreshRecord` answers `null`, which would sign the user out. So a verified session inside its deadline is served as it is, before the refresh path and without a write.
-- Past the deadline the same `null` is the wanted answer: the row is deleted and the cookie cleared.
+- Past the deadline the store's TTL hides the row (it is stamped with the same `session.ttlSeconds`), so the read finds nothing and the cookie is cleared; DynamoDB deletes the row later. If a read still finds the row, `refreshRecord`'s `null` ends it: the row is deleted and the cookie cleared.
 
 A sliding limit was not built: it would let a session live for ever with nothing upstream that could end it. An app that wants a longer session sets `session.ttlSeconds`.
 
-**Sign-out is local.** There is no upstream session to end, so `signOut` deletes the row and clears the cookie. In `createApi()`'s signed-in state, a verified user's `signOut` action is the plain one answered by `setAuthState({ action: 'signOut' })`, as for a password user: the form-post action of a redirect provider points at the sign-out route, which a block with only verified providers does not mount.
+**Removing a verified provider ends its sessions.** `resolveSession` recognises a verified row by its issuer (`verified:…`), not by the current options. A verified row whose provider is no longer a `type: 'verified'` entry (removed, renamed, or its id reused for a redirect provider) is deleted and its cookie cleared on the next request. Without this, such a session would stay valid for the rest of `session.ttlSeconds`, since nothing refreshes it, and a `'builtin'` block has no `auth.admin` to revoke it. That matters when a provider is removed because its verification was found flawed.
+
+**Sign-out is local.** There is no upstream session to end, so `signOut` deletes the row and clears the cookie. In `createApi()`'s signed-in state, the `signOut` action is the form-post one only for a session of a redirect provider on a block that mounts the sign-out route (one with at least one redirect provider). A verified user, and any session on a block whose only providers are verified ones (a redirect provider's session from before it was removed), gets the plain action answered by `setAuthState({ action: 'signOut' })`, as a password user does.
 
 ### The stub IdP (`engines/stub-idp.ts`, mock only)
 
@@ -676,7 +681,7 @@ So on an email-only pool, key app data on `userSub` (= `userId`), and show `attr
 
 ## Mode gates
 
-A gated method takes a trailing rest parameter typed by `PasswordGate<O, T>` (email + password methods) or `FederationGate<O, T>` (federated sign-in). `T` is the method's ordinary trailing optional parameters.
+A gated method takes a trailing rest parameter typed by `PasswordGate<O, T>` (email + password methods), `FederationGate<O, T>` (federated sign-in) or `VerifiedGate<O, T>` (`signInVerified`). `T` is the method's ordinary trailing optional parameters.
 
 - Mode enabled → the gate resolves to `T`, so the method reads and calls normally.
 - Mode disabled → the gate resolves to `[ERROR_…: never]`, so every call is a compile error.
@@ -691,8 +696,9 @@ A gated method takes a trailing rest parameter typed by `PasswordGate<O, T>` (em
 
 - Email + password is *unknown* (`EmailPasswordEnabled` is `boolean`): the gate accepts both resolutions, so calls compile and the runtime `EmailPasswordNotEnabledException` backs them. Cost: hovering a password method on a zero-config instance shows the union, including the `ERROR_…` name.
 - Federation is *closed* (`HasFederatedProvider` is `false`): `new Auth(scope, 'auth').getSignInUrl(…)` is a compile error, and a helper typed `(auth: Auth)` cannot call federation methods — type it with the instance's own type (`typeof auth`) instead.
+- `signInVerified` is *closed* the same way (`HasVerifiedProvider` is `false`).
 
-Each gate is backed at runtime by an `ApiError` — `EmailPasswordNotEnabledException` / `NoFederatedProviderException` — for untyped JavaScript callers.
+Each gate is backed at runtime by an `ApiError` — `EmailPasswordNotEnabledException` / `NoFederatedProviderException`, and for `signInVerified` 400 `ProviderNotConfiguredException` — for untyped JavaScript callers.
 
 **The account and admin gates**, on the same rest-parameter technique:
 

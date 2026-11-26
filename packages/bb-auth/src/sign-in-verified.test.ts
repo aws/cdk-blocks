@@ -11,7 +11,7 @@ import { rmSync } from 'node:fs';
 import { afterEach, beforeEach, describe, test } from 'node:test';
 import { AuthErrors } from './errors.js';
 import { resolveOptions } from './resolve-options.js';
-import { Browser, makeAuth } from './test-helpers.js';
+import { Browser, makeAuth, makeContext } from './test-helpers.js';
 
 beforeEach(() => rmSync('.cdk-blocks/local/data', { recursive: true, force: true }));
 afterEach(() => rmSync('.cdk-blocks/local/data', { recursive: true, force: true }));
@@ -66,18 +66,34 @@ describe('signInVerified', () => {
 			store: 'builtin',
 			providers: { appleNative: { type: 'verified' } },
 			validateUser: async (candidate) => {
-				seen.push({ provider: candidate.provider, subject: candidate.subject, email: candidate.email });
+				seen.push({
+					provider: candidate.provider,
+					subject: candidate.subject,
+					email: candidate.email,
+					iss: candidate.claims.iss,
+					sub: candidate.claims.sub,
+				});
 				throw new Error('not on the allowlist');
 			},
 		});
 		const b = new Browser();
 		await assert.rejects(
 			b.request((ctx) =>
-				h.auth.signInVerified('appleNative', { subject: 'u-1', claims: { email: 'eve@example.com' } }, ctx),
+				h.auth.signInVerified(
+					'appleNative',
+					{ subject: 'u-1', claims: { email: 'eve@example.com', iss: 'https://okta.example.com', sub: 'x' } },
+					ctx,
+				),
 			),
 		);
 		assert.deepStrictEqual(seen, [
-			{ provider: 'appleNative', subject: 'verified:appleNative:u-1', email: 'eve@example.com' },
+			{
+				provider: 'appleNative',
+				subject: 'verified:appleNative:u-1',
+				email: 'eve@example.com',
+				iss: 'verified:appleNative',
+				sub: 'u-1',
+			},
 		]);
 		assert.strictEqual(b.jar.has(h.cookieName), false);
 		assert.strictEqual(await b.request((ctx) => h.auth.getCurrentUser(ctx)), null);
@@ -124,6 +140,80 @@ describe('signInVerified', () => {
 		assert.strictEqual(await b.request((ctx) => h.auth.getCurrentUser(ctx)), null);
 	});
 
+	test('forceRefresh still refreshes a redirect provider session on a block that also has a verified provider', async () => {
+		const h = makeAuth({
+			store: 'builtin',
+			providers: {
+				appleNative: { type: 'verified' },
+				okta: { type: 'oidc', issuer: 'https://okta.example.com', clientId: 'c' },
+			},
+		});
+		const okta = h.federation.get('okta');
+		assert.ok(okta);
+		okta.identity = {
+			kind: 'direct',
+			issuer: 'https://okta.example.com',
+			subject: 'u-1',
+			claims: { sub: 'u-1', iss: 'https://okta.example.com' },
+			groups: [],
+			expiresAt: Date.now() + 3600_000,
+		};
+		const b = new Browser();
+		await b.request((ctx) => h.auth.completeFederated(ctx, 'okta'));
+		await b.request((ctx) => h.auth.getAuthSession(ctx, { forceRefresh: true }));
+		assert.ok(okta.calls.includes('refresh:direct'));
+	});
+
+	test('the session is counted from the call: an auth_time in the claims does not decide { fresh: true }', async (t) => {
+		t.mock.timers.enable({ apis: ['Date'], now: START });
+		const h = makeAuth({
+			store: 'builtin',
+			session: { freshAgeSeconds: 60 },
+			providers: { appleNative: { type: 'verified' } },
+		});
+		const b = new Browser();
+		await b.request((ctx) =>
+			h.auth.signInVerified('appleNative', { subject: 'u-1', claims: { auth_time: START + 86_400_000 } }, ctx),
+		);
+		await b.request((ctx) => h.auth.requireAuth(ctx, { fresh: true }));
+
+		t.mock.timers.setTime(START + 61_000);
+		await assert.rejects(
+			b.request((ctx) => h.auth.requireAuth(ctx, { fresh: true })),
+			{ name: AuthErrors.ReauthenticationRequired },
+		);
+
+		const old = new Browser();
+		await old.request((ctx) =>
+			h.auth.signInVerified('appleNative', { subject: 'u-2', claims: { auth_time: 1 } }, ctx),
+		);
+		await old.request((ctx) => h.auth.requireAuth(ctx, { fresh: true }));
+	});
+
+	test('removing a verified provider ends its sessions', async () => {
+		const before = makeAuth({ store: 'builtin', providers: { magic: { type: 'verified' } } });
+		const b = new Browser();
+		await b.request((ctx) => before.auth.signInVerified('magic', { subject: 'u-1' }, ctx));
+		const cookie = b.cookieHeader();
+		assert.ok(cookie);
+
+		const after = makeAuth(
+			{ store: 'builtin', providers: { wallet: { type: 'verified' } } },
+			{ rootId: before.auth.parent.id },
+		);
+		assert.strictEqual(await b.request((ctx) => after.auth.getCurrentUser(ctx)), null);
+		assert.strictEqual(b.jar.has(after.cookieName), false, 'the cookie is cleared');
+		const restored = makeAuth(
+			{ store: 'builtin', providers: { magic: { type: 'verified' } } },
+			{ rootId: before.auth.parent.id },
+		);
+		assert.strictEqual(
+			await restored.auth.getCurrentUser(makeContext(cookie)),
+			null,
+			'the row is gone: putting the provider back does not bring the session back',
+		);
+	});
+
 	test('signOut ends the session', async () => {
 		const h = makeAuth({ store: 'builtin', providers: { appleNative: { type: 'verified' } } });
 		const b = new Browser();
@@ -151,8 +241,10 @@ describe('signInVerified', () => {
 
 	for (const [what, identity] of [
 		['an empty subject', { subject: '' }],
+		['a subject over 255 characters', { subject: 'x'.repeat(256) }],
 		['a subject that is not a string', { subject: 42 }],
 		['claims that are not an object', { subject: 'u-1', claims: 'email' }],
+		['claims that are an array', { subject: 'u-1', claims: ['email'] }],
 		['groups that are not strings', { subject: 'u-1', groups: [1] }],
 	] as const) {
 		test(`${what} is refused before anything is stored`, async () => {
@@ -182,7 +274,7 @@ describe("type: 'verified' in the options", () => {
 		assert.throws(
 			// @ts-expect-error: `type: 'verified'` is not a default-store provider.
 			() => resolveOptions({ providers: { appleNative: { type: 'verified' } } }, 'auth'),
-			/providers\.appleNative.*`type: 'verified'`.*store: 'builtin'/s,
+			/providers\.appleNative has `type: 'verified'`, which needs `store: 'builtin'`/,
 		);
 	});
 

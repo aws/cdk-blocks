@@ -76,6 +76,7 @@ Choose this first, once per block, with `store`. It decides which sign-in method
 | `type: 'saml'` | Yes | No |
 | `type: 'oidc'` | Yes, federated through Cognito; `clientSecret` required | Yes, verified by your backend; `clientSecret` optional, `groupsClaim` for roles |
 | `type: 'oauth2'` (`github()`, `customOauth2()`) and `type: 'stub'` (`stubIdp()`) | No | Yes |
+| `type: 'verified'` (an identity your own code verified; [recipe](#sign-in-an-identity-your-own-code-verified)) | No | Yes |
 | `users` | The full user-pool shape (`signInWith`, `attributes`, `groups`, …) | `users.groups` only |
 | `userPool` (wrap an existing pool), `admin`, `hostedUi`, `featurePlan` | Yes | No |
 | `allowBearerAuth` | `true` (Cognito access tokens) or `{ clientIds }` (other app clients of the pool) | `true` (the provider's access token) |
@@ -618,8 +619,9 @@ Then:
 
 - **The block verifies nothing here.** It trusts the identity you pass. A method that passes client input straight to `signInVerified()` lets anyone sign in as anyone.
 - **`userId` is `` `verified:${providerId}:${subject}` ``**, here `verified:appleNative:<sub>`. It can never equal another provider's `userId`, so the same person signing in through a redirect provider is a different user. The provider id must not contain `:` (the block refuses it at construction); the subject may.
-- **String-valued `claims` become the user's `attributes`**, and `groups` (optional) are narrowed to `users.groups`, so `requireRole()` works.
+- **String-valued `claims` become the user's `attributes`**, and `groups` (optional) are narrowed to `users.groups`, so `requireRole()` works. `iss`, `sub` and `auth_time` in `claims` are ignored: the block sets them, and the user counts as signed in at the time of the call (`requireAuth(context, { fresh: true })`).
 - **The session lasts `session.ttlSeconds` from sign-in.** There is no token to refresh, so neither use nor `getAuthSession({ forceRefresh: true })` extends it; the user signs in again when it ends.
+- **Removing the provider ends its sessions.** A session of a `type: 'verified'` provider that is no longer in `providers` (removed or renamed) is signed out on its next request.
 - **No route or UI action.** A `type: 'verified'` provider mounts no sign-in route, has no `signIn:<id>` action, and `getSignInUrl()` does not accept its id. A block may mix it with redirect providers.
 
 ### End-to-end tests: emailed codes and two users at once
@@ -918,7 +920,7 @@ Use `state.retriable`, not `errorName` alone, to decide whether to keep the form
 - `signIn`, `confirmSignIn` and `autoSignIn` return only the `nextStep` values the configuration can produce, so a `switch` on `nextStep.name` handles just those: the MFA steps need `mfa` on (and each factor's steps that factor in `mfa.types`), `CONFIRM_SIGN_IN_WITH_WEB_AUTHN` needs `passkeys`, and the first-factor steps need `users.authFlow: 'USER_AUTH'`. With `userPool: Auth.fromExisting(…)` every step stays, since the wrapped pool's own settings decide them. The full list is in `SignInNextStep`'s documentation.
 - The same gates apply to the input of `authApi.setAuthState(…)` and `submitAuthAction(authApi, …)` (`AuthActionInputOf<O>`), in the frontend too: with `emailPassword: false`, `authApi.setAuthState({ action: 'signIn', … })` and `submitAuthAction(authApi, { action: 'signIn', … })` are compile errors.
 - As actions, `setUpTotp` / `verifyTotpSetup` also need `'TOTP'` in `mfa.types`, and `confirmSignIn` takes only the challenges that answer the steps above (`mfaType` one of `mfa.types`).
-- A narrowly configured instance is still assignable to the plain `Auth` type, so helpers typed `(auth: Auth)` keep working. On the plain type, federation and `auth.admin` are closed (type such a helper with the instance's own type, `typeof auth`), while the email + password, MFA and passkey methods stay callable and are checked at runtime. That includes `new Auth(scope, 'auth')` with no options, which the compiler cannot tell apart from the plain type.
+- A narrowly configured instance is still assignable to the plain `Auth` type, so helpers typed `(auth: Auth)` keep working. On the plain type, federation, `signInVerified` and `auth.admin` are closed (type such a helper with the instance's own type, `typeof auth`), while the email + password, MFA and passkey methods stay callable and are checked at runtime. That includes `new Auth(scope, 'auth')` with no options, which the compiler cannot tell apart from the plain type.
 
 The gates are TypeScript-only. A native client (Swift, Kotlin, Dart) gets the types from the OpenRPC spec in their wide form, whatever the options:
 
@@ -967,7 +969,7 @@ The compiler checks the option combinations:
 
 - With `store: 'builtin'`, `emailPassword` (other than `false`), `mfa`, `passkeys`, `admin`, `userPool`, `users.signInWith` and the other user-pool options are compile errors whose type names the fix (`ERROR_needs_store_cognito<'emailPassword'>`). So is a `type: 'google'` or `type: 'saml'` entry.
 - On the default store, `stubIdp()`, `github()` and a `type: 'oidc'` entry without `clientSecret` are compile errors.
-- With `store` set, autocomplete for `type:` lists only that store's types. With `store` omitted it lists every type, and the compiler rejects `'oauth2'` / `'stub'`.
+- With `store` set, autocomplete for `type:` lists only that store's types. With `store` omitted it lists every type, and the compiler rejects `'oauth2'` / `'stub'` / `'verified'`.
 
 The constructor checks the same rules again (in `npm run dev`, at synth and in Lambda) with a readable message. It also rejects what the compiler cannot see:
 
@@ -1145,7 +1147,7 @@ new Auth(scope, 'auth', {
 
 - **Session and `baseUrl`.** The session is the block's usual `HttpOnly` cookie. No token is stored in JavaScript or put in a URL. The provider's `redirect_uri` is `<baseUrl><callbackPath>`, so `baseUrl` must be the origin your providers have registered (for providers federated through Cognito, the app origin the block registers on its managed-login client).
 - **Local development.** A frontend at `http://127.0.0.1:<port>` is always allowed, and the dev server's CORS already admits it. Open both the frontend and the dev server at `127.0.0.1` (not `localhost`), so they are the same site and the session cookie needs no `crossDomain`.
-- **Which providers.** Every `providers` entry, on either store, since each signs in by redirect: `type: 'oidc'`, `github()` / `customOauth2()` and `stubIdp()` (locally) on a `store: 'builtin'` block; social, SAML and `type: 'oidc'` on the default store. Email and password sign-in keeps using `authApi` (`getAuthState` / `setAuthState`), which works across origins with the same CORS and cookie settings.
+- **Which providers.** Every `providers` entry that signs in by redirect, on either store: `type: 'oidc'`, `github()` / `customOauth2()` and `stubIdp()` (locally) on a `store: 'builtin'` block; social, SAML and `type: 'oidc'` on the default store. A `type: 'verified'` entry has no redirect and is not one of them. Email and password sign-in keeps using `authApi` (`getAuthState` / `setAuthState`), which works across origins with the same CORS and cookie settings.
 - **Sign-out.** `signOut()` ends the block's session. When the provider keeps its own session (Cognito managed login, or an OIDC provider with an `end_session_endpoint`), it also returns `logoutUrl`; `endProviderSession: true` navigates there. The provider then returns the browser to `redirects.postSignOutPath` on the API's origin.
 - **Names.** The methods follow Amplify JS v6 (`signInWithRedirect`, `fetchAuthSession`, `getCurrentUser`, `signOut`); the user and the errors are the block's own (for example, `isBlocksError(e, 'InvalidRelayException')`). `user.userId` is the block's id; the Cognito `sub` that Amplify's `getCurrentUser().userId` returns is `user.userSub`.
 
