@@ -224,3 +224,10 @@ Before 1.0.0 every breaking change was filed as `minor`, because a `minor` bump 
 release off 1.x reads as safe to tools that resolve ranges, such as Dependabot,
 Renovate, or a `1.+` Gradle constraint, and they will pull it in without review. A
 source-breaking change filed as `minor` now ships to those callers as a silent break.
+
+The changeset text becomes the public changelog entry, so keep it terse and about
+consumers only: write the minimum a reader needs to judge how the change affects their
+app. Leave out implementation details such as class names, file names, internal
+mechanisms, and how the change was tested; those belong in the PR description. For
+example, write "Drop the `androidx.security:security-crypto` dependency from the
+Android runtime." rather than explaining how the old credential file is now cleaned up.
