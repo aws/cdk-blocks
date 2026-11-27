@@ -730,13 +730,25 @@ async function importAppFileForStage<TConfig>(
   stageConfig: PipelineStageConfig<TConfig>,
   appFile: string,
 ): Promise<void> {
-  const stageEnv = stageConfig.environment;
+  // Variables set on process.env for the import. CDK_DEFAULT_ACCOUNT and
+  // CDK_DEFAULT_REGION describe the environment the CDK CLI runs the pipeline
+  // in, not the stage the app is being imported for, so an app file that
+  // passes them as its stack's `env` would override the stage's environment.
+  // They take the stage's account and region for the import, and are unset
+  // where the stage resolves none (undefined or a token), so the stack falls
+  // back to the stage.
+  const importEnv: Record<string, string | undefined> = {
+    ...stageConfig.environment,
+    CDK_DEFAULT_ACCOUNT: cdk.Token.isUnresolved(stage.account) ? undefined : stage.account,
+    CDK_DEFAULT_REGION: cdk.Token.isUnresolved(stage.region) ? undefined : stage.region,
+  };
   const savedEnv: Record<string, string | undefined> = {};
 
-  // Set stage-specific env vars on process.env
-  if (stageEnv) {
-    for (const [key, value] of Object.entries(stageEnv)) {
-      savedEnv[key] = process.env[key];
+  for (const [key, value] of Object.entries(importEnv)) {
+    savedEnv[key] = process.env[key];
+    if (value === undefined) {
+      delete process.env[key];
+    } else {
       process.env[key] = value;
     }
   }
@@ -768,13 +780,11 @@ async function importAppFileForStage<TConfig>(
     delete (globalThis as any)[__PIPELINE_STAGE_SCOPE__];
 
     // Restore process.env
-    if (stageEnv) {
-      for (const key of Object.keys(stageEnv)) {
-        if (savedEnv[key] === undefined) {
-          delete process.env[key];
-        } else {
-          process.env[key] = savedEnv[key];
-        }
+    for (const key of Object.keys(importEnv)) {
+      if (savedEnv[key] === undefined) {
+        delete process.env[key];
+      } else {
+        process.env[key] = savedEnv[key];
       }
     }
   }

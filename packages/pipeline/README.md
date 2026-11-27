@@ -44,6 +44,14 @@ pipeline for the synth step. Keep `cdk.json` pointed at `cdk-blocks/index.cdk.ts
 for local app deploys. To deploy the pipeline itself from the project root,
 run `npx cdk deploy --app "npx tsx -C cdk cdk-blocks/pipeline.cdk.ts"`.
 
+Inside a pipeline the app's stack takes the stage's environment (its `env`,
+the pipeline's account and region when the stage sets none), also when the app
+file passes the CDK CLI's environment to its stack, as in
+`env: { account: process.env.CDK_DEFAULT_ACCOUNT, region: process.env.CDK_DEFAULT_REGION }`.
+While the file is imported for a stage, those two variables hold the account
+and region of the stage's `env` and are unset where it has none; a stage's
+`environment` cannot set them.
+
 For multiple stages with the same app file, give each stage a distinct
 `BlocksStack.create()` ID. For example, set `environment: { APP_STAGE: 'beta' }`
 and `environment: { APP_STAGE: 'prod' }` on the stages, and use
@@ -81,6 +89,10 @@ new Pipeline(stack, 'Pipeline', {
   },
 });
 ```
+
+A `stageFactory` is not imported that way: there `CDK_DEFAULT_ACCOUNT` and
+`CDK_DEFAULT_REGION` are the environment the CDK CLI runs the pipeline in.
+Pass `stageConfig.env` to the stacks it creates, not those variables.
 
 ### `Pipeline.create()` and `new Pipeline()`
 

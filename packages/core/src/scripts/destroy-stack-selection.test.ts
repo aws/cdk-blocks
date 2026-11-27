@@ -6,28 +6,30 @@ import assert from 'node:assert';
 import { execFile, execFileSync } from 'node:child_process';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
-import { buildSandboxDeployArgs, cdkAppCommand } from './sandbox.js';
-import { cdkListedStacks, stackExists } from './destroy.js';
+import { type AssemblyStackNode, buildSandboxDeployArgs, cdkAppCommand } from './sandbox.js';
+import { selectProductionStacks, stackExists } from './destroy.js';
 
-// The sandbox destroy must select the same stacks the sandbox deploy creates.
-// (The production destroy follows in a separate change, together with its
-// confirmation; `npm run deploy` already passes `--all`.) With no selector,
+// A destroy must select the stacks its deploy creates. With no selector,
 // `cdk destroy` refuses an app with more than one top-level stack ("Since
 // this app includes more than a single stack, specify which stacks to use ...
-// or specify `--all`"), so a sandbox deployed with `--all` (e.g. a
-// Lambda@Edge `edge-lambda-stack-*` outside us-east-1, or a `Vpc.fromLookup`
-// reference stack) could never be destroyed. The real destroy functions run in
-// a child process against fake `npm`/`npx` binaries that record their argv, so
-// no CDK or AWS call is made. The fakes are POSIX shell scripts (no `.cmd`).
+// or specify `--all`"), so an app deployed with `--all` (e.g. a Lambda@Edge
+// `edge-lambda-stack-*` outside us-east-1, a `Vpc.fromLookup` reference stack,
+// or Hosting's us-east-1 CloudFront monitoring stack) could never be destroyed.
+// The sandbox destroy passes `--all`: a sandbox owns every stack it synthesizes.
+// The production destroy names the app stack and its monitoring stack, and
+// nothing else. The real destroy functions run in a child process against fake
+// `npm`/`npx` binaries that record their argv, so no CDK or AWS call is made.
+// The fakes are POSIX shell scripts (no `.cmd`).
 
 const skip = process.platform === 'win32';
 let root: string;
 let argvLog: string;
 let cdkLog: string;
+let synthLog: string;
 
 before(() => {
   if (skip) return;
@@ -36,20 +38,28 @@ before(() => {
   mkdirSync(bin);
   argvLog = join(root, 'argv.log');
   cdkLog = join(root, 'cdk.log');
+  synthLog = join(root, 'synth.log');
   for (const name of ['npm', 'npx']) {
     const file = join(bin, name);
     // Records its argv and, like CDK, writes a manifest into the `--output`
-    // directory. cdk.log gets the working directory, the stage environment and
-    // whether a stale file was still in that directory when it ran.
+    // directory. cdk.log gets the working directory, the stage environment,
+    // whether a stale file was still in that directory when it ran, and
+    // whether the `--app` directory held an assembly.
     writeFileSync(
       file,
-      // `cdk ls` prints the stacks in ZZ_STACKS and records nothing.
-      `#!/bin/sh\nif [ "$2" = ls ]; then printf '%s\\n' "$ZZ_STACKS"; exit 0; fi\n` +
+      // `cdk synth` (the production destroy's) writes the manifest in ZZ_MANIFEST
+      // and records its argv and stage environment in synth.log, not in argv.log.
+      `#!/bin/sh\nif [ "$2" = synth ]; then printf '%s\\n' "$@" "stage=$BLOCKS_STAGE mark=$ZZ_MARK" > "${synthLog}"\n` +
+        `prev=\nfor a in "$@"; do if [ "$prev" = --output ]; then ` +
+        `/bin/mkdir -p "$a" && printf '%s' "$ZZ_MANIFEST" > "$a/manifest.json"; fi; prev=$a; done\nexit 0\nfi\n` +
         `printf '%s\\n' "$@" > "${argvLog}"\necho "cwd=$PWD" > "${cdkLog}"\n` +
         `echo "stage=$BLOCKS_STAGE mark=$ZZ_MARK" >> "${cdkLog}"\necho "app=$BLOCKS_CDK_APP_ENTRY" >> "${cdkLog}"\n` +
         `prev=\nfor a in "$@"; do if [ "$prev" = --output ]; then ` +
         `if [ -e "$a/stale.json" ]; then echo stale-seen >> "${cdkLog}"; fi; ` +
-        `/bin/mkdir -p "$a" && echo '{}' > "$a/manifest.json"; fi; prev=$a; done\n`,
+        `/bin/mkdir -p "$a" && echo '{}' > "$a/manifest.json"; fi; ` +
+        `if [ "$prev" = --app ] && [ -e "$a/manifest.json" ]; then echo assembly-seen >> "${cdkLog}"; fi; prev=$a; done\n` +
+        // A destroy that can never succeed: the retry loop stops at once on this line.
+        `if [ -n "$ZZ_FAIL_DESTROY" ]; then echo 'Error: Region is missing' >&2; exit 1; fi\n`,
     );
     chmodSync(file, 0o755);
   }
@@ -121,24 +131,44 @@ describe('destroy selects the stacks its deploy creates', { skip }, () => {
   });
 });
 
-describe('the production destroy of a stack that does not exist', { skip }, () => {
-  /** Loopback STS and CloudFormation: GetCallerIdentity succeeds; DescribeStacks knows only `live-prod`. */
+/** A stack artifact of a cloud assembly manifest; by default in 111111111111, the account the fake STS verifies. */
+function stackArtifact(region: string, dependencies: string[] = [], stackName?: string, account = '111111111111') {
+  return {
+    type: 'aws:cloudformation:stack',
+    environment: `aws://${account}/${region}`,
+    dependencies,
+    properties: { templateFile: 'stack.template.json', ...(stackName ? { stackName } : {}) },
+  };
+}
+
+describe('the production destroy', { skip }, () => {
+  /**
+   * Loopback STS and CloudFormation: GetCallerIdentity succeeds; DescribeStacks knows
+   * the stacks in `live`, whatever the Region, and records `<region>:<stack>` in `lookups`.
+   */
   let server: Server;
   let endpoint: string;
+  const live = new Set(['live-prod']);
+  const lookups: string[] = [];
   before(async () => {
     server = createServer((req, res) => {
       let body = '';
       req.on('data', (chunk) => (body += chunk));
       req.on('end', () => {
         const params = new URLSearchParams(body);
+        const stackName = params.get('StackName') ?? '';
         res.setHeader('content-type', 'text/xml');
         if (params.get('Action') === 'GetCallerIdentity') {
           res.end('<GetCallerIdentityResponse><GetCallerIdentityResult><Arn>arn:aws:iam::111111111111:user/u</Arn><Account>111111111111</Account></GetCallerIdentityResult></GetCallerIdentityResponse>');
-        } else if (params.get('StackName') === 'live-prod') {
-          res.end('<DescribeStacksResponse><DescribeStacksResult><Stacks><member><StackName>live-prod</StackName><StackStatus>UPDATE_COMPLETE</StackStatus><CreationTime>2026-01-01T00:00:00Z</CreationTime></member></Stacks></DescribeStacksResult></DescribeStacksResponse>');
+          return;
+        }
+        // The Region is in the credential scope of the signature: Credential=<key>/<date>/<region>/<service>/aws4_request.
+        lookups.push(`${/Credential=[^/]+\/\d+\/([^/]+)\//.exec(req.headers.authorization ?? '')?.[1]}:${stackName}`);
+        if (live.has(stackName)) {
+          res.end(`<DescribeStacksResponse><DescribeStacksResult><Stacks><member><StackName>${stackName}</StackName><StackStatus>UPDATE_COMPLETE</StackStatus><CreationTime>2026-01-01T00:00:00Z</CreationTime></member></Stacks></DescribeStacksResult></DescribeStacksResponse>`);
         } else {
           res.statusCode = 400;
-          res.end(`<ErrorResponse><Error><Type>Sender</Type><Code>ValidationError</Code><Message>Stack with id ${params.get('StackName')} does not exist</Message></Error></ErrorResponse>`);
+          res.end(`<ErrorResponse><Error><Type>Sender</Type><Code>ValidationError</Code><Message>Stack with id ${stackName} does not exist</Message></Error></ErrorResponse>`);
         }
       });
     });
@@ -147,16 +177,28 @@ describe('the production destroy of a stack that does not exist', { skip }, () =
   });
   after(() => new Promise<void>((resolve) => server.close(() => resolve())));
 
+  /** The assembly directories of production destroys still in the project. */
+  const assemblyDirs = () => readdirSync(join(root, '.cdk-blocks-sandbox')).filter((name) => name.startsWith('destroy-'));
+  /** The value of `flag` in a recorded argv. */
+  const valueOf = (argv: string[], flag: string) => argv[argv.indexOf(flag) + 1];
+
   /**
-   * Run the production destroy in a child, with a CDK app that defines `stacks`;
-   * the server must keep answering, so not execFileSync.
+   * Run the production destroy in a child, with a CDK app that synthesizes
+   * `artifacts` (default: the one stack `stackName`, in us-east-1) and with
+   * `deployed` as the stacks CloudFormation has; the server must keep
+   * answering, so not execFileSync.
    */
   async function runDestroy(
     stackName: string,
-    stacks = stackName,
+    artifacts: Record<string, unknown> = { [stackName]: stackArtifact('us-east-1') },
     env: NodeJS.ProcessEnv = {},
-  ): Promise<{ failed: boolean; output: string; cdkRan: boolean }> {
+    deployed: string[] = ['live-prod'],
+  ): Promise<{ failed: boolean; output: string; cdkRan: boolean; argv: string[] }> {
     rmSync(argvLog, { force: true });
+    rmSync(synthLog, { force: true });
+    lookups.length = 0;
+    live.clear();
+    for (const stack of deployed) live.add(stack);
     const moduleUrl = new URL('./destroy.js', import.meta.url).href;
     const options = JSON.stringify({ cdkAppPath: 'cdk-blocks/index.cdk.ts', projectRoot: root, stackName });
     const script = `const mod = await import(${JSON.stringify(moduleUrl)}); await mod.destroy(${options});`;
@@ -171,7 +213,7 @@ describe('the production destroy of a stack that does not exist', { skip }, () =
         AWS_SECRET_ACCESS_KEY: 'secret',
         AWS_ENDPOINT_URL_STS: endpoint,
         AWS_ENDPOINT_URL_CLOUDFORMATION: endpoint,
-        ZZ_STACKS: stacks,
+        ZZ_MANIFEST: JSON.stringify({ version: '36.0.0', artifacts }),
         ...env,
       },
       timeout: 60_000,
@@ -180,8 +222,21 @@ describe('the production destroy of a stack that does not exist', { skip }, () =
       (result) => ({ failed: false, ...result }),
       (error: { stdout: string; stderr: string }) => ({ failed: true, stdout: error.stdout, stderr: error.stderr }),
     );
-    return { failed, output: `${stdout}${stderr}`, cdkRan: existsSync(argvLog) };
+    const cdkRan = existsSync(argvLog);
+    const argv = cdkRan ? readFileSync(argvLog, 'utf-8').split('\n').filter(Boolean) : [];
+    return { failed, output: `${stdout}${stderr}`, cdkRan, argv };
   }
+
+  /** An app in eu-west-1 with Hosting's us-east-1 monitoring stack, a Lambda@Edge stack, a VPC lookup stack and an unrelated stack. */
+  const hostedApp = (app: string) => ({
+    [app]: stackArtifact('eu-west-1', [`${app}.assets`, 'edge-lambda-stack-c8', `${app}-vpc-ref`]),
+    [`${app}.assets`]: { type: 'cdk:asset-manifest', properties: { file: `${app}.assets.json` } },
+    [`${app}-CfMonitoring-0a1b2c3d`]: stackArtifact('us-east-1', [app]),
+    'edge-lambda-stack-c8': stackArtifact('us-east-1'),
+    [`${app}-vpc-ref`]: stackArtifact('eu-west-1'),
+    'other-prod': stackArtifact('eu-west-1'),
+  });
+  const EU = { AWS_REGION: 'eu-west-1' };
 
   it('says there is nothing to delete, and runs no cdk destroy', async () => {
     const missing = await runDestroy('gone-prod');
@@ -189,34 +244,202 @@ describe('the production destroy of a stack that does not exist', { skip }, () =
     assert.match(missing.output, /There is no stack gone-prod in Region us-east-1; nothing to delete\./);
     assert.doesNotMatch(missing.output, /destroyed/);
     assert.strictEqual(missing.cdkRan, false);
+    assert.deepStrictEqual(assemblyDirs(), [], 'the synthesized assembly is removed');
     const live = await runDestroy('live-prod');
     assert.strictEqual(live.cdkRan, true);
     assert.match(live.output, /Production stack destroyed/);
   });
 
+  it('deletes the app stack and its CloudFront monitoring stack from the assembly it inspected, and nothing else', async () => {
+    const run = await runDestroy('live-prod', hostedApp('live-prod'), EU, [
+      'live-prod',
+      'live-prod-CfMonitoring-0a1b2c3d',
+      'edge-lambda-stack-c8',
+      'other-prod',
+    ]);
+    assert.strictEqual(run.failed, false, run.output);
+    // The assembly this destroy synthesized, then exactly the two stacks by id; no `--all`, and no
+    // `--output` or `--context`, which would synthesize again. `--build=`: the CLI would run
+    // cdk.json's build command again for an assembly, outside the synth lock.
+    const assembly = valueOf(run.argv, '--app');
+    assert.deepStrictEqual(run.argv, [
+      'cdk',
+      'destroy',
+      '--app',
+      assembly,
+      '--build=',
+      '--exclusively',
+      'live-prod',
+      'live-prod-CfMonitoring-0a1b2c3d',
+      '--force',
+    ]);
+    assert.ok(assembly.startsWith(join(root, '.cdk-blocks-sandbox', 'destroy-')), assembly);
+    // `cdk destroy` ran in the project root on the assembly the one synth wrote ...
+    const cdk = readFileSync(cdkLog, 'utf-8');
+    assert.match(cdk, new RegExp(`^cwd=${realpathSync(root)}$`, 'm'));
+    assert.match(cdk, /^assembly-seen$/m);
+    const synth = readFileSync(synthLog, 'utf-8').split('\n').filter(Boolean);
+    assert.deepStrictEqual(synth.slice(0, 2), ['cdk', 'synth']);
+    assert.strictEqual(valueOf(synth, '--output'), assembly);
+    // ... which is removed once the stacks are gone.
+    assert.deepStrictEqual(assemblyDirs(), [], 'the synthesized assembly is removed');
+    // Each stack is looked up in its own Region, and the set is printed in the order CDK deletes it.
+    assert.ok(lookups.includes('eu-west-1:live-prod'), lookups.join(' '));
+    assert.ok(lookups.includes('us-east-1:live-prod-CfMonitoring-0a1b2c3d'), lookups.join(' '));
+    assert.match(run.output, /Deleting live-prod-CfMonitoring-0a1b2c3d in Region us-east-1, then live-prod in Region eu-west-1/);
+    assert.match(run.output, /Production stack destroyed/);
+    // What the app stack depended on stays, and is reported with its Region and the command to delete it ...
+    assert.match(run.output, /Not deleted: live-prod depended on this stack, which `npm run destroy` never deletes:/);
+    assert.match(run.output, /^ {5}edge-lambda-stack-c8 in Region us-east-1$/m);
+    assert.match(run.output, /^ {5}NODE_OPTIONS="--conditions=cdk" npx cdk destroy --exclusively edge-lambda-stack-c8$/m);
+    // ... but not a lookup stack that was never deployed, nor a stack the app stack has nothing to do with.
+    assert.doesNotMatch(run.output, /live-prod-vpc-ref|other-prod/);
+  });
+
+  it('synthesizes each destroy into its own directory, removed after a successful and after a failed destroy', async () => {
+    const first = await runDestroy('live-prod');
+    const second = await runDestroy('live-prod');
+    assert.strictEqual(first.failed, false, first.output);
+    assert.strictEqual(second.failed, false, second.output);
+    // Two destroys of one checkout never share an assembly: neither can replace the one the other checked.
+    assert.notStrictEqual(valueOf(first.argv, '--app'), valueOf(second.argv, '--app'));
+    assert.deepStrictEqual(assemblyDirs(), []);
+    // quiet: the retry loop reads the retained output, and stops at once on a failure no retry can fix.
+    const failing = await runDestroy('live-prod', undefined, { ZZ_FAIL_DESTROY: '1', BLOCKS_LOG_LEVEL: 'quiet' });
+    assert.strictEqual(failing.failed, true, failing.output);
+    assert.strictEqual(failing.cdkRan, true);
+    assert.match(failing.output, /Destroy failed: no AWS Region is set/);
+    assert.ok(![valueOf(first.argv, '--app'), valueOf(second.argv, '--app')].includes(valueOf(failing.argv, '--app')));
+    assert.deepStrictEqual(assemblyDirs(), [], 'the assembly of a failed destroy is removed too');
+    // A refused selection never reaches cdk destroy, and leaves no assembly either.
+    const refused = await runDestroy('live-prod', { 'my-blocks-stack-prod': stackArtifact('us-east-1') });
+    assert.strictEqual(refused.failed, true);
+    assert.deepStrictEqual(assemblyDirs(), []);
+  });
+
+  it('stops, and deletes nothing, when another stack depends on the app stack', async () => {
+    const run = await runDestroy(
+      'live-prod',
+      {
+        ...hostedApp('live-prod'),
+        'reports-prod': stackArtifact('eu-west-1', ['live-prod']),
+        // Named like a monitoring stack, but not in us-east-1: not Hosting's.
+        'live-prod-CfMonitoring-9f8e7d6c': stackArtifact('eu-west-1', ['live-prod']),
+      },
+      EU,
+    );
+    assert.strictEqual(run.failed, true, run.output);
+    assert.strictEqual(run.cdkRan, false);
+    assert.match(
+      run.output,
+      /reports-prod, live-prod-CfMonitoring-9f8e7d6c depend on live-prod, and `npm run destroy` deletes only live-prod and the CloudFront monitoring stack that Hosting adds for it; nothing was deleted\. Delete reports-prod, live-prod-CfMonitoring-9f8e7d6c first, then re-run `npm run destroy`\./,
+    );
+    assert.deepStrictEqual(lookups, [], 'no stack is looked up once the selection is refused');
+  });
+
+  it('finishes a teardown that left the monitoring stack behind', async () => {
+    const run = await runDestroy('half-prod', hostedApp('half-prod'), EU, ['half-prod-CfMonitoring-0a1b2c3d']);
+    assert.strictEqual(run.failed, false, run.output);
+    assert.match(
+      run.output,
+      /There is no stack half-prod in Region eu-west-1; deleting what is left of the app: half-prod-CfMonitoring-0a1b2c3d in Region us-east-1\./,
+    );
+    assert.deepStrictEqual(run.argv.slice(5), ['--exclusively', 'half-prod', 'half-prod-CfMonitoring-0a1b2c3d', '--force']);
+    assert.match(run.output, /Production stack destroyed/);
+  });
+
+  it('says there is nothing to delete when neither the app stack nor its monitoring stack exists', async () => {
+    const run = await runDestroy('gone-prod', hostedApp('gone-prod'), EU, ['edge-lambda-stack-c8', 'other-prod']);
+    assert.strictEqual(run.failed, false, run.output);
+    assert.match(
+      run.output,
+      /There is no stack gone-prod in Region eu-west-1, and no stack gone-prod-CfMonitoring-0a1b2c3d in Region us-east-1; nothing to delete\./,
+    );
+    assert.strictEqual(run.cdkRan, false);
+    assert.deepStrictEqual(lookups.sort(), ['eu-west-1:gone-prod', 'us-east-1:gone-prod-CfMonitoring-0a1b2c3d']);
+  });
+
+  // The destroy's own lookups use the credentials CDK destroys with, in the account STS verified.
+  // A stack name looked up for another account's stack would find a stack of this account, or
+  // none, and "none" must not read as "nothing to delete".
+  it('makes no AWS call of its own for a stack pinned to another account, and still hands it to cdk destroy', async () => {
+    const run = await runDestroy('gone-prod', {
+      'gone-prod': stackArtifact('us-east-1', ['shared-prod'], undefined, '222222222222'),
+      'shared-prod': stackArtifact('us-east-1', [], undefined, '222222222222'),
+    });
+    assert.strictEqual(run.failed, false, run.output);
+    assert.deepStrictEqual(lookups, []);
+    assert.match(
+      run.output,
+      /Not looking up gone-prod \(account 222222222222\), shared-prod \(account 222222222222\), .*: these credentials are for account 111111111111\./,
+    );
+    assert.doesNotMatch(run.output, /nothing to delete/);
+    assert.deepStrictEqual(run.argv.slice(5), ['--exclusively', 'gone-prod', '--force']);
+    // The stack it depended on is unknown too, so it is listed as possibly still there.
+    assert.match(run.output, /^ {5}shared-prod in Region us-east-1$/m);
+  });
+
+  it('makes no AWS call of its own when the account of the credentials could not be verified', async () => {
+    // STS cannot be reached: the credential check warns and continues, as it always did.
+    const run = await runDestroy('gone-prod', undefined, { AWS_ENDPOINT_URL_STS: 'http://127.0.0.1:9' });
+    assert.strictEqual(run.failed, false, run.output);
+    assert.deepStrictEqual(lookups, []);
+    assert.match(run.output, /Not looking up gone-prod \(account 111111111111\), .*: the AWS account of these credentials could not be verified\./);
+    assert.doesNotMatch(run.output, /nothing to delete/);
+    assert.strictEqual(run.cdkRan, true);
+  });
+
   it('refuses, and deletes nothing, when the CDK app does not define the named stack', async () => {
-    const other = await runDestroy('live-prod', 'my-blocks-stack-prod');
+    const other = await runDestroy('live-prod', { 'my-blocks-stack-prod': stackArtifact('us-east-1') });
     assert.strictEqual(other.failed, true);
     assert.strictEqual(other.cdkRan, false);
     assert.match(
       other.output,
       /The CDK app \(cdk-blocks\/index\.cdk\.ts\) defines my-blocks-stack-prod, not live-prod, the production stack that \.cdk-blocks\/config\.json names; nothing was deleted\./,
     );
-    // A construct id that differs from the stack name is listed as `id (name)`.
-    const named = await runDestroy('live-prod', 'Edge\nApp (live-prod)');
+    // A stack whose construct id differs from its name is selected by the id, which is what the CDK CLI matches.
+    const named = await runDestroy('live-prod', {
+      Edge: stackArtifact('us-east-1'),
+      App: stackArtifact('us-east-1', [], 'live-prod'),
+    });
     assert.strictEqual(named.cdkRan, true, named.output);
+    assert.deepStrictEqual(named.argv.slice(5), ['--exclusively', 'App', '--force']);
+  });
+
+  it('does not synthesize while another command of the checkout does, and holds no lock afterwards', async () => {
+    // A synth stages the frontend in directories the checkout shares: the lock of a command that
+    // still runs (this test process plays it) stops the destroy before its synth.
+    const lockFile = join(root, '.cdk-blocks-sandbox', 'synth.pid');
+    const theirLock = JSON.stringify({ pid: process.pid, ppid: 1, port: 0, token: 'theirs', invocation: 'npm run deploy' });
+    mkdirSync(join(root, '.cdk-blocks-sandbox'), { recursive: true });
+    writeFileSync(lockFile, theirLock);
+    try {
+      const blocked = await runDestroy('live-prod');
+      assert.strictEqual(blocked.failed, true, blocked.output);
+      assert.match(blocked.output, new RegExp(`\`npm run deploy\` \\(pid ${process.pid}\\) is generating the client and synthesizing this app`));
+      assert.ok(!existsSync(synthLog), 'no synth ran');
+      assert.strictEqual(blocked.cdkRan, false);
+      assert.strictEqual(readFileSync(lockFile, 'utf-8'), theirLock);
+    } finally {
+      rmSync(lockFile, { force: true });
+    }
+    // A destroy that runs takes the lock for its synth only, and releases it.
+    const live = await runDestroy('live-prod');
+    assert.strictEqual(live.failed, false, live.output);
+    assert.ok(!existsSync(lockFile));
   });
 
   it('loads .env.production before the Region check, as the production deploy does', async () => {
     writeFileSync(join(root, '.env.production'), 'AWS_REGION=us-east-1\nZZ_MARK=from-env-production\n');
     try {
-      const live = await runDestroy('live-prod', 'live-prod', { AWS_REGION: undefined });
+      const live = await runDestroy('live-prod', undefined, { AWS_REGION: undefined });
       assert.strictEqual(live.failed, false, live.output);
-      const argv = readFileSync(argvLog, 'utf-8').split('\n').filter(Boolean);
+      const synth = readFileSync(synthLog, 'utf-8').split('\n').filter(Boolean);
       // A destroy doesn't deploy the frontend, so Hosting reuses an existing build.
-      assert.strictEqual(argv[argv.indexOf('reuseFrontendBuild=true') - 1], '--context', `expected --context reuseFrontendBuild=true in: ${argv.join(' ')}`);
-      // cdk destroy synthesizes the app with the production environment.
-      assert.match(readFileSync(cdkLog, 'utf-8'), /^stage=production mark=from-env-production$/m);
+      assert.strictEqual(synth[synth.indexOf('reuseFrontendBuild=true') - 1], '--context', `expected --context reuseFrontendBuild=true in: ${synth.join(' ')}`);
+      assert.strictEqual(synth[synth.indexOf(`projectRoot=${root}`) - 1], '--context', `expected --context projectRoot in: ${synth.join(' ')}`);
+      // The destroy synthesizes the app with the production environment.
+      assert.ok(synth.includes('stage=production mark=from-env-production'), synth.join(' '));
     } finally {
       rmSync(join(root, '.env.production'), { force: true });
     }
@@ -254,20 +477,93 @@ describe('the production destroy of a stack that does not exist', { skip }, () =
   });
 });
 
-describe('cdkListedStacks', () => {
-  it('keeps only stack ids from cdk ls output, not the build output of the synth', () => {
-    const out = [
-      'AI agent detected',
-      '🏗️  Building frontend (spa): npm run build',
-      '> mig1@0.1.0 prebuild',
-      'blocks-generate-client: wrote /app/cdk-blocks/client.js',
-      'vite v6.4.5 building for production...',
-      '✓ built in 406ms',
-      'zz-app-prod',
-      'Main (zz-app-prod-main)',
-      'Stage/Nested',
-      '',
-    ].join('\n');
-    assert.deepStrictEqual(cdkListedStacks(out), ['zz-app-prod', 'Main (zz-app-prod-main)', 'Stage/Nested']);
+describe('selectProductionStacks', () => {
+  const node = (id: string, region: string | undefined, dependencies: string[] = [], stackName = id): AssemblyStackNode => ({
+    id,
+    selector: id,
+    stackName,
+    region,
+    account: region ? '111111111111' : undefined,
+    dependencies,
+  });
+  const app = node('zz-prod', 'eu-west-1', ['edge-lambda-stack-c8']);
+  const monitoring = node('zz-prod-CfMonitoring-0a1b2c3d', 'us-east-1', ['zz-prod']);
+  const edge = node('edge-lambda-stack-c8', 'us-east-1', ['shared']);
+  const shared = node('shared', 'us-east-1');
+  const unrelated = node('other-prod', 'eu-west-1');
+  const ids = (stacks: AssemblyStackNode[]) => stacks.map((stack) => stack.id);
+
+  it('selects the app stack and its monitoring stack, and leaves what the app stack depends on', () => {
+    const selection = selectProductionStacks([unrelated, monitoring, shared, edge, app], 'zz-prod');
+    assert.deepStrictEqual(ids(selection.stacks), ['zz-prod', 'zz-prod-CfMonitoring-0a1b2c3d']);
+    // Also what it depends on through another stack.
+    assert.deepStrictEqual(ids(selection.upstream).sort(), ['edge-lambda-stack-c8', 'shared']);
+  });
+
+  it('selects an environment-agnostic app stack on its own', () => {
+    const selection = selectProductionStacks([node('zz-prod', undefined)], 'zz-prod');
+    assert.deepStrictEqual(ids(selection.stacks), ['zz-prod']);
+    assert.deepStrictEqual(selection.upstream, []);
+  });
+
+  it('does not select a stack that only has the name of a monitoring stack', () => {
+    const lookalike = node('zz-prod-CfMonitoring-0a1b2c3d', 'us-east-1');
+    assert.deepStrictEqual(ids(selectProductionStacks([app, edge, shared, lookalike], 'zz-prod').stacks), ['zz-prod']);
+  });
+
+  it('refuses a stack that depends on the app stack and is not its monitoring stack', () => {
+    for (const [foreign, names] of [
+      // Another app's stack that reads from this one.
+      [[node('reports-prod', 'eu-west-1', ['zz-prod'])], 'reports-prod depends on zz-prod'],
+      // The monitoring name, outside us-east-1 or without the 8 hex digits.
+      [[node('zz-prod-CfMonitoring-0a1b2c3d', 'eu-west-1', ['zz-prod'])], 'zz-prod-CfMonitoring-0a1b2c3d depends on zz-prod'],
+      [[node('zz-prod-CfMonitoring-custom', 'us-east-1', ['zz-prod'])], 'zz-prod-CfMonitoring-custom depends on zz-prod'],
+      // A stack that depends on the monitoring stack, so on the app stack through it.
+      [[monitoring, node('dash', 'us-east-1', ['zz-prod-CfMonitoring-0a1b2c3d'])], 'dash depends on zz-prod'],
+    ] as const) {
+      assert.throws(
+        () => selectProductionStacks([app, edge, shared, ...foreign], 'zz-prod'),
+        (error: Error) => error.message.startsWith(`${names}, and \`npm run destroy\` deletes only zz-prod`) && /nothing was deleted/.test(error.message),
+        names,
+      );
+    }
+  });
+
+  it('names the invocation the user ran', () => {
+    assert.throws(
+      () => selectProductionStacks([app, edge, shared, node('reports-prod', 'eu-west-1', ['zz-prod'])], 'zz-prod', 'npm run destroy -- --yes'),
+      /Delete reports-prod first, then re-run `npm run destroy -- --yes`\./,
+    );
+  });
+
+  it('refuses an app that does not define the named stack, listing its stacks as `cdk ls` does', () => {
+    assert.throws(
+      () => selectProductionStacks([node('Main', 'eu-west-1', [], 'zz-app-prod-main'), unrelated], 'zz-prod'),
+      /defines Main \(zz-app-prod-main\), other-prod, not zz-prod, the production stack that \.cdk-blocks\/config\.json names; nothing was deleted\./,
+    );
+    assert.throws(() => selectProductionStacks([], 'zz-prod'), /defines no stack, not zz-prod/);
+  });
+
+  it('refuses two stacks with the production stack name', () => {
+    assert.throws(
+      () => selectProductionStacks([node('Eu', 'eu-west-1', [], 'zz-prod'), node('Us', 'us-east-1', [], 'zz-prod')], 'zz-prod'),
+      /defines 2 stacks named zz-prod \(Eu in eu-west-1, Us in us-east-1\).*nothing was deleted/,
+    );
+  });
+
+  it('without a stack name, selects the only stack of the app and refuses any other app', () => {
+    assert.deepStrictEqual(ids(selectProductionStacks([unrelated], undefined).stacks), ['other-prod']);
+    assert.throws(
+      () => selectProductionStacks([app, monitoring, edge, shared], undefined),
+      /was not given the production stack to delete; nothing was deleted\. Pass `stackName` to destroy\(\)\./,
+    );
+    assert.throws(() => selectProductionStacks([], undefined), /defines no stack, and the destroy was not given/);
+  });
+
+  it('refuses a stack id that the CDK CLI would read as a pattern', () => {
+    assert.throws(
+      () => selectProductionStacks([node('zz-*', 'eu-west-1', [], 'zz-prod'), unrelated], 'zz-prod'),
+      /can't select zz-\* \(zz-prod\).*nothing was deleted/,
+    );
   });
 });

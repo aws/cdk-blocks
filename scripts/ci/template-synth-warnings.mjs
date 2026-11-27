@@ -32,6 +32,9 @@ import { runSpawn } from './_proc.mjs';
  * @typedef {object} SynthMode
  * @property {string} name
  * @property {string[]} context `key=value` pairs passed as `--context`
+ * @property {string} region the region the CDK CLI targets
+ * @property {string} [account] an account for the app to deploy to; the CDK
+ *   CLI resolves none without credentials
  */
 
 /**
@@ -51,7 +54,7 @@ export const EXPECTED_TEMPLATE_WARNINGS = {
 	demo: [
 		{
 			id: '@aws-cdk-blocks/bb-email-client:UnverifiableSender',
-			modes: ['production', 'sandbox', 'preview'],
+			modes: ['production', 'sandbox', 'preview', 'production-eu-west-1'],
 			reason:
 				'The template ships a placeholder sender address on the reserved `.invalid` domain, so every send fails on AWS until the developer sets an address they have verified.',
 		},
@@ -125,24 +128,69 @@ export function readAnnotations(assemblyDir) {
 	return annotations;
 }
 
+/** The Region of `AWS/CloudFront` metrics; an alarm on them works only there. */
+const CLOUDFRONT_METRICS_REGION = 'us-east-1';
+
+/**
+ * What is wrong with the stacks of an app with `Hosting` synthesized for
+ * `region`, a Region other than us-east-1, read from the assembly at
+ * `assemblyDir`: there the app has a stack in `region`, and the CloudFront 5xx
+ * alarm is in a us-east-1 stack. Without this the synth could pass by warning
+ * about nothing because it made no alarm, or made it where CloudFront
+ * publishes no metrics. Other us-east-1 stacks (Lambda@Edge) are fine.
+ *
+ * @param {string} assemblyDir
+ * @param {string} region
+ * @returns {string[]} one line per problem; empty when there is none
+ */
+export function findOffRegionProblems(assemblyDir, region) {
+	const problems = [];
+	let alarmStacks = 0;
+	let stacksInRegion = 0;
+	for (const [id, artifact] of Object.entries(readJson(join(assemblyDir, 'manifest.json')).artifacts ?? {})) {
+		if (artifact.type !== 'aws:cloudformation:stack') continue;
+		const stackRegion = artifact.environment?.split('/')[3];
+		if (stackRegion === region) stacksInRegion++;
+		const resources = readJson(join(assemblyDir, artifact.properties.templateFile)).Resources ?? {};
+		const hasAlarm = Object.values(resources).some(
+			(resource) =>
+				resource.Type === 'AWS::CloudWatch::Alarm' &&
+				resource.Properties?.Namespace === 'AWS/CloudFront' &&
+				resource.Properties?.MetricName === '5xxErrorRate',
+		);
+		if (!hasAlarm) continue;
+		alarmStacks++;
+		if (stackRegion !== CLOUDFRONT_METRICS_REGION) {
+			problems.push(`stack ${id} has the CloudFront 5xx alarm in ${stackRegion}, where CloudFront publishes no metrics`);
+		}
+	}
+	if (stacksInRegion === 0) problems.push(`no stack is in ${region}, the Region the app is deployed to`);
+	if (alarmStacks === 0) problems.push(`no stack has the CloudFront 5xx alarm; it belongs in a ${CLOUDFRONT_METRICS_REGION} stack`);
+	return problems;
+}
+
 /**
  * The modes an app is synthesized in, in the order they run: production,
- * sandbox, and preview when the app has a `sandbox:preview` script (the
- * templates with `Hosting`; for a backend-only template preview is the same
- * synth as sandbox).
+ * sandbox, and for an app with a `sandbox:preview` script (the templates with
+ * `Hosting`) production outside us-east-1 and preview. Outside us-east-1
+ * Hosting adds a second stack in us-east-1 for its CloudFront alarm, which
+ * needs an account. That synth reuses the frontend build of the production
+ * synth, so it runs right after it: a preview synth builds the frontend for
+ * another front door and leaves that build behind.
  *
  * @param {string} appDir
  * @returns {SynthMode[]}
  */
 export function synthModes(appDir) {
-	const modes = [
-		{ name: 'production', context: [] },
-		{ name: 'sandbox', context: ['sandboxMode=true'] },
+	const production = { name: 'production', context: [], region: 'us-east-1' };
+	const sandbox = { name: 'sandbox', context: ['sandboxMode=true'], region: 'us-east-1' };
+	if (!readJson(join(appDir, 'package.json')).scripts?.['sandbox:preview']) return [production, sandbox];
+	return [
+		production,
+		{ name: 'production-eu-west-1', context: ['reuseFrontendBuild=true'], region: 'eu-west-1', account: '123456789012' },
+		sandbox,
+		{ name: 'preview', context: ['sandboxMode=true', 'previewMode=true'], region: 'us-east-1' },
 	];
-	if (readJson(join(appDir, 'package.json')).scripts?.['sandbox:preview']) {
-		modes.push({ name: 'preview', context: ['sandboxMode=true', 'previewMode=true'] });
-	}
-	return modes;
 }
 
 /** `<level> <id> at <construct path>: <start of the message>`, on one line. */
@@ -242,12 +290,11 @@ export function checkTemplateSynthWarnings({ template, appDir, outDir, env }) {
 	const problems = [];
 	for (const mode of synthModes(appDir)) {
 		const modeOut = join(outDir, mode.name);
-		// `--region` pins CDK_DEFAULT_REGION: hosting's CloudFrontAlarmRegionUnresolved
-		// is an info only when it is us-east-1, and a warning otherwise.
-		const args = ['--no', 'cdk', 'synth', '--quiet', '--region', 'us-east-1', '--output', modeOut];
+		// `--region` sets CDK_DEFAULT_REGION, which the templates pass to their stack.
+		const args = ['--no', 'cdk', 'synth', '--quiet', '--region', mode.region, '--output', modeOut];
 		const result = runSpawn('npx', [...args, ...mode.context.flatMap((pair) => ['--context', pair])], {
 			cwd: appDir,
-			env,
+			env: mode.account ? { ...env, CDK_DEFAULT_ACCOUNT: mode.account } : env,
 		});
 		let found;
 		if (result.status !== 0) {
@@ -256,6 +303,7 @@ export function checkTemplateSynthWarnings({ template, appDir, outDir, env }) {
 			try {
 				const expectedIds = expected.filter((entry) => entry.modes.includes(mode.name)).map((entry) => entry.id);
 				found = findProblems(readAnnotations(modeOut), expectedIds);
+				if (mode.region !== CLOUDFRONT_METRICS_REGION) found.push(...findOffRegionProblems(modeOut, mode.region));
 			} catch (error) {
 				found = [error?.message ?? String(error)];
 			}

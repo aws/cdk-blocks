@@ -1500,7 +1500,12 @@ alarm and its own encrypted SNS topic. There is no opt-out.
 - Your `frontDoor.features.monitoring.subscriptions` apply to that topic too.
 - The topic's ARN is the `MonitoringTopicArnUsEast1` output.
 - Set `env: { account, region }` on the hosting stack when deploying outside
-  `us-east-1`.
+  `us-east-1`. An app from `create-blocks-app` passes the account and region
+  the CDK CLI deploys to
+  (`env: { account: process.env.CDK_DEFAULT_ACCOUNT, region: process.env.CDK_DEFAULT_REGION }`),
+  so it gets the companion stack whenever that region is not `us-east-1`.
+  `us-east-1` then needs a CDK bootstrap too; `npm run deploy` checks it before
+  it deploys anything, and `npm run destroy` deletes both stacks.
 - With the region resolved and the account unresolved, only the CloudFront
   alarm is skipped, with a synth warning. All other alarms are kept.
 - A stack with no `env` is environment-agnostic: its region is unresolved at

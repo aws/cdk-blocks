@@ -295,6 +295,7 @@ Before they deploy, `npm run sandbox` and `npm run deploy` print the deployment 
 
 - With verified credentials, `npm run sandbox`, `npm run sandbox:deploy` and `npm run deploy` check that CDK is bootstrapped in the account and Region. They read the SSM parameter `/cdk-bootstrap/<qualifier>/version`, where the qualifier is `@aws-cdk/core:bootstrapQualifier` from the `cdk.json` context, or CDK's default.
 - When the parameter does not exist, deploy stops before synthesizing. Copy the bootstrap command it prints, including `--profile` if present, and run it from the project directory. `--app=` keeps CDK from synthesizing the app first.
+- `npm run deploy` then synthesizes the app and runs the same check for every other Region that a stack of the app deploys to, before it deploys anything. `Hosting` on CloudFront in an app outside `us-east-1` adds a stack in `us-east-1` for the CloudFront alarm, so that Region needs a bootstrap as well.
 - Bootstrapping is needed once per account and Region. It creates the `CDKToolkit` CloudFormation stack, including IAM roles that CDK deploys with, so the commands never bootstrap for you.
 - Any other result of the read, such as a denied read or a timeout, does not stop the deploy.
 
@@ -434,6 +435,8 @@ npm run -s whoami -- --query stacks.production
 Errors print as `Error: <what failed>`, then where it failed and a `Try:` line with the next step. A command in the `Try:` line, or in the "re-run" guidance of a deploy, uses the app's package scripts so it can be run from the app directory. An unknown command or option suggests the closest name. Colour is used only on a terminal, and never when `NO_COLOR` is set.
 
 `npm run destroy` prints the stack it deletes, then asks for confirmation in a terminal. Without a terminal (no TTY, `--no-input`, or `CI` set) it needs `--yes`, and exits 2 otherwise: `npm run destroy -- --yes`. `npm run sandbox:destroy` asks only in a terminal; `npm run sandbox:destroy -- --yes` skips the question.
+
+Together with the production stack, `npm run destroy` deletes the `us-east-1` stack that `Hosting` adds for its CloudFront alarm (`<stack>-CfMonitoring-<hash>`), and prints both before it deletes them. It deletes no other stack of the CDK app: it lists the stacks the production stack depended on that are still deployed, and stops, before deleting anything, when another stack depends on the production stack.
 
 ### Per-app configuration
 

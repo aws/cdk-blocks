@@ -722,6 +722,16 @@ The alarm is created locally in all three cases, and the synthesized template do
 
 The zero-subscriber notice that the same principle produced (`@aws-cdk-blocks/hosting:MonitoringAlarmTopicHasNoSubscribers`) is an info for the reason D-033 gives.
 
+### Amendment (2026-11-25): the scaffolded stack passes the CDK CLI's environment
+
+The templates of `create-blocks-app` now pass `env: { account: process.env.CDK_DEFAULT_ACCOUNT, region: process.env.CDK_DEFAULT_REGION }` to `BlocksStack.create()`. The stack of a new app is no longer environment-agnostic under the CDK CLI, so outside us-east-1 the alarm goes to the us-east-1 support stack and works, and the unresolved-region case above remains for apps that set no `env` (apps scaffolded earlier, and hand-written ones).
+
+This was held back in D-033 because it adds a second stack to every app deployed outside us-east-1. The lifecycle commands handle that stack since #1803: `npm run deploy` checks the CDK bootstrap of every Region in the assembly before it deploys, `npm run destroy` deletes the app stack and its monitoring stack, and a `Pipeline` gives the app file the stage's environment in place of the CLI's.
+
+- Without credentials the CLI resolves a region and no account. The stack is then region-only: in us-east-1 the alarm is local, and elsewhere only the CloudFront alarm is skipped, with the `CloudFrontAlarmSkippedNoAccount` warning (the decision's warn-and-skip case). A deploy always has an account.
+- With both resolved, CDK looks up context for constructs that ask for it (the availability zones of a VPC) and records it in `cdk.context.json`, as in any CDK app with an `env`.
+- An existing app is not changed by an upgrade: `index.cdk.ts` belongs to the app. `docs/guides/upgrading-older-apps.md` describes adding the line.
+
 ## D-017: `--telemetry-file` appends every event from the run that created the file
 
 **Date**: 2026-10-05
@@ -1656,7 +1666,7 @@ Applied to the five, without changing a synthesized template:
 ### Consequences
 - An app that acknowledged the access-logging or CloudFront alarm annotation with `acknowledgeWarning` sees it again as an info, until it calls `acknowledgeInfo`.
 - The `deploy` and `sandbox` tasks hide routine CDK annotations at the default log level; use `--verbose` to see them. That is unchanged.
-- An unchanged Hosting app whose CDK CLI region is not us-east-1 still gets one warning: its CloudFront 5xx alarm will never fire. That is a real fault in that deployment, and `env` on the stack fixes it.
+- An unchanged Hosting app whose CDK CLI region is not us-east-1 still gets one warning: its CloudFront 5xx alarm will never fire. That is a real fault in that deployment, and `env` on the stack fixes it. (Since the D-016 amendment of 2026-11-25 the templates pass the CLI's environment as `env`, so a new app no longer gets it; the check synthesizes the Hosting templates for eu-west-1 as well.)
 - A new default that needs the developer's attention is an info, and a new warning has to be one an unchanged scaffold does not trigger. Otherwise the template check fails.
 - The check runs `cdk synth --region us-east-1`, because the level of `CloudFrontAlarmRegionUnresolved` follows `CDK_DEFAULT_REGION`.
 

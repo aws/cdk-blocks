@@ -346,10 +346,50 @@ export interface CdkDeployArgsOptions {
   projectRoot: string;
   /** Path (relative to the project root) CDK writes stack outputs to. */
   outputsFile: string;
+  /**
+   * The cloud assembly directory that {@link buildCdkSynthArgs} synthesized into: the deploy's own
+   * directory (see `PRODUCTION_DEPLOY_ASSEMBLY_PREFIX` in deploy.ts), not one a second deploy can rewrite.
+   */
+  assemblyDir: string;
+}
+
+/**
+ * Build the `cdk synth` argv `npm run deploy` runs first. The deploy
+ * synthesizes once into `assemblyDir`, reads the stacks and their Regions from
+ * that assembly (the CDK bootstrap check of every Region, before anything
+ * deploys), then deploys it with {@link buildCdkDeployArgs}, so the frontend
+ * build still runs only once.
+ *
+ * - `--quiet`: the templates are not printed.
+ * - `--ci`: as for the deploy below, the CLI's own lines go to stdout.
+ * - `--no-notices`: the deploy that follows prints the CDK notices; without
+ *   this they would print twice.
+ */
+export function buildCdkSynthArgs({ projectRoot, assemblyDir }: Omit<CdkDeployArgsOptions, 'outputsFile'>): string[] {
+  return [
+    'cdk',
+    'synth',
+    '--quiet',
+    '--ci',
+    '--no-notices',
+    '--output',
+    assemblyDir,
+    '--context',
+    `projectRoot=${projectRoot}`,
+  ];
 }
 
 /**
  * Build the `cdk deploy` argv used by `npm run deploy`.
+ *
+ * - `--app <assemblyDir>`: deploy the assembly {@link buildCdkSynthArgs}
+ *   synthesized, not a second synth of the app: what deploys is what was
+ *   checked, and the frontend build runs once.
+ * - `--build=`: no build command. The CDK CLI runs the `build` command of
+ *   cdk.json before it looks at `--app`, also when that is an assembly: the
+ *   synth has run it already, and here it would run again, after the synth
+ *   lock is released. One token: an empty argument of its own can get lost
+ *   on the way through `npx` on Windows.
  *
  * - `--all`: deploy every stack the app synthesizes. CDK Blocks apps routinely
  *   synth more than one stack in documented configurations — `Hosting` with an
@@ -375,7 +415,7 @@ export interface CdkDeployArgsOptions {
  *   deploy does not have, and a half-rendered bar is not a usable progress
  *   signal in a log file.
  */
-export function buildCdkDeployArgs({ projectRoot, outputsFile }: CdkDeployArgsOptions): string[] {
+export function buildCdkDeployArgs({ projectRoot, outputsFile, assemblyDir }: CdkDeployArgsOptions): string[] {
   return [
     'cdk',
     'deploy',
@@ -389,6 +429,9 @@ export function buildCdkDeployArgs({ projectRoot, outputsFile }: CdkDeployArgsOp
     outputsFile,
     '--context',
     `projectRoot=${projectRoot}`,
+    '--app',
+    assemblyDir,
+    '--build=',
   ];
 }
 

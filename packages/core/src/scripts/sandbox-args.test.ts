@@ -98,7 +98,7 @@ describe('buildSandboxDeployArgs — express mode (sandbox only)', () => {
     // A production deploy must keep a reviewable change set and full
     // stabilization with rollback: neither `--express` nor `--method direct`
     // (both sandbox-only speedups) may appear in buildCdkDeployArgs.
-    const prod = buildCdkDeployArgs({ projectRoot: '/app', outputsFile: OUTPUTS_FILE.production });
+    const prod = buildCdkDeployArgs({ projectRoot: '/app', outputsFile: OUTPUTS_FILE.production, assemblyDir: 'cdk.out' });
     assert.ok(!prod.includes('--express'), `production deploy must not use --express: ${prod.join(' ')}`);
     assert.ok(!prod.includes('--method'), `production deploy must not use --method: ${prod.join(' ')}`);
   });
@@ -149,6 +149,11 @@ describe('sandbox Express Mode fallback (Lambda Web Function endpoints)', () => 
       assemblyDir: '.cdk-blocks-sandbox/cdk.out',
     });
     assert.strictEqual(valueAfter(deploy, '--app'), '.cdk-blocks-sandbox/cdk.out', 'no second synth/framework build');
+    // Nor a second run of cdk.json's `build` command, which the CLI runs before it looks at --app.
+    assert.ok(deploy.includes('--build='), deploy.join(' '));
+    // A deploy that synthesizes the app itself keeps the build command.
+    assert.ok(!buildSandboxDeployArgs({ outDir: '.cdk-blocks-sandbox', projectRoot: '/app' }).includes('--build='));
+    assert.ok(!synth.includes('--build='));
   });
 
   it('finds stacks whose synthesized template has a Web Function endpoint', () => {

@@ -7,8 +7,18 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, it, mock } from 'node:test';
 import type { AwsCredentialIdentity } from '@smithy/types';
-import { type BootstrapTarget, type BootstrapVersionReader, cdkBootstrapFailure } from './preflight-bootstrap.js';
-import { type AssertAwsCredentialsOptions, assertAwsCredentials } from './preflight-credentials.js';
+import {
+	type BootstrapTarget,
+	type BootstrapVersionReader,
+	type CdkBootstrapCheckOptions,
+	assemblyBootstrapFailure,
+	cdkBootstrapFailure,
+} from './preflight-bootstrap.js';
+import {
+	type AssertAwsCredentialsOptions,
+	type VerifiedDeploymentTarget,
+	assertAwsCredentials,
+} from './preflight-credentials.js';
 
 const CREDENTIALS: AwsCredentialIdentity = { accessKeyId: 'AKIAEXAMPLEFIXTURE', secretAccessKey: 'fixture-secret' };
 const ACCOUNT = '123456789012';
@@ -60,7 +70,10 @@ describe('CDK bootstrap check', () => {
 		await rm(directory, { recursive: true, force: true });
 	});
 
-	function check(read: BootstrapVersionReader, options: Partial<AssertAwsCredentialsOptions> = {}): Promise<void> {
+	function check(
+		read: BootstrapVersionReader,
+		options: Partial<AssertAwsCredentialsOptions> = {},
+	): Promise<VerifiedDeploymentTarget | undefined> {
 		return assertAwsCredentials({
 			command: 'deploy',
 			env,
@@ -134,10 +147,16 @@ describe('CDK bootstrap check', () => {
 		assert.doesNotMatch(message, /custom bootstrap qualifier/);
 	});
 
-	it('continues when the version parameter exists', async () => {
+	it('continues when the version parameter exists, and returns the account and the check that passed', async () => {
 		const { read, calls } = reader(FOUND);
-		await check(read);
+		const verified = await check(read);
 		assert.equal(calls.length, 1);
+		// What a deploy re-runs for the other Regions of its stacks, and a destroy binds its own AWS calls to.
+		assert.equal(verified?.account, ACCOUNT);
+		assert.equal(verified?.bootstrapCheck?.region, 'eu-south-2');
+		assert.equal(verified?.bootstrapCheck?.account, ACCOUNT);
+		assert.equal(verified?.bootstrapCheck?.credentials, CREDENTIALS);
+		assert.equal(verified?.bootstrapCheck?.read, read);
 	});
 
 	for (const [name, result] of [
@@ -153,16 +172,17 @@ describe('CDK bootstrap check', () => {
 		});
 	}
 
-	it('skips the check when it is off, as for the destroy commands', async () => {
+	it('skips the check when it is off, as for the destroy commands, and still returns the verified account', async () => {
 		const { read, calls } = reader(NOT_FOUND);
-		await check(read, { checkBootstrap: false, accountDetails: false });
+		const verified = await check(read, { checkBootstrap: false, accountDetails: false });
 		assert.equal(calls.length, 0);
+		assert.deepEqual(verified, { account: ACCOUNT, bootstrapCheck: undefined });
 	});
 
-	it('skips the check when the credential check did not return an account', async () => {
+	it('skips the check when the credential check did not return an account, and returns nothing', async () => {
 		const { read, calls } = reader(NOT_FOUND);
-		await check(read, { probe: async () => ({ credentials: CREDENTIALS }) });
-		await check(read, { probe: async () => undefined });
+		assert.equal(await check(read, { probe: async () => ({ credentials: CREDENTIALS }) }), undefined);
+		assert.equal(await check(read, { probe: async () => undefined }), undefined);
 		assert.equal(calls.length, 0);
 	});
 
@@ -195,5 +215,79 @@ describe('cdkBootstrapFailure', () => {
 			read: reader(NOT_FOUND).read,
 		});
 		assert.match(String(message), /^ {4}npx cdk bootstrap aws:\/\/123456789012\/eu-south-2 --app= --profile starter$/m);
+	});
+});
+
+describe('assemblyBootstrapFailure', () => {
+	/** The check that passed in the configured Region; `read` answers per Region. */
+	function checked(unbootstrapped: string[] = []) {
+		const regions: string[] = [];
+		const options: CdkBootstrapCheckOptions = {
+			invocation: 'npm run deploy',
+			account: ACCOUNT,
+			region: 'eu-west-1',
+			profile: 'starter',
+			credentials: CREDENTIALS,
+			qualifier: 'custom1',
+			read: async (target, name) => {
+				assert.deepEqual({ ...target, region: undefined }, { region: undefined, profile: 'starter', credentials: CREDENTIALS });
+				assert.equal(name, '/cdk-bootstrap/custom1/version');
+				regions.push(target.region);
+				if (unbootstrapped.includes(target.region)) throw namedError('ParameterNotFound');
+				return { Parameter: { Value: '30' } };
+			},
+		};
+		return { options, regions };
+	}
+	// An app in eu-west-1 with Hosting's CloudFront monitoring stack in us-east-1.
+	const TWO_REGIONS = [
+		{ region: 'eu-west-1', account: ACCOUNT },
+		{ region: 'us-east-1', account: ACCOUNT },
+	];
+
+	it('reports the Region of a stack outside the checked Region, with its bootstrap command', async () => {
+		const { options, regions } = checked(['us-east-1']);
+		const message = await assemblyBootstrapFailure(options, TWO_REGIONS);
+		// The Region that the credential check covered is not read again.
+		assert.deepEqual(regions, ['us-east-1']);
+		assert.match(String(message), /^CDK is not bootstrapped in Region us-east-1 of account 123456789012, so `npm run deploy` cannot deploy there/);
+		assert.match(String(message), /^ {4}npx cdk bootstrap aws:\/\/123456789012\/us-east-1 --app= --profile starter$/m);
+		assert.doesNotMatch(String(message), /eu-west-1/);
+	});
+
+	it('passes when every Region is bootstrapped, reading each Region once', async () => {
+		const { options, regions } = checked();
+		const stacks = [...TWO_REGIONS, { region: 'us-east-1', account: ACCOUNT }, { region: 'ap-south-1', account: ACCOUNT }];
+		assert.equal(await assemblyBootstrapFailure(options, stacks), undefined);
+		assert.deepEqual(regions.sort(), ['ap-south-1', 'us-east-1']);
+	});
+
+	it('reports every Region without a bootstrap', async () => {
+		const { options } = checked(['us-east-1', 'ap-south-1']);
+		const message = await assemblyBootstrapFailure(options, [...TWO_REGIONS, { region: 'ap-south-1', account: ACCOUNT }]);
+		assert.match(String(message), /aws:\/\/123456789012\/us-east-1 /);
+		assert.match(String(message), /aws:\/\/123456789012\/ap-south-1 /);
+	});
+
+	it('reads nothing for an environment-agnostic app, which deploys to the checked Region', async () => {
+		const { options, regions } = checked(['us-east-1']);
+		assert.equal(await assemblyBootstrapFailure(options, [{}, { region: 'eu-west-1' }]), undefined);
+		assert.deepEqual(regions, []);
+	});
+
+	it('skips a stack of another account, which these credentials cannot read', async () => {
+		const { options, regions } = checked(['us-east-1']);
+		assert.equal(await assemblyBootstrapFailure(options, [{ region: 'us-east-1', account: '999999999999' }]), undefined);
+		assert.deepEqual(regions, []);
+	});
+
+	it('continues after an error that does not prove a missing bootstrap', async () => {
+		const options: CdkBootstrapCheckOptions = {
+			...checked().options,
+			read: async () => {
+				throw namedError('AccessDeniedException');
+			},
+		};
+		assert.equal(await assemblyBootstrapFailure(options, TWO_REGIONS), undefined);
 	});
 });

@@ -146,6 +146,16 @@ void describe('HostingConstruct — CloudFront alarm region (#481)', () => {
     supportTemplate.resourceCountIs('AWS::SNS::Topic', 1);
     // The us-east-1 topic ARN is surfaced by logical id.
     supportTemplate.hasOutput('MonitoringTopicArnUsEast1', Match.anyValue());
+
+    // The support stack is Hosting's own, so the reference it makes to the
+    // hosting stack must not raise aws-cdk-lib's "no cross-stack-reference
+    // strength configured" warning in an app that never asked for a second stack.
+    const XREF_WARNING = Match.stringLikeRegexp('\\[ack: @aws-cdk/core:crossStackReferencesDefaultStrong\\]$');
+    Annotations.fromStack(support).hasNoWarning('*', XREF_WARNING);
+    Annotations.fromStack(stack).hasNoWarning('*', XREF_WARNING);
+    // Still the export writer and reader the default strength synthesizes.
+    supportTemplate.resourceCountIs('Custom::CrossRegionExportReader', 1);
+    regional.resourceCountIs('Custom::CrossRegionExportWriter', 1);
   });
 
   // ---- (v) Off-region: endpoint subscriptions reach BOTH topics ----

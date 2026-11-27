@@ -237,6 +237,29 @@ Skip this for a Next.js app: `next build` ignores project references when it typ
 - A backend method whose signature uses a Node type, such as one that returns a `Buffer`, reads as `any` in the frontend, with no error (`skipLibCheck` hides it). Return plain JSON-serializable values from API methods.
 - [TROUBLESHOOTING.md](../../packages/blocks/TROUBLESHOOTING.md#typescript-errors-in-cdk-blocks-from-the-frontend) lists the errors of this layout, including `TS2742` under pnpm.
 
+## A `Hosting` app deployed outside us-east-1: pass `env`
+
+Nothing breaks here, so this edit is optional. An app scaffolded before the templates passed `env` has a stack with no account or Region of its own. Deployed outside us-east-1, its CloudFront 5xx alarm is created in the app's Region, where CloudFront publishes no metrics, so it never fires, and synth warns with `@aws-cdk-blocks/hosting:CloudFrontAlarmRegionUnresolved`.
+
+Add the `env` line to `BlocksStack.create()` in `cdk-blocks/index.cdk.ts`, as the current templates have it:
+
+```ts
+export const blocksStack = await BlocksStack.create(app, stackName, {
+  // ...
+  env: { account: process.env.CDK_DEFAULT_ACCOUNT, region: process.env.CDK_DEFAULT_REGION },
+});
+```
+
+On the next `npm run deploy`:
+
+- An app outside us-east-1 gets a second stack, `<stack>-CfMonitoring-<hash>`, in us-east-1, with the CloudFront 5xx alarm and its own SNS topic (the `MonitoringTopicArnUsEast1` output). The alarm that never fired is removed from the app stack. Subscriptions set in `monitoring.subscriptions` apply to both topics.
+- us-east-1 needs a CDK bootstrap in the same account. The deploy stops before it changes anything and prints the `npx cdk bootstrap aws://<account>/us-east-1` command when it is missing.
+- `npm run destroy` deletes both stacks.
+- An app in us-east-1 deploys the same resources as before.
+- With an account and a Region, CDK looks up context that constructs ask for (the availability zones of a VPC) and writes it to `cdk.context.json`. Commit that file.
+
+This needs `aws-cdk-blocks` with the two-stack `deploy` and `destroy` (the release that has this section in its guide, or later).
+
 ## Keep the next upgrade from surprising you
 
 Pin `aws-cdk-blocks` (for example `"^0.9.0"` instead of `"*"`) in `package.json`, so a fresh install doesn't pull a release with breaking changes. Check the package's `CHANGELOG.md` when you move the range.

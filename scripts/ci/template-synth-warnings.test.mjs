@@ -17,6 +17,7 @@ import { fileURLToPath } from 'node:url';
 import {
 	EXPECTED_TEMPLATE_WARNINGS,
 	findAcknowledgements,
+	findOffRegionProblems,
 	findProblems,
 	readAnnotations,
 	synthModes,
@@ -209,22 +210,66 @@ describe('findProblems', () => {
 	});
 });
 
-describe('synthModes', () => {
-	const appWithScripts = (scripts) => writeDir({ 'package.json': { name: 'my-app', scripts } });
+describe('findOffRegionProblems', () => {
+	const ALARM = { Type: 'AWS::CloudWatch::Alarm', Properties: { Namespace: 'AWS/CloudFront', MetricName: '5xxErrorRate' } };
+	const OTHER_ALARM = { Type: 'AWS::CloudWatch::Alarm', Properties: { Namespace: 'AWS/Lambda', MetricName: 'Errors' } };
+	/** An assembly of stacks, each `[region, resources]`, keyed by stack id. */
+	const assembly = (stacks) =>
+		writeDir({
+			'manifest.json': manifest(
+				Object.fromEntries(
+					Object.entries(stacks).map(([id, [region]]) => [
+						id,
+						stackArtifact({ environment: `aws://123456789012/${region}`, properties: { templateFile: `${id}.template.json` } }),
+					]),
+				),
+			),
+			...Object.fromEntries(Object.entries(stacks).map(([id, [, Resources]]) => [`${id}.template.json`, { Resources }])),
+		});
 
-	it('synthesizes production, then sandbox, then preview for an app with a sandbox:preview script', () => {
-		const app = appWithScripts({ sandbox: 'cdk-blocks sandbox', 'sandbox:preview': 'cdk-blocks sandbox preview' });
-		assert.deepEqual(synthModes(app), [
-			{ name: 'production', context: [] },
-			{ name: 'sandbox', context: ['sandboxMode=true'] },
-			{ name: 'preview', context: ['sandboxMode=true', 'previewMode=true'] },
+	it('passes an app stack in its Region with the CloudFront alarm in a us-east-1 stack', () => {
+		const dir = assembly({ App: ['eu-west-1', { Errors: OTHER_ALARM }], Monitoring: ['us-east-1', { Alarm: ALARM }] });
+		assert.deepEqual(findOffRegionProblems(dir, 'eu-west-1'), []);
+	});
+
+	it('reports an app without the CloudFront alarm', () => {
+		const dir = assembly({ App: ['eu-west-1', { Errors: OTHER_ALARM }] });
+		assert.deepEqual(findOffRegionProblems(dir, 'eu-west-1'), ['no stack has the CloudFront 5xx alarm; it belongs in a us-east-1 stack']);
+	});
+
+	it('reports the CloudFront alarm in the app stack, outside us-east-1', () => {
+		const dir = assembly({ App: ['eu-west-1', { Alarm: ALARM }] });
+		assert.deepEqual(findOffRegionProblems(dir, 'eu-west-1'), [
+			'stack App has the CloudFront 5xx alarm in eu-west-1, where CloudFront publishes no metrics',
 		]);
 	});
 
-	it('leaves preview out for an app without a sandbox:preview script', () => {
+	it('reports an app with no stack in the Region it is deployed to; another us-east-1 stack is fine', () => {
+		const dir = assembly({ App: ['us-east-1', {}], Monitoring: ['us-east-1', { Alarm: ALARM }] });
+		assert.deepEqual(findOffRegionProblems(dir, 'eu-west-1'), ['no stack is in eu-west-1, the Region the app is deployed to']);
+		const withEdge = assembly({ App: ['eu-west-1', {}], Edge: ['us-east-1', {}], Monitoring: ['us-east-1', { Alarm: ALARM }] });
+		assert.deepEqual(findOffRegionProblems(withEdge, 'eu-west-1'), []);
+	});
+});
+
+describe('synthModes', () => {
+	const appWithScripts = (scripts) => writeDir({ 'package.json': { name: 'my-app', scripts } });
+
+	it('adds production outside us-east-1, right after production, and preview for an app with a sandbox:preview script', () => {
+		const app = appWithScripts({ sandbox: 'cdk-blocks sandbox', 'sandbox:preview': 'cdk-blocks sandbox preview' });
+		assert.deepEqual(synthModes(app), [
+			{ name: 'production', context: [], region: 'us-east-1' },
+			// Before preview, which rebuilds the frontend for another front door.
+			{ name: 'production-eu-west-1', context: ['reuseFrontendBuild=true'], region: 'eu-west-1', account: '123456789012' },
+			{ name: 'sandbox', context: ['sandboxMode=true'], region: 'us-east-1' },
+			{ name: 'preview', context: ['sandboxMode=true', 'previewMode=true'], region: 'us-east-1' },
+		]);
+	});
+
+	it('synthesizes only production and sandbox for an app without a sandbox:preview script', () => {
 		const expected = [
-			{ name: 'production', context: [] },
-			{ name: 'sandbox', context: ['sandboxMode=true'] },
+			{ name: 'production', context: [], region: 'us-east-1' },
+			{ name: 'sandbox', context: ['sandboxMode=true'], region: 'us-east-1' },
 		];
 		assert.deepEqual(synthModes(appWithScripts({ sandbox: 'cdk-blocks sandbox' })), expected);
 		assert.deepEqual(synthModes(writeDir({ 'package.json': { name: 'my-app' } })), expected);
