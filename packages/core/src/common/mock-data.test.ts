@@ -205,4 +205,45 @@ describe('getMockDataDir', () => {
 		assert.equal(probe.status, 0, 'the data must be ignored');
 		assert.match(probe.stdout, /local[/\\]\.gitignore/, `attributed to: ${probe.stdout}`);
 	});
+
+	void it('keeps an interrupted carry-over copy out of the block data', () => {
+		const fullId = 'app-uploads';
+		const legacy = join(project, LEGACY_MOCK_DATA_DIR, fullId, 'content');
+		mkdirSync(join(legacy, '.carry-user'), { recursive: true });
+		writeFileSync(join(legacy, '.carry-user', 'copy'), 'user object');
+		writeFileSync(join(legacy, 'keep.tmp'), 'another user object');
+		const source = join(legacy, 'report.txt');
+		writeFileSync(source, 'report');
+
+		const moduleUrl = pathToFileURL(join(import.meta.dirname, 'mock-data.js')).href;
+		const child = spawnSync(
+			process.execPath,
+			[
+				'--input-type=module',
+				'-e',
+				`
+			import fs from 'node:fs';
+			import { syncBuiltinESMExports } from 'node:module';
+			const copy = fs.copyFileSync;
+			fs.copyFileSync = (from, ...args) => {
+				copy(from, ...args);
+				// Exit after the real copy without running the migration's finally block.
+				if (from === ${JSON.stringify(source)}) process.exit(75);
+			};
+			syncBuiltinESMExports();
+			const { getMockDataDir } = await import(${JSON.stringify(moduleUrl)});
+			getMockDataDir({ fullId: ${JSON.stringify(fullId)} });
+		`,
+			],
+			{ cwd: project, encoding: 'utf-8' },
+		);
+		assert.equal(child.status, 75, child.stderr);
+		assert.ok(!existsSync(join(MOCK_DATA_DIR, fullId, 'content', 'report.txt')));
+
+		const content = join(getMockDataDir(scope(fullId)), 'content');
+		assert.deepStrictEqual(readdirSync(content).sort(), ['.carry-user', 'keep.tmp', 'report.txt']);
+		assert.equal(readFileSync(join(content, '.carry-user', 'copy'), 'utf-8'), 'user object');
+		assert.equal(readFileSync(join(content, 'keep.tmp'), 'utf-8'), 'another user object');
+		assert.equal(readFileSync(join(content, 'report.txt'), 'utf-8'), 'report');
+	});
 });
