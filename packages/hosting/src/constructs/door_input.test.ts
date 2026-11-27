@@ -90,7 +90,6 @@ describe('buildDoorInput — app facts and origins', () => {
       api: { url: 'https://abc123.execute-api.us-east-1.amazonaws.com/prod/cdk-blocks/api', paths: ['/webhooks/*', '/health'] },
     });
     assert.deepEqual(input.origins.api?.paths, ['/cdk-blocks/*', '/aws-blocks/*', '/webhooks/*', '/health']);
-    assert.ok(!input.origins.api?.paths.includes('/aws-blocks-auth/*'), 'no stale /aws-blocks-auth/* path');
     // A literal URL resolves at synth; a token URL is split in-template.
     assert.equal(input.origins.api?.host, 'abc123.execute-api.us-east-1.amazonaws.com');
     assert.equal(input.origins.api?.stagePath, '/prod');

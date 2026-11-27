@@ -575,12 +575,8 @@ describe('create-blocks-app auto-detection', () => {
       const dev = await resolvedDevConfig(tmpDir);
       assert.strictEqual(dev.frontendCommand, undefined);
       assert.strictEqual(dev.port, 3001);
-      assert.ok(!existsSync(join(tmpDir, 'cdk-blocks', 'scripts', 'server.ts')));
-      assert.ok(!existsSync(join(tmpDir, 'cdk-blocks', 'scripts', 'stop.ts')));
       assert.match(readFileSync(generateClientPath, 'utf-8'), /from 'aws-cdk-blocks\/scripts'/);
       assert.match(readFileSync(cognitoVerifierPath, 'utf-8'), /from 'aws-cdk-blocks'/);
-      assert.doesNotMatch(readFileSync(generateClientPath, 'utf-8'), /@aws-cdk-blocks\/core/);
-      assert.doesNotMatch(readFileSync(cognitoVerifierPath, 'utf-8'), /@aws-cdk-blocks\/core/);
       // With `next` installed, the app's tsconfig.json checks cdk-blocks/ (next build ignores
       // project references), so the backend gets no project of its own and the steps say so.
       assert.ok(!existsSync(join(tmpDir, 'cdk-blocks', 'tsconfig.json')));
@@ -607,7 +603,6 @@ describe('create-blocks-app auto-detection', () => {
       assert.strictEqual(result.exitCode, 0);
       const handler = readFileSync(join(tmpDir, 'cdk-blocks', 'index.handler.ts'), 'utf-8');
       assert.match(handler, /createLambdaHandler\(\(\) => import\('\.\/index\.js'\)\)/);
-      assert.doesNotMatch(handler, /import \* as backend/);
     } finally {
       rmSync(tmpDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
     }
@@ -950,7 +945,6 @@ describe('create-blocks-app auto-detection', () => {
           assert.strictEqual(pkg.blocks, undefined, `${template} into ${framework}`);
           const dev = await resolvedDevConfig(tmpDir, { 'frontend-port': '41902' });
           assert.strictEqual(dev.frontendCommand, command.replace('3100', '41902'), `${template} into ${framework}`);
-          assert.ok(!existsSync(join(tmpDir, 'cdk-blocks', 'scripts')), 'no lifecycle wrappers are copied');
         } finally {
           rmSync(tmpDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
         }

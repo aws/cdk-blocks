@@ -939,7 +939,6 @@ void describe('request fn — G1 assetPrefix strip before classification', () =>
     assert.equal(selectedOrigin, ORIGIN_ID.s3);
     // prefix stripped, then build-id prefixed — NO /cdn-static in the key
     assert.equal(output.uri, '/builds/b1/_next/static/chunks/main.js');
-    assert.ok(!output.uri.includes('/cdn-static'), 'assetPrefix must be stripped');
   });
 
   void it('a bare /_next/static request (no prefix) still resolves to S3', async () => {
@@ -1040,8 +1039,6 @@ void describe('request fn — G2b basePath + non-nested assetPrefix (PR review #
     );
     assert.equal(selectedOrigin, ORIGIN_ID.s3);
     assert.equal(output.uri, '/builds/b1/_next/static/chunks/main.js');
-    assert.ok(!output.uri.includes('/cdn-static'));
-    assert.ok(!output.uri.includes('/myapp'));
   });
 
   void it('still 308-redirects a normal off-base page to the basePath', async () => {

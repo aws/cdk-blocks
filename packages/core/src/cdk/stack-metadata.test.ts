@@ -167,7 +167,6 @@ describe('addBlocksStackMetadata', () => {
 
 		const value = blocksValue(stack);
 		assert.strictEqual(value, `1;core=${CORE_VERSION};mode=production;bb=Secret;custom=3`);
-		assert.ok(!value.includes('MyWidget'));
 	});
 
 	test('counts nested-stack blocks on the root stack', () => {
@@ -409,7 +408,6 @@ describe('AWSBlocks value carries no customer text', () => {
 
 		const value = blocksValue(stack);
 		assert.strictEqual(value, `1;core=${CORE_VERSION};mode=production;bb=;custom=1`);
-		assert.ok(!value.includes('Evil'));
 	});
 });
 
