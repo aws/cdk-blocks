@@ -9,6 +9,7 @@ import android.os.Build
 import android.security.KeyStoreException
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
+import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -27,7 +28,8 @@ internal actual fun platformKeyValueStore(name: String, applicationId: String?):
             ContextProvider.applicationContext.getSharedPreferences("$name.keystore", Context.MODE_PRIVATE)
         },
         keys = KeystoreKeySource("com.aws.blocks.kotlin.$name"),
-        legacy = EncryptedPreferencesLegacySource(name),
+        legacy = LegacyPrefsFile(name),
+        warn = { message, failure -> Log.w("CdkBlocks", message, failure) },
     )
 
 /**
@@ -47,29 +49,16 @@ internal interface KeySource {
 }
 
 /**
- * The file an earlier version of the library wrote with `EncryptedSharedPreferences`. Read to
- * move its entries over, then deleted; never receives entries again.
+ * The `EncryptedSharedPreferences` file that 0.2.0 and earlier wrote. Never read: only deleted, so
+ * that no stale encrypted session is left behind.
  */
-internal interface LegacySource {
+internal interface LegacyFile {
+    /** Whether the file is there and was written by the library, not by the application. */
     fun exists(): Boolean
 
-    /**
-     * Returns every entry decrypted. Throws [LegacyKeyLostException] when the file no longer opens
-     * under the `MasterKey` this device holds, so nothing in it will ever be readable again; a key
-     * store that could not answer is a read failure that may clear on a later attempt.
-     */
-    fun readAll(): Map<String, String>
-
-    /**
-     * Identifies the file as it stands now, so one already taken over is told apart from one a
-     * downgraded build has written since. Recorded alongside the entries it names.
-     */
-    fun stamp(): String
-
+    /** Deletes the file, and throws when it is still present afterwards. */
     fun delete()
 }
-
-internal class LegacyKeyLostException(cause: Throwable? = null) : Exception(cause)
 
 /**
  * Stores each entry AES-GCM encrypted in plain [SharedPreferences], under a key the Android
@@ -83,37 +72,45 @@ internal class LegacyKeyLostException(cause: Throwable? = null) : Exception(caus
  * Entry names are stored as they are given, where the `EncryptedSharedPreferences` this replaces
  * encrypted them too, so a name must not itself carry anything secret.
  *
- * The memoized key is resolved under this instance's lock and the migration under the `lazy`, so a
+ * A file that `EncryptedSharedPreferences` wrote for an earlier version is deleted on first access
+ * and its entries are not imported: the cookie jar 1.0.0 introduced never read what 0.2.0 stored
+ * there, so it holds no session this store could give back. The deletion is best-effort: a failure
+ * is reported through [warn] and retried by the next instance, never thrown, since that file has no
+ * bearing on whether this store's own entries can be read.
+ *
+ * The memoized key is resolved under this instance's lock and the cleanup under the `lazy`, so a
  * second caller cannot corrupt either. [clear] edits the file outside both, so an instance expects
  * the serialized calls its caller makes; two instances for one name would each hold a key.
  *
  * @param prefs the entry file, which must return the same instance for a name on every call:
- * [clear] reaches it directly, so a fresh instance each call would let a later migration write to a
- * file this one had not cleared. `Context.getSharedPreferences` holds one instance per file for the
- * life of the process, which is what the production caller relies on.
+ * [clear] reaches it directly, so a fresh instance each call would clear a file the lazy `store`
+ * does not read. `Context.getSharedPreferences` holds one instance per file for the life of the
+ * process, which is what the production caller relies on.
+ * @param warn reports a failure the store recovers from, so it is seen without failing the call.
  */
 internal class AndroidKeyValueStore(
     private val prefs: () -> SharedPreferences,
     private val keys: KeySource,
-    private val legacy: LegacySource,
+    private val legacy: LegacyFile,
+    private val warn: (message: String, failure: Throwable) -> Unit,
 ) : KeyValueStore {
 
     private companion object {
         const val GCM_NONCE_SIZE = 12
         const val GCM_TAG_BITS = 128
 
-        // Not an entry: it records which earlier file this store has already taken over. The
-        // underscores keep it clear of the names a caller gives, which are stored as given.
+        // Not an entry: the record the 1.0.0 migration kept of the earlier file it had taken over,
+        // which a store may still hold when its delete failed. Removed on first access.
         const val TAKEN_OVER_KEY = "__migrated"
     }
 
     private var secretKey: SecretKey? = null
 
     /**
-     * Resolved on first use so the migration runs inside the I/O dispatcher, and re-attempted on
-     * the next access when it throws: `lazy` caches a value the block returned, not a failure.
+     * Resolved on first use so the cleanup runs inside the I/O dispatcher. The cleanup never
+     * throws, so it runs once per instance.
      */
-    private val store: SharedPreferences by lazy { prefs().also { migrateLegacyEntries(it) } }
+    private val store: SharedPreferences by lazy { prefs().also { removeLegacyFile(it) } }
 
     /**
      * Writes commit rather than apply: the call already suspends on [Dispatchers.IO], so there is
@@ -146,73 +143,27 @@ internal class AndroidKeyValueStore(
 
     /**
      * Deletes every entry but keeps the key, unlike [dropEntries]: the Keystore key is unchanged,
-     * so the next [put] re-encrypts under it. A legacy file not yet migrated is deleted without
-     * being imported, and recorded as dealt with first, so a delete that throws cannot undo this.
+     * so the next [put] re-encrypts under it. A file left by an earlier version holds nothing this
+     * store reads, so it does not stand in the way of a sign-out.
      */
     override suspend fun clear() {
         withContext(Dispatchers.IO) {
-            // Reaches the file directly, not the lazy `store`: clearing needs no migration, and the
-            // same handle means a later migration sees the cleared state.
-            val editor = prefs().edit().clear()
-            val present = legacy.exists()
-            if (present) editor.putString(TAKEN_OVER_KEY, legacy.stamp())
-            if (!editor.commit()) throw KeyValueStoreException("Could not clear the store")
-            if (present) {
-                deleteLegacy()
-                forgetTakenOver(prefs())
-            }
+            // Reaches the file directly, not the lazy `store`: clearing needs no cleanup first.
+            if (!prefs().edit().clear().commit()) throw KeyValueStoreException("Could not clear the store")
         }
     }
 
     /**
-     * Copies the entries of the earlier file into this store, records the file it took them from in
-     * the same write, then deletes it. A file written by a downgraded build has a stamp of its own,
-     * so it is taken over in turn and overwrites the entries it names: it holds the later session.
+     * Deletes the file an earlier version left, and the 1.0.0 migration's record of it. Neither is
+     * an entry, so a failure is reported and left for the next instance rather than thrown.
      */
-    private fun migrateLegacyEntries(target: SharedPreferences) {
-        if (!legacy.exists()) return
-        val stamp = legacy.stamp()
-        if (target.getString(TAKEN_OVER_KEY, null) == stamp) {
-            // This file's entries are already here and only its delete failed, which the access
-            // that took it over reported. Copying it again would put them back over the live ones,
-            // and failing again would fail every access, so the delete is all that is retried.
-            if (runCatching { legacy.delete() }.isSuccess) forgetTakenOver(target)
-            return
-        }
-        val entries = try {
-            legacy.readAll()
-        } catch (_: LegacyKeyLostException) {
-            recordTakenOver(target, stamp)
-            deleteLegacy()
-            forgetTakenOver(target)
-            return
+    private fun removeLegacyFile(target: SharedPreferences) {
+        try {
+            if (legacy.exists()) legacy.delete()
         } catch (failure: Exception) {
-            // Left in place for the next attempt, so the caller sees a read failure rather
-            // than an empty store it would then overwrite.
-            throw KeyValueStoreException("Could not read the entries stored by an earlier version", failure)
+            warn("Could not remove the credential file left by an earlier version", failure)
         }
-        val secret = keyForWriting(target)
-        val editor = target.edit()
-        entries.forEach { (key, value) -> editor.putString(key, encrypt(key, value, secret)) }
-        editor.putString(TAKEN_OVER_KEY, stamp)
-        if (!editor.commit()) throw KeyValueStoreException("Could not write the migrated entries")
-        deleteLegacy()
-        forgetTakenOver(target)
-    }
-
-    /** Records a file whose entries are not coming over, so it is not read again. */
-    private fun recordTakenOver(target: SharedPreferences, stamp: String) {
-        if (!target.edit().putString(TAKEN_OVER_KEY, stamp).commit()) {
-            throw KeyValueStoreException("Could not record the file left by an earlier version")
-        }
-    }
-
-    /**
-     * Drops the record once the file it names is gone, so a store holds only its own entries. A
-     * write that does not reach disk needs no report: the file is absent, so nothing reads it.
-     */
-    private fun forgetTakenOver(target: SharedPreferences) {
-        target.edit().remove(TAKEN_OVER_KEY).commit()
+        if (target.contains(TAKEN_OVER_KEY)) target.edit().remove(TAKEN_OVER_KEY).commit()
     }
 
     @Synchronized
@@ -221,7 +172,7 @@ internal class AndroidKeyValueStore(
     @Synchronized
     private fun keyForWriting(target: SharedPreferences): SecretKey = currentKey() ?: run {
         // A new key cannot read anything the lost one wrote, so the whole store is cleared first.
-        if (target.all.keys.any { it != TAKEN_OVER_KEY }) dropEntries(target)
+        if (target.all.isNotEmpty()) dropEntries(target)
         createKey().also { secretKey = it }
     }
 
@@ -239,24 +190,13 @@ internal class AndroidKeyValueStore(
 
     @Synchronized
     private fun dropEntries(target: SharedPreferences) {
-        // The record of an earlier file is not an entry: forgetting it here would read that file
-        // back in on the next access, and a key this store cannot read is no reason to.
-        val takenOver = target.getString(TAKEN_OVER_KEY, null)
-        val editor = target.edit().clear()
-        if (takenOver != null) editor.putString(TAKEN_OVER_KEY, takenOver)
-        if (!editor.commit()) throw KeyValueStoreException("Could not clear the store")
+        if (!target.edit().clear().commit()) throw KeyValueStoreException("Could not clear the store")
         try {
             keys.delete()
         } catch (failure: Exception) {
             throw KeyValueStoreException("Could not remove the encryption key", failure)
         }
         secretKey = null
-    }
-
-    private fun deleteLegacy() = try {
-        legacy.delete()
-    } catch (failure: Exception) {
-        throw KeyValueStoreException("Could not remove the file left by an earlier version", failure)
     }
 
     /**
@@ -325,7 +265,7 @@ private class KeystoreKeySource(private val alias: String) : KeySource {
 
 internal const val ANDROID_KEYSTORE = "AndroidKeyStore"
 
-/** The on-disk location an `EncryptedSharedPreferences` file named [name] takes under [dataDir]. */
+/** The on-disk location a `SharedPreferences` file named [name] takes under [dataDir]. */
 internal fun legacyPrefsPath(dataDir: String, name: String): File = File(dataDir, "shared_prefs/$name.xml")
 
 /**
