@@ -14,6 +14,9 @@ import type { IKey } from 'aws-cdk-lib/aws-kms';
 import { type ITopic, type ITopicSubscription, Topic } from 'aws-cdk-lib/aws-sns';
 import { createAlarmTopicKey, infoIfUndeliverable } from './monitoring_construct.js';
 
+/** aws-cdk-lib's context key for the strength of cross-stack references (`cx-api` `DEFAULT_CROSS_STACK_REFERENCES`). */
+const CROSS_STACK_REFERENCES_CONTEXT = '@aws-cdk/core:defaultCrossStackReferences';
+
 /**
  * Props for {@link UsEast1MonitoringStack}.
  */
@@ -70,6 +73,14 @@ export class UsEast1MonitoringStack extends Stack {
     props: UsEast1MonitoringStackProps,
   ) {
     super(scope, id, props);
+
+    // The alarm reads the distribution id from the hosting stack, a cross-stack
+    // reference. aws-cdk-lib warns on the consuming stack when the app has not
+    // chosen a reference strength, and no app chose to have this stack. Pin
+    // "strong", the default that warning names, unless the app set one.
+    if (this.node.tryGetContext(CROSS_STACK_REFERENCES_CONTEXT) === undefined) {
+      this.node.setContext(CROSS_STACK_REFERENCES_CONTEXT, 'strong');
+    }
 
     this.encryptionKey = createAlarmTopicKey(this);
     this.topic = new Topic(this, 'AlarmTopicUsEast1', {

@@ -20,6 +20,27 @@ function synth(appFile = 'cdk-blocks/pipeline.cdk.ts') {
   );
 }
 
+/**
+ * Synthesize by running the app the way the CDK CLI does, with a fixed CLI
+ * environment. `cdk synth` exports its own CDK_DEFAULT_ACCOUNT and
+ * CDK_DEFAULT_REGION to the app (from the credentials and Region it finds), so
+ * a value set here would not reach the app through it.
+ */
+function synthWithCliEnvironment(appFile: string, cliEnv: { account: string; region: string }) {
+  rmSync(CDK_OUT, { recursive: true, force: true });
+  execSync(`npx tsx -C cdk ${appFile}`, {
+    cwd: APP_ROOT,
+    stdio: 'pipe',
+    timeout: 120_000,
+    env: {
+      ...process.env,
+      CDK_OUTDIR: CDK_OUT,
+      CDK_DEFAULT_ACCOUNT: cliEnv.account,
+      CDK_DEFAULT_REGION: cliEnv.region,
+    },
+  });
+}
+
 /** Recursively find all .template.json files under a directory. */
 function findTemplates(dir: string): string[] {
   const results: string[] = [];
@@ -237,8 +258,8 @@ function extractDeployActions(template: any): DeployAction[] {
  * Recursively collect all stack artifact IDs and their stackNames from
  * manifest.json files in the cloud assembly (including nested assemblies).
  */
-function collectStackArtifacts(assemblyDir: string): { artifactId: string; stackName: string; templateFile: string }[] {
-  const results: { artifactId: string; stackName: string; templateFile: string }[] = [];
+function collectStackArtifacts(assemblyDir: string): { artifactId: string; stackName: string; templateFile: string; environment: string }[] {
+  const results: { artifactId: string; stackName: string; templateFile: string; environment: string }[] = [];
   const manifestPath = join(assemblyDir, 'manifest.json');
   if (!existsSync(manifestPath)) return results;
 
@@ -249,6 +270,7 @@ function collectStackArtifacts(assemblyDir: string): { artifactId: string; stack
         artifactId: id,
         stackName: artifact.properties?.stackName ?? id,
         templateFile: join(assemblyDir, artifact.properties?.templateFile ?? `${id}.template.json`),
+        environment: artifact.environment,
       });
     } else if (artifact.type === 'cdk:cloud-assembly') {
       const nestedDir = join(assemblyDir, artifact.properties?.directoryName ?? id);
@@ -346,5 +368,39 @@ describe('Deploy actions reference actual assembly stacks', () => {
       missing.length, 0,
       `Stack artifacts with missing template files:\n${missing.join('\n')}`
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// App file that passes the CDK CLI's environment to its stack
+// ---------------------------------------------------------------------------
+
+describe('Pipeline synth when the app file passes CDK_DEFAULT_ACCOUNT / CDK_DEFAULT_REGION as env', () => {
+  // The environment the CDK CLI runs the pipeline in: not the stage's.
+  const CLI_ENV = { account: '111111111111', region: 'eu-west-1' };
+
+  /** The environment of the app's stack (`pipeline-test-prod` in index-cli-env.cdk.ts) in the synthesized assembly. */
+  function appStackEnvironment(): string {
+    const stacks = collectStackArtifacts(CDK_OUT);
+    const appStack = stacks.find(s => s.stackName.endsWith('pipeline-test-prod'));
+    assert.ok(appStack, `Expected the app's stack in the assembly, found: ${stacks.map(s => s.stackName).join(', ')}`);
+    return appStack.environment;
+  }
+
+  after(() => {
+    rmSync(CDK_OUT, { recursive: true, force: true });
+  });
+
+  test("the app's stack takes the environment of a stage that sets env", () => {
+    synthWithCliEnvironment('cdk-blocks/pipeline-cli-env-stage.cdk.ts', CLI_ENV);
+    assert.strictEqual(appStackEnvironment(), 'aws://222222222222/ap-south-1');
+  });
+
+  test('an environment-agnostic pipeline whose stage sets no env synthesizes, with an environment-agnostic app stack', () => {
+    // With the CLI's environment on the app's stack, synth fails with
+    // PipelineStackMustHaveExplicitRegion: the agnostic pipeline stack would
+    // deploy a stack pinned to an account and Region.
+    assert.doesNotThrow(() => synthWithCliEnvironment('cdk-blocks/pipeline-cli-env-agnostic.cdk.ts', CLI_ENV));
+    assert.strictEqual(appStackEnvironment(), 'aws://unknown-account/unknown-region');
   });
 });

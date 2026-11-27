@@ -142,13 +142,19 @@ describe('destroy fails fast on a deterministic error', () => {
 	});
 
 	it('wires the classification into both destroy paths', () => {
-		const sandbox = sandboxDestroyDeps('/app/cdk-blocks/index.cdk.ts', {}, {
+		const clients = {
 			cfnFor: () => {
 				throw new Error('unused');
 			},
 			s3: {} as never,
-		});
-		const production = productionDestroyDeps({ cdkAppPath: 'cdk.ts', projectRoot: '/app' }, {});
+		};
+		const sandbox = sandboxDestroyDeps('/app/cdk-blocks/index.cdk.ts', {}, clients);
+		const production = productionDestroyDeps(
+			{ cdkAppPath: 'cdk.ts', projectRoot: '/app' },
+			{},
+			{ assemblyDir: '/app/.cdk-blocks-sandbox/destroy-x', stacks: [], account: undefined },
+			clients,
+		);
 		for (const deps of [sandbox, production]) {
 			assert.strictEqual(typeof deps.deterministicFailure, 'function');
 			assert.strictEqual(deps.deterministicFailure?.(), undefined, 'nothing has run yet');

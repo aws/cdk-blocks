@@ -2,6 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import assert from 'node:assert';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, it, mock } from 'node:test';
 import type { CloudFormationClient } from '@aws-sdk/client-cloudformation';
 import type { S3Client } from '@aws-sdk/client-s3';
@@ -10,7 +13,6 @@ import { productionDestroyDeps } from './destroy.js';
 import {
 	type AssemblyStack,
 	destroyWasThrottled,
-	emptySandboxBuckets,
 	isThrottleReason,
 	runDestroyWithRetries,
 	sandboxDestroyDeps,
@@ -594,12 +596,372 @@ describe('destroy call sites', () => {
 		assert.deepStrictEqual(regions, ['eu-west-1', 'eu-west-1', 'us-east-1']);
 	});
 
-	it('production destroy detects throttles and empties buckets before a retry', () => {
-		const deps = productionDestroyDeps({ cdkAppPath: 'cdk.ts', projectRoot: '/app' }, {});
-		assert.strictEqual(deps.isThrottled, destroyWasThrottled);
+	it('sandbox:destroy lists, for its own AWS calls, only the stacks in the account STS verified', (t) => {
+		// The retry reads the stacks from the assembly `cdk destroy` synthesized, relative to the project root.
+		const dir = mkdtempSync(join(tmpdir(), 'bb-sandbox-account-'));
+		const cwd = process.cwd();
+		process.chdir(dir);
+		const warn = mock.method(console, 'warn', () => {});
+		t.after(() => {
+			process.chdir(cwd);
+			warn.mock.restore();
+			rmSync(dir, { recursive: true, force: true });
+		});
+		const assembly = join(dir, '.cdk-blocks-sandbox', 'sandbox-destroy.out');
+		mkdirSync(assembly, { recursive: true });
+		const stack = (account: string) => ({
+			type: 'aws:cloudformation:stack',
+			environment: `aws://${account}/eu-west-1`,
+			properties: { templateFile: 'stack.template.json' },
+		});
+		writeFileSync(
+			join(assembly, 'manifest.json'),
+			JSON.stringify({
+				version: '36.0.0',
+				artifacts: { mine: stack('111111111111'), agnostic: stack('unknown-account'), foreign: stack('999999999999') },
+			}),
+		);
+		const clients = {
+			cfnFor: () => {
+				throw new Error('unused');
+			},
+			s3: {} as never,
+		};
+		const listed = (account: string | undefined) =>
+			sandboxDestroyDeps('/app/cdk-blocks/index.ts', {}, clients, undefined, account)
+				.listStacks()
+				.map((listedStack) => listedStack.stackName);
+		// A stack pinned to another account is never looked up or emptied with these credentials;
+		// an environment-agnostic one deploys to their account.
+		assert.deepStrictEqual(listed('111111111111'), ['mine', 'agnostic']);
+		assert.match(String(warn.mock.calls.at(-1)?.arguments[0]), /Not looking up foreign \(account 999999999999\), .*these credentials are for account 111111111111/);
+		// Without a verified account, none is.
+		assert.deepStrictEqual(listed(undefined), []);
+		assert.match(String(warn.mock.calls.at(-1)?.arguments[0]), /Not looking up mine \(account 111111111111\), agnostic, foreign \(account 999999999999\), .*could not be verified/);
+		// One destroy says so once, however often its retry lists the stacks.
+		const deps = sandboxDestroyDeps('/app/cdk-blocks/index.ts', {}, clients, undefined, '111111111111');
+		const before = warn.mock.callCount();
+		deps.listStacks();
+		deps.listStacks();
+		assert.strictEqual(warn.mock.callCount() - before, 1);
+	});
+
+	it('production destroy detects throttles and reads bucket failures before a retry, for each stack in its own Region', async () => {
+		const regions: Array<string | undefined> = [];
+		const { cfn, calls } = fakeCfn({ 'app-prod': attempt('app-prod', 1, THROTTLE) });
+		const cfnFor = (region: string | undefined) => {
+			regions.push(region);
+			return cfn;
+		};
+		const s3 = {
+			send: async () => {
+				throw new Error('no bucket failed to delete: nothing may be emptied');
+			},
+		} as unknown as S3Client;
+		const node = (id: string, region: string, dependencies: string[]) => ({
+			id,
+			selector: id,
+			stackName: id,
+			region,
+			account: '111111111111',
+			dependencies,
+		});
+		const deps = productionDestroyDeps(
+			{ cdkAppPath: 'cdk.ts', projectRoot: '/app' },
+			{},
+			{
+				assemblyDir: '/app/.cdk-blocks-sandbox/destroy-x',
+				stacks: [node('app-prod', 'eu-west-1', []), node('app-prod-CfMonitoring-0a1b2c3d', 'us-east-1', ['app-prod'])],
+				account: '111111111111',
+			},
+			{ cfnFor, s3 },
+		);
+		// The retry gets the stacks the destroy selected, the monitoring stack with us-east-1.
+		const stacks = deps.listStacks();
+		assert.deepStrictEqual(stacks, [
+			{ stackName: 'app-prod', region: 'eu-west-1' },
+			{ stackName: 'app-prod-CfMonitoring-0a1b2c3d', region: 'us-east-1' },
+		]);
+		assert.ok(deps.isThrottled, 'isThrottled is wired');
 		assert.deepStrictEqual(deps.attemptOutput?.(), [], 'attemptOutput is wired (nothing retained while uncurated)');
-		assert.strictEqual(deps.emptyBuckets, emptySandboxBuckets);
+		assert.strictEqual(await deps.isThrottled(stacks, SINCE), true);
+		assert.deepStrictEqual(calls, ['app-prod:0']);
+		// Before an attempt the newest event of both stacks is read, each in its own Region.
+		calls.length = 0;
+		regions.length = 0;
+		await deps.beforeAttempt?.();
+		assert.deepStrictEqual(calls, ['app-prod:0', 'app-prod-CfMonitoring-0a1b2c3d:0']);
+		assert.deepStrictEqual(regions, ['eu-west-1', 'us-east-1']);
 		assert.strictEqual(deps.successLabel, 'Production stack');
+	});
+
+	// The retry's own calls use the credentials CDK destroys with. A stack pinned to another account,
+	// looked up by name with them, would be a stack of the same name in THIS account: its buckets
+	// must never be emptied. Without a verified account, no stack is known to be in it.
+	for (const [name, account, reached] of [
+		['only for the stacks in the account STS verified', '111111111111', ['same-account', 'agnostic']],
+		['for no stack when the account could not be verified', undefined, []],
+	] as const) {
+		it(`production destroy makes its own AWS calls ${name}`, async () => {
+			const { cfn, calls } = fakeCfn({});
+			const listed: string[] = [];
+			const cfnFor = () =>
+				({
+					send: async (cmd: { constructor: { name: string }; input: { StackName: string } }) => {
+						if (cmd.constructor.name === 'ListStackResourcesCommand') {
+							listed.push(cmd.input.StackName);
+							return { StackResourceSummaries: [] };
+						}
+						return cfn.send(cmd as never);
+					},
+				}) as unknown as CloudFormationClient;
+			const s3 = { send: async () => ({}) } as unknown as S3Client;
+			const node = (id: string, stackAccount: string | undefined) => ({
+				id,
+				selector: id,
+				stackName: id,
+				region: stackAccount ? 'eu-west-1' : undefined,
+				account: stackAccount,
+				dependencies: [],
+			});
+			const deps = productionDestroyDeps(
+				{ cdkAppPath: 'cdk.ts', projectRoot: '/app' },
+				{},
+				{
+					assemblyDir: '/app/.cdk-blocks-sandbox/destroy-x',
+					stacks: [node('same-account', '111111111111'), node('agnostic', undefined), node('foreign', '999999999999')],
+					account,
+				},
+				{ cfnFor, s3 },
+			);
+			assert.deepStrictEqual(
+				deps.listStacks().map((stack) => stack.stackName),
+				reached,
+			);
+			// A failed destroy, retried once: the throttle check and the bucket emptying get that list.
+			const log = mock.method(console, 'log', () => {});
+			const error = mock.method(console, 'error', () => {});
+			try {
+				await assert.rejects(
+					runDestroyWithRetries({
+						...deps,
+						runDestroy: () => {
+							throw new Error('delete failed');
+						},
+						sleep: async () => {},
+						retryDelays: [0],
+					}),
+					/delete failed/,
+				);
+			} finally {
+				log.mock.restore();
+				error.mock.restore();
+			}
+			const lookedUp = [...new Set([...calls.map((call) => call.split(':')[0]), ...listed])];
+			assert.deepStrictEqual(lookedUp.sort(), [...reached].sort());
+			assert.ok(!lookedUp.includes('foreign'));
+		});
+	}
+
+	// A production stack retains its data buckets (RemovalPolicy.RETAIN): deleting the stack keeps
+	// them, so the retry of a failed delete must not empty them either. It empties a bucket only
+	// on the deployed stack's own evidence that, in this attempt, CloudFormation tried to delete
+	// it and S3 refused because it holds objects. Anything less empties nothing.
+	describe('what the production retry empties', () => {
+		const ACCOUNT = '111111111111';
+		const NOT_EMPTY = 'The bucket you tried to delete is not empty (Service: S3, Status Code: 409, Request ID: x)';
+		const event = (minute: number, type: string, id: string, status: string, physicalId?: string, reason?: string): FakeEvent => ({
+			EventId: `${id}:${status}:${minute}`,
+			Timestamp: at(minute),
+			LogicalResourceId: id,
+			PhysicalResourceId: physicalId,
+			ResourceType: type,
+			ResourceStatus: status,
+			ResourceStatusReason: reason,
+		});
+		const stackEvent = (minute: number, stack: string, status: string) => event(minute, 'AWS::CloudFormation::Stack', stack, status);
+		const bucket = (minute: number, id: string, status: string, reason = status === 'DELETE_FAILED' ? NOT_EMPTY : undefined) =>
+			event(minute, 'AWS::S3::Bucket', id, status, `${id}-physical`.toLowerCase(), reason);
+		const node = (id: string, region: string) => ({ id, selector: id, stackName: id, region, account: ACCOUNT, dependencies: [] });
+		const STACKS = [node('app-prod', 'eu-west-1'), node('app-prod-CfMonitoring-0a1b2c3d', 'us-east-1')];
+
+		interface S3Request {
+			command: string;
+			input: { Bucket: string; ExpectedBucketOwner?: string };
+		}
+
+		/**
+		 * The S3 requests of the bucket step before a retry, for a destroy of STACKS. `before` holds
+		 * each stack's CloudFormation events when the attempt began and `during` those the attempt
+		 * added (both newest first); `after`, when given, is what the stack's events read as once
+		 * the attempt failed, instead of `during` on top of `before`. Each bucket holds one object
+		 * version. `account`: the verified account, `null` for none.
+		 */
+		async function s3Requests(
+			before: Record<string, FakeEvent[] | Error>,
+			during: Record<string, FakeEvent[]>,
+			{ account = ACCOUNT, after }: { account?: string | null; after?: Record<string, FakeEvent[]> } = {},
+		): Promise<S3Request[]> {
+			const events: Record<string, FakeEvent[] | Error> = { ...before };
+			const { cfn } = fakeCfn(events);
+			const requests: S3Request[] = [];
+			const listedOnce = new Set<string>();
+			const s3 = {
+				send: async (cmd: { constructor: { name: string }; input: { Bucket: string; ExpectedBucketOwner?: string } }) => {
+					requests.push({ command: cmd.constructor.name, input: cmd.input });
+					if (cmd.constructor.name !== 'ListObjectVersionsCommand' || listedOnce.has(cmd.input.Bucket)) return {};
+					listedOnce.add(cmd.input.Bucket);
+					return { Versions: [{ Key: 'object', VersionId: 'v1' }] };
+				},
+			} as unknown as S3Client;
+			const deps = productionDestroyDeps(
+				{ cdkAppPath: 'cdk.ts', projectRoot: '/app' },
+				{},
+				{ assemblyDir: '/app/.cdk-blocks-sandbox/destroy-x', stacks: STACKS, account: account ?? undefined },
+				{ cfnFor: () => cfn, s3 },
+			);
+			const log = mock.method(console, 'log', () => {});
+			try {
+				await deps.beforeAttempt?.();
+				for (const { stackName } of STACKS) {
+					const earlier = before[stackName];
+					events[stackName] = after?.[stackName] ?? [...(during[stackName] ?? []), ...(Array.isArray(earlier) ? earlier : [])];
+				}
+				await deps.emptyBuckets(STACKS);
+			} finally {
+				log.mock.restore();
+			}
+			return requests;
+		}
+		const emptied = (requests: S3Request[]) => [...new Set(requests.map((request) => request.input.Bucket))];
+
+		// Functions: the suite's body runs before `at` below is initialized.
+		// The deploy that the destroy starts from.
+		const deployed = (stack: string): FakeEvent[] => [
+			stackEvent(-900, stack, 'UPDATE_COMPLETE'),
+			bucket(-905, 'SiteBucket', 'UPDATE_COMPLETE'),
+			bucket(-906, 'ConfigLogsBucket', 'UPDATE_COMPLETE'),
+		];
+		// A delete of the app stack that began at `minute`: the site bucket could not be deleted
+		// (`reason`), the config bucket is retained (CloudFormation skips it), and the stack failed.
+		// Every event of one delete carries the ClientRequestToken of its DeleteStack call.
+		const failedOnBucket = (minute = 1, reason = NOT_EMPTY, token = `delete-at-${minute}`): FakeEvent[] =>
+			[
+				stackEvent(minute + 19, 'app-prod', 'DELETE_FAILED'),
+				bucket(minute + 5, 'SiteBucket', 'DELETE_FAILED', reason),
+				bucket(minute + 4, 'ConfigLogsBucket', 'DELETE_SKIPPED'),
+				event(minute + 3, 'AWS::Lambda::Function', 'Handler', 'DELETE_COMPLETE'),
+				stackEvent(minute, 'app-prod', 'DELETE_IN_PROGRESS'),
+			].map((ev) => ({ ...ev, ClientRequestToken: token }));
+		const BEFORE = () => ({ 'app-prod': deployed('app-prod') });
+
+		it('empties the bucket S3 refused to delete because it is not empty, and not the one the stack retains', async () => {
+			const requests = await s3Requests(BEFORE(), { 'app-prod': failedOnBucket() });
+			assert.deepStrictEqual(emptied(requests), ['sitebucket-physical']);
+			assert.deepStrictEqual(
+				requests.map((request) => request.command),
+				['ListObjectVersionsCommand', 'DeleteObjectsCommand', 'ListObjectVersionsCommand'],
+			);
+			// Both requests name the verified account: S3 refuses them for a bucket of anyone else.
+			for (const request of requests) assert.strictEqual(request.input.ExpectedBucketOwner, ACCOUNT, request.command);
+		});
+
+		it('empties nothing when the bucket could not be deleted for another reason', async () => {
+			for (const reason of [
+				'Access Denied (Service: S3, Status Code: 403, Request ID: x)',
+				'Rate exceeded (Service: S3, Status Code: 503, Error Code: SlowDown)',
+				undefined,
+			]) {
+				const during = failedOnBucket();
+				during[1].ResourceStatusReason = reason;
+				assert.deepStrictEqual(await s3Requests(BEFORE(), { 'app-prod': during }), [], String(reason));
+			}
+		});
+
+		it('ignores a bucket that an earlier attempt could not delete, however recent', async () => {
+			// The previous attempt began 30 seconds before this one and failed on the bucket.
+			const before = { 'app-prod': [...failedOnBucket(-0.5), ...deployed('app-prod')] };
+			// This attempt never reached the stack.
+			assert.deepStrictEqual(await s3Requests(before, {}), []);
+			// This attempt deleted the stack's resources and failed on something else.
+			const thenAnother = [
+				stackEvent(20, 'app-prod', 'DELETE_FAILED'),
+				event(5, 'AWS::ApiGateway::RestApi', 'Api', 'DELETE_FAILED'),
+				stackEvent(1, 'app-prod', 'DELETE_IN_PROGRESS'),
+			];
+			assert.deepStrictEqual(await s3Requests(before, { 'app-prod': thenAnother }), []);
+		});
+
+		it('empties nothing without a delete of the stack begun in this attempt', async () => {
+			// A bucket event with no DELETE_IN_PROGRESS of the stack after the snapshot.
+			assert.deepStrictEqual(await s3Requests(BEFORE(), { 'app-prod': failedOnBucket().slice(0, -1) }), []);
+		});
+
+		it('empties nothing for a bucket failure of another operation than the delete this attempt began', async () => {
+			// An operation begun before the snapshot was still finishing: its bucket failure lands
+			// after the snapshot, on either side of this attempt's DELETE_IN_PROGRESS.
+			const lateFailure = (minute: number) => ({ ...bucket(minute, 'DataBucket', 'DELETE_FAILED'), ClientRequestToken: 'earlier-operation' });
+			const [failed, site, ...rest] = failedOnBucket();
+			const mixed = [failed, lateFailure(8), site, ...rest, lateFailure(0.5)];
+			assert.deepStrictEqual(emptied(await s3Requests(BEFORE(), { 'app-prod': mixed })), ['sitebucket-physical']);
+			// Events without a request token prove nothing.
+			const untokened = failedOnBucket().map((ev) => ({ ...ev, ClientRequestToken: undefined }));
+			assert.deepStrictEqual(await s3Requests(BEFORE(), { 'app-prod': untokened }), []);
+		});
+
+		it('empties nothing when the events from before the attempt could not be read, or are not found again', async () => {
+			assert.deepStrictEqual(await s3Requests({ 'app-prod': new Error('Rate exceeded') }, { 'app-prod': failedOnBucket() }), []);
+			// A stack with no event before the attempt.
+			assert.deepStrictEqual(await s3Requests({}, { 'app-prod': failedOnBucket() }), []);
+			// The newest event from before the attempt is not among the stack's events afterwards.
+			assert.deepStrictEqual(await s3Requests(BEFORE(), {}, { after: { 'app-prod': failedOnBucket() } }), []);
+		});
+
+		it('empties nothing in the app stack when the monitoring stack failed and the app stack was not reached', async () => {
+			const monitoring = 'app-prod-CfMonitoring-0a1b2c3d';
+			const requests = await s3Requests(
+				{ ...BEFORE(), [monitoring]: [stackEvent(-890, monitoring, 'CREATE_COMPLETE')] },
+				{
+					// CDK deletes the monitoring stack first; it was throttled, and the destroy stopped there.
+					[monitoring]: [
+						stackEvent(20, monitoring, 'DELETE_FAILED'),
+						event(5, 'AWS::CloudWatch::Alarm', 'CloudFront5xxRate', 'DELETE_FAILED', undefined, THROTTLE),
+						stackEvent(1, monitoring, 'DELETE_IN_PROGRESS'),
+					],
+				},
+			);
+			assert.deepStrictEqual(requests, []);
+		});
+
+		it('empties nothing without a verified account, whatever the events say', async () => {
+			assert.deepStrictEqual(await s3Requests(BEFORE(), { 'app-prod': failedOnBucket() }, { account: null }), []);
+		});
+
+		it('the sandbox destroy still empties every bucket of its stacks, naming the verified account', async () => {
+			const requests: Array<{ command: string; input: { Bucket: string; ExpectedBucketOwner?: string } }> = [];
+			const cfn = {
+				send: async (cmd: { constructor: { name: string } }) => {
+					assert.strictEqual(cmd.constructor.name, 'ListStackResourcesCommand');
+					return {
+						StackResourceSummaries: [
+							{ ResourceType: 'AWS::S3::Bucket', PhysicalResourceId: 'site-bucket' },
+							// Retained by the stack: a sandbox is disposable, so it is emptied all the same.
+							{ ResourceType: 'AWS::S3::Bucket', PhysicalResourceId: 'retained-bucket' },
+						],
+					};
+				},
+			} as unknown as CloudFormationClient;
+			const s3 = {
+				send: async (cmd: { constructor: { name: string }; input: { Bucket: string; ExpectedBucketOwner?: string } }) => {
+					requests.push({ command: cmd.constructor.name, input: cmd.input });
+					return {};
+				},
+			} as unknown as S3Client;
+			const deps = sandboxDestroyDeps('/app/cdk-blocks/index.ts', {}, { cfnFor: () => cfn, s3 }, undefined, ACCOUNT);
+			await deps.emptyBuckets([{ stackName: 'app-jdoe', region: 'eu-west-1' }]);
+			assert.deepStrictEqual(emptied(requests), ['site-bucket', 'retained-bucket']);
+			for (const request of requests) assert.strictEqual(request.input.ExpectedBucketOwner, ACCOUNT);
+		});
 	});
 
 	it('destroyWasThrottled returns false for no stacks and calls no AWS API', async () => {
@@ -650,8 +1012,11 @@ describe('isThrottleReason', () => {
 });
 
 type FakeEvent = {
+	EventId?: string;
+	ClientRequestToken?: string;
 	Timestamp: Date;
 	LogicalResourceId: string;
+	PhysicalResourceId?: string;
 	ResourceType: string;
 	ResourceStatus: string;
 	ResourceStatusReason?: string;

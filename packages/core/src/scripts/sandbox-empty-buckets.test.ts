@@ -17,6 +17,7 @@ import {
 	listStackBucketNames,
 	runDestroyWithRetries,
 	toDeleteObjects,
+	topLevelStackNodes,
 	topLevelStacks,
 } from './sandbox.js';
 
@@ -128,6 +129,31 @@ describe('emptyBucket', () => {
 		await emptyBucket({ send } as unknown as S3Client, 'bucket');
 		assert.strictEqual(lists, 1); // did NOT re-list after Errors
 		assert.strictEqual(deletes, 1);
+	});
+
+	it('names the expected bucket owner on the list and on the delete, and only when one is given', async () => {
+		const owners = async (expectedBucketOwner?: string) => {
+			const seen: Array<[string, unknown]> = [];
+			let lists = 0;
+			const send: Send = async (cmd) => {
+				seen.push([cmd.constructor.name, cmd.input.ExpectedBucketOwner]);
+				if (cmd.constructor.name === 'ListObjectVersionsCommand') return ++lists === 1 ? { Versions: [{ Key: 'a', VersionId: 'v1' }] } : {};
+				return {};
+			};
+			await emptyBucket({ send } as unknown as S3Client, 'bucket', expectedBucketOwner);
+			return seen;
+		};
+		// A bucket name is global: with the owner, S3 refuses a bucket of the same name in another account.
+		assert.deepStrictEqual(await owners('111111111111'), [
+			['ListObjectVersionsCommand', '111111111111'],
+			['DeleteObjectsCommand', '111111111111'],
+			['ListObjectVersionsCommand', '111111111111'],
+		]);
+		assert.deepStrictEqual(await owners(), [
+			['ListObjectVersionsCommand', undefined],
+			['DeleteObjectsCommand', undefined],
+			['ListObjectVersionsCommand', undefined],
+		]);
 	});
 });
 
@@ -307,6 +333,89 @@ describe('topLevelStacks', () => {
 
 	it('returns [] when there is no assembly', () => {
 		assert.deepStrictEqual(topLevelStacks(join(tmpdir(), 'bb-no-such-assembly')), []);
+	});
+});
+
+// The production destroy and the bootstrap check of a deploy read more of the
+// assembly: which stack depends on which, and the id the CDK CLI selects it by.
+describe('topLevelStackNodes', () => {
+	it('lists each top-level stack with its artifact id, CLI selector, environment and stack dependencies', (t) => {
+		const dir = mkdtempSync(join(tmpdir(), 'bb-stack-nodes-'));
+		t.after(() => rmSync(dir, { recursive: true, force: true }));
+		writeFileSync(
+			join(dir, 'manifest.json'),
+			JSON.stringify({
+				version: '36.0.0',
+				artifacts: {
+					'my-app.assets': { type: 'cdk:asset-manifest', properties: { file: 'my-app.assets.json' } },
+					'my-app': {
+						type: 'aws:cloudformation:stack',
+						environment: 'aws://111122223333/eu-west-1',
+						displayName: 'my-app',
+						// Its asset manifest is a dependency too, but not a stack.
+						dependencies: ['my-app.assets', 'edge-lambda-stack-x'],
+						properties: { templateFile: 'my-app.template.json' },
+					},
+					'my-app-CfMonitoring-0a1b2c3d': {
+						type: 'aws:cloudformation:stack',
+						environment: 'aws://111122223333/us-east-1',
+						displayName: 'my-app-CfMonitoring-0a1b2c3d',
+						dependencies: ['my-app'],
+						properties: { templateFile: 'monitoring.template.json' },
+					},
+					'edge-lambda-stack-x': {
+						type: 'aws:cloudformation:stack',
+						environment: 'aws://111122223333/us-east-1',
+						properties: { templateFile: 'edge.template.json' },
+					},
+					MainStackABCD1234: {
+						type: 'aws:cloudformation:stack',
+						environment: 'aws://unknown-account/unknown-region',
+						displayName: 'Parent/Main',
+						properties: { templateFile: 'main.template.json', stackName: 'main-prod' },
+					},
+				},
+			}),
+		);
+		assert.deepStrictEqual(topLevelStackNodes(dir), [
+			{
+				id: 'my-app',
+				selector: 'my-app',
+				stackName: 'my-app',
+				region: 'eu-west-1',
+				account: '111122223333',
+				dependencies: ['edge-lambda-stack-x'],
+			},
+			{
+				id: 'my-app-CfMonitoring-0a1b2c3d',
+				selector: 'my-app-CfMonitoring-0a1b2c3d',
+				stackName: 'my-app-CfMonitoring-0a1b2c3d',
+				region: 'us-east-1',
+				account: '111122223333',
+				dependencies: ['my-app'],
+			},
+			{
+				id: 'edge-lambda-stack-x',
+				selector: 'edge-lambda-stack-x',
+				stackName: 'edge-lambda-stack-x',
+				region: 'us-east-1',
+				account: '111122223333',
+				dependencies: [],
+			},
+			// The CLI selects a stack by its construct path, not by its artifact id or its stack name.
+			{
+				id: 'MainStackABCD1234',
+				selector: 'Parent/Main',
+				stackName: 'main-prod',
+				region: undefined,
+				account: undefined,
+				dependencies: [],
+			},
+		]);
+	});
+
+	it('returns [] when there is no assembly', () => {
+		assert.deepStrictEqual(topLevelStackNodes(join(tmpdir(), 'bb-no-such-assembly')), []);
 	});
 });
 
@@ -531,5 +640,32 @@ describe('destroyRetryClients', () => {
 		assert.strictEqual(await regionOf(clients.cfnFor('us-east-1')), 'us-east-1');
 		assert.strictEqual(clients.cfnFor('us-east-1'), clients.cfnFor('us-east-1')); // one client per Region
 		assert.strictEqual(await regionOf(clients.s3), 'eu-west-3');
+	});
+
+	it('uses the access keys of the environment, as CDK does, when AWS_PROFILE is set too', async (t) => {
+		const dir = mkdtempSync(join(tmpdir(), 'bb-retry-clients-'));
+		t.after(() => rmSync(dir, { recursive: true, force: true }));
+		writeFileSync(join(dir, 'cdk.json'), JSON.stringify({ app: 'x', region: 'eu-west-3' }));
+		// A default SDK client would use the profile, and so another account than the one CDK
+		// destroys in: the retry would empty the buckets of a stack of the same name there.
+		const env = {
+			HOME: dir,
+			AWS_PROFILE: 'other-account',
+			AWS_ACCESS_KEY_ID: 'AKIAEXAMPLEKEYS',
+			AWS_SECRET_ACCESS_KEY: 'fixture-secret',
+		};
+		const clients = await destroyRetryClients(dir, env);
+		// Static credentials: resolving them sends no request and reads no profile.
+		for (const client of [clients.cfnFor(undefined), clients.cfnFor('us-east-1'), clients.s3]) {
+			const credentials = await client.config.credentials();
+			assert.strictEqual(credentials.accessKeyId, 'AKIAEXAMPLEKEYS');
+			assert.strictEqual(credentials.secretAccessKey, 'fixture-secret');
+		}
+		// cdk.json's profile comes before the keys, in CDK and here.
+		writeFileSync(join(dir, 'cdk.json'), JSON.stringify({ app: 'x', region: 'eu-west-3', profile: 'from-cdk-json' }));
+		const profiled = await destroyRetryClients(dir, env);
+		const profileOf = (config: object): unknown => ('profile' in config ? config.profile : undefined);
+		assert.strictEqual(profileOf(profiled.cfnFor('us-east-1').config), 'from-cdk-json');
+		assert.strictEqual(profileOf(profiled.s3.config), 'from-cdk-json');
 	});
 });

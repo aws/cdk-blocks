@@ -6,7 +6,7 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, it, mock } from 'node:test';
-import { resolveDeploymentTarget } from './deployment-target.js';
+import { deploymentClientCredentials, resolveDeploymentTarget } from './deployment-target.js';
 import { assertAwsCredentials } from './preflight-credentials.js';
 
 describe('resolveDeploymentTarget', () => {
@@ -145,6 +145,14 @@ describe('resolveDeploymentTarget', () => {
 		});
 	});
 
+	it('reports the cloud assembly directory that cdk.json or ~/.cdk.json sets as output', async () => {
+		assert.equal((await resolveDeploymentTarget({ env, projectRoot })).assemblyDir, undefined);
+		await writeFile(join(home, '.cdk.json'), '{"output":"build/user.out"}');
+		assert.equal((await resolveDeploymentTarget({ env, projectRoot })).assemblyDir, 'build/user.out');
+		await writeFile(join(projectRoot, 'cdk.json'), '{"output":"build/cdk.out"}');
+		assert.equal((await resolveDeploymentTarget({ env, projectRoot })).assemblyDir, 'build/cdk.out');
+	});
+
 	it('reads Regions from absolute AWS_CONFIG_FILE and AWS_SHARED_CREDENTIALS_FILE paths', async () => {
 		await writeFile(join(home, 'custom-config'), '[default]\nregion=eu-west-1\n');
 		await writeFile(join(home, 'custom-credentials'), '[default]\nregion=eu-north-1\n');
@@ -173,5 +181,41 @@ describe('resolveDeploymentTarget', () => {
 				return true;
 			},
 		);
+	});
+});
+
+// SDK v3 clients and CDK order the credential sources differently. A client built
+// for the stacks CDK deploys or destroys must use CDK's order, or it acts in
+// another account.
+describe('deploymentClientCredentials', () => {
+	const keys = { AWS_ACCESS_KEY_ID: 'AKIAEXAMPLEKEYS', AWS_SECRET_ACCESS_KEY: 'fixture-secret' };
+
+	it('passes the access keys of the environment explicitly, also when AWS_PROFILE is set', () => {
+		assert.deepEqual(deploymentClientCredentials({}, { ...keys, AWS_PROFILE: 'other-account' }), {
+			credentials: { accessKeyId: 'AKIAEXAMPLEKEYS', secretAccessKey: 'fixture-secret' },
+		});
+		// The AMAZON_ names that CDK still reads, and a session token.
+		assert.deepEqual(
+			deploymentClientCredentials(
+				{},
+				{ AMAZON_ACCESS_KEY_ID: 'AKIAAMAZONKEYS', AMAZON_SECRET_ACCESS_KEY: 'secret', AWS_SESSION_TOKEN: 'token' },
+			),
+			{ credentials: { accessKeyId: 'AKIAAMAZONKEYS', secretAccessKey: 'secret', sessionToken: 'token' } },
+		);
+	});
+
+	it('uses the profile of cdk.json before the keys', () => {
+		assert.deepEqual(deploymentClientCredentials({ profile: 'deployment' }, { ...keys, AWS_PROFILE: 'other-account' }), {
+			profile: 'deployment',
+		});
+	});
+
+	it('names the AWS_PROFILE of the given environment when there are no keys, and nothing otherwise', () => {
+		assert.deepEqual(deploymentClientCredentials({}, { AWS_PROFILE: 'dev' }), { profile: 'dev' });
+		// Half a key pair is no key pair.
+		assert.deepEqual(deploymentClientCredentials({}, { AWS_ACCESS_KEY_ID: 'AKIAEXAMPLEKEYS', AWS_PROFILE: 'dev' }), {
+			profile: 'dev',
+		});
+		assert.deepEqual(deploymentClientCredentials({}, {}), {});
 	});
 });
