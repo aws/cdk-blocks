@@ -1406,7 +1406,8 @@ export class CdnConstruct extends Construct {
 
     // ---- Error responses ----
     // Four modes:
-    //  1. Compute origin → 502/503/504 → custom error page (preserves status).
+    //  1. Compute origin → 502/504 (CloudFront's when the server fails) →
+    //     custom error page (preserves status); 500/503 pass through.
     //  2. Static deploy WITH `manifest.errorPages` (Next.js `output: 'export'`,
     //     Astro static, etc.) → 403/404 → /404.html with status 404. S3
     //     with OAC returns 403 (not 404) for missing keys, so both must
@@ -1483,25 +1484,29 @@ export class CdnConstruct extends Construct {
         : []),
       ...(hasCompute
         ? [
-            // 500: Don't cache Lambda 500s — they're likely transient, and
-            // caching one would serve a stale error to all users. (A missing
-            // source image is a 404 from the image-opt Lambda, not a 500.)
-            // 502/503/504: not cached either (see withServerErrorsNotCached).
-            {
-              httpStatus: 500,
-              responseHttpStatus: 500,
-              responsePagePath: `/builds/${buildId}/${ERROR_PAGE_KEY}`,
-              ttl: Duration.seconds(0),
-            },
+            // 502 / 504 only: CloudFront generates these when the server
+            // function crashes, returns an invalid response or times out, and
+            // their body is CloudFront's own, so the static page replaces it.
+            // A 502 / 504 the server or the backend sends itself (e.g. the
+            // RPC's HandlerTimeoutError) is replaced too: CloudFront error
+            // responses apply to every path. 500 and 503 are left alone: the
+            // server usually answers them itself (an API route's JSON error,
+            // the framework's own error page, a maintenance response), and
+            // mapping them would replace those bodies on `/api/*` and the
+            // proxied RPC (`/cdk-blocks/*`) too. A 500 that API Gateway
+            // answers (Lambda rejected the invocation, e.g. throttled) and a
+            // 503 that CloudFront generates (a function or Lambda@Edge error)
+            // then pass through with their own bodies. An app that wants a
+            // page for a 500 sets `errorPages.serverError`.
+            // The error caching minimum TTL is 0 for all of them (see
+            // withServerErrorsNotCached, which adds TTL-only entries for 500,
+            // 501 and 503). A response that sets max-age, s-maxage or
+            // Expires is still cached for that time; the SSR cache guard
+            // rewrites a credentialed or cookie-setting one to
+            // private, no-store.
             {
               httpStatus: 502,
               responseHttpStatus: 502,
-              responsePagePath: `/builds/${buildId}/${ERROR_PAGE_KEY}`,
-              ttl: Duration.seconds(0),
-            },
-            {
-              httpStatus: 503,
-              responseHttpStatus: 503,
               responsePagePath: `/builds/${buildId}/${ERROR_PAGE_KEY}`,
               ttl: Duration.seconds(0),
             },
@@ -1517,8 +1522,8 @@ export class CdnConstruct extends Construct {
 
     // ---- Custom error pages (user-provided) ----
     // Shared with `cf.errorPages` (a bring-your-own door): see error_responses.ts.
-    // For compute (SSR) stacks, the default 502/503/504 error pages are
-    // already wired above; only 500 gets the custom page.
+    // For compute (SSR) stacks, the default 502/504 error pages are
+    // already wired above; only 500 gets the custom page (503 passes through).
     errorResponses.push(...customErrorResponses(props.customErrorPages, { pathPrefix: `/builds/${buildId}`, hasCompute }));
     // A server's 5xx is never cached: the error caching minimum TTL is 0 for
     // 500-504, keeping each response's page (see withServerErrorsNotCached).

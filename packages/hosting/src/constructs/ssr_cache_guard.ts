@@ -244,6 +244,10 @@ const INSTALLED = Symbol.for('aws-blocks.hosting.ssr-cache-guard');
 // The error statuses CloudFront caches from the origin for the error caching
 // minimum TTL even when the response has no caching headers.
 const ERROR_STATUSES_CACHED = new Set([404, 414, 500, 501, 502, 503, 504]);
+// The error statuses whose private, no-store and no-cache CloudFront ignores:
+// it caches them for the greater of the error caching minimum TTL and the
+// response's own max-age, s-maxage or Expires.
+const ERROR_STATUSES_IGNORING_PRIVATE = new Set([500, 502, 503, 504]);
 
 function cookieNames(value) {
   const names = [];
@@ -265,6 +269,22 @@ function expiresInFuture(expires) {
   return !Number.isNaN(at) && at > Date.now();
 }
 
+// Whether CloudFront keeps this error response for a TTL of its own even when
+// it is private, no-store or no-cache: a 500 / 502 / 503 / 504 with a
+// positive max-age or s-maxage, or a future Expires.
+function errorHeldByTtl(cacheControl, expires, statusCode) {
+  if (!ERROR_STATUSES_IGNORING_PRIVATE.has(Number(statusCode))) return false;
+  if (expiresInFuture(expires)) return true;
+  for (const part of String(cacheControl ?? '').split(',')) {
+    const [name, value] = part.split('=');
+    const directive = name.trim().toLowerCase();
+    if ((directive === 'max-age' || directive === 's-maxage') && Number.parseInt(String(value ?? '').trim().replace(/^"|"$/g, ''), 10) > 0) {
+      return true;
+    }
+  }
+  return false;
+}
+
 // Whether a response with this Cache-Control (and Expires) can be stored by a
 // shared cache. private/no-store are never stored; s-maxage gives a shared TTL
 // even next to no-cache; no-cache alone means revalidate on every request (not
@@ -278,6 +298,7 @@ function expiresInFuture(expires) {
 // (e.g. no-cache="a, b"); a split there can only add directive names such as
 // private or no-store, so a mis-split errs toward not-cacheable.
 function sharedCacheable(cacheControl, expires, statusCode) {
+  if (errorHeldByTtl(cacheControl, expires, statusCode)) return true;
   const fallback = expiresInFuture(expires) || DEFAULT_TTL_POSITIVE || ERROR_STATUSES_CACHED.has(Number(statusCode));
   if (cacheControl == null || String(cacheControl).trim() === '') return fallback;
   const directives = new Set();
@@ -331,8 +352,11 @@ function warnVary(names) {
 export function guardCacheControl(request, response) {
   // A response that sets cookies is never stored by a shared cache: it is
   // left alone when it is already private or no-store (keeping its browser
-  // caching), else made private, no-store.
+  // caching), else made private, no-store. A 500 / 502 / 503 / 504 with a TTL
+  // is made private, no-store either way, since CloudFront ignores private
+  // and no-store on those statuses.
   if (response.setCookie) {
+    if (errorHeldByTtl(response.cacheControl, response.expires, response.statusCode)) return PRIVATE;
     const names = String(response.cacheControl ?? '').split(',').map((d) => d.split('=')[0].trim().toLowerCase());
     return names.includes('private') || names.includes('no-store') ? null : PRIVATE;
   }
@@ -374,8 +398,13 @@ export function requestInfoFromEvent(event) {
   return { authorization, cookies: [...new Set(cookies)] };
 }
 
-function setHeader(map, name, value, multi) {
+function removeHeader(map, name) {
+  if (!map) return;
   for (const key of Object.keys(map)) if (key.toLowerCase() === name) delete map[key];
+}
+
+function setHeader(map, name, value, multi) {
+  removeHeader(map, name);
   map[name] = multi ? [value] : value;
 }
 
@@ -399,6 +428,9 @@ function guardHeaders(target, request) {
     vary: vary.length ? vary.join(', ') : undefined,
   });
   if (next == null) return target;
+  // Expires is dropped with the rewrite: CloudFront would keep a 5xx for it.
+  removeHeader(target.headers, 'expires');
+  removeHeader(target.multiValueHeaders, 'expires');
   // Replace Cache-Control in each map that held it. With none to replace, add
   // it to multiValueHeaders when present (else headers), so it is sent once.
   if (inMulti.length || (!inHeaders.length && target.multiValueHeaders)) {
@@ -677,11 +709,14 @@ function installHttpServerGuard() {
         const next = guardCacheControl(request, { cacheControl, expires, setCookie, statusCode, vary });
         if (next != null) {
           this.setHeader('cache-control', next);
+          // Expires is dropped with the rewrite: CloudFront would keep a 5xx for it.
+          this.removeHeader('expires');
           // Headers passed to writeHead are merged over setHeader values, so
-          // replace any Cache-Control among them too. Once a header is set,
-          // Node rejects an array of tuples, so pass those on as a flat array.
-          if (argCacheControl.length || tuples) {
-            const kept = pairs.filter(([k]) => k.toLowerCase() !== 'cache-control');
+          // replace any Cache-Control (and drop any Expires) among them too.
+          // Once a header is set, Node rejects an array of tuples, so pass
+          // those on as a flat array.
+          if (argCacheControl.length || argExpires.length || tuples) {
+            const kept = pairs.filter(([k]) => k.toLowerCase() !== 'cache-control' && k.toLowerCase() !== 'expires');
             if (Array.isArray(extra)) {
               extra = kept.flat();
             } else {
