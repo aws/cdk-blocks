@@ -7,6 +7,7 @@ import * as cdk from 'aws-cdk-lib';
 import { RemovalPolicy } from 'aws-cdk-lib';
 import * as ec2 from 'aws-cdk-lib/aws-ec2';
 import * as iam from 'aws-cdk-lib/aws-iam';
+import * as kms from 'aws-cdk-lib/aws-kms';
 import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
 import { FRAMEWORK_KEY_VALUE, isFrameworkKeyOptions } from './framework-key-options.js';
 import { secretArnConfigKey } from './internal-shared.js';
@@ -138,6 +139,17 @@ export class Secret extends BuildingBlockScope {
 					actions: ['secretsmanager:GetSecretValue'],
 					resources: [this.secret.secretArn],
 				}),
+			);
+			// The narrow statement above skips the KMS grant that `grantRead` adds.
+			// The secret can still carry a customer-managed key this block never set
+			// (for example from a CDK property injector), and then GetSecretValue
+			// fails without kms:Decrypt. Grant it the same way `grantRead` does:
+			// only through Secrets Manager in this region.
+			this.secret.encryptionKey?.grantDecrypt(
+				new kms.ViaServicePrincipal(
+					`secretsmanager.${cdk.Stack.of(this.secret).region}.amazonaws.com`,
+					this.executionRole.grantPrincipal,
+				),
 			);
 		} else {
 			this.secret.grantRead(this.executionRole);
