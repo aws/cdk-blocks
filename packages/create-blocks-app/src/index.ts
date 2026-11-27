@@ -1442,17 +1442,21 @@ async function create() {
 
 // Run the CLI only when this module is the entry point. Resolve argv[1]
 // through its real path first so an npm bin symlink (node_modules/.bin/…)
-// still matches this module's real file location. Guarding the auto-run
+// still matches this module's real file location. Resolve this module's
+// path too: under `node --preserve-symlinks-main`, import.meta.url keeps
+// the symlink path. Guarding the auto-run
 // lets tests import the exported allowlist constants without scaffolding.
 const entryArg = process.argv[1];
 if (entryArg) {
   let entryUrl: string | undefined;
+  let selfUrl = import.meta.url;
   try {
     entryUrl = pathToFileURL(realpathSync(entryArg)).href;
+    selfUrl = pathToFileURL(realpathSync(fileURLToPath(import.meta.url))).href;
   } catch {
     entryUrl = pathToFileURL(entryArg).href;
   }
-  if (import.meta.url === entryUrl) {
+  if (selfUrl === entryUrl) {
     // A failed step (such as `npm install`) must fail the command, so `create-blocks-app app && cd app` stops there.
     create().catch((error: unknown) => {
       console.error(error instanceof Error ? `Error: ${error.message}` : error);

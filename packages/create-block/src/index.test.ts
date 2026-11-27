@@ -401,7 +401,7 @@ describe('CLI entry point', () => {
 	const distDir = dirname(fileURLToPath(import.meta.url));
 
 	/**
-	 * Create a symlink at `<tmp>/<linkName>` to `target`, then run `node <tmp>/<entry> --help`.
+	 * Create a symlink at `<tmp>/<linkName>` to `target`, then run `node [nodeArgs] <tmp>/<entry> --help`.
 	 * `--help` prints the usage and returns before any file or network access.
 	 * Returns `undefined` after skipping the test when the platform refuses to create a file symlink.
 	 */
@@ -411,6 +411,7 @@ describe('CLI entry point', () => {
 		type: 'file' | 'junction',
 		linkName: string,
 		entry: string,
+		nodeArgs: string[] = [],
 	) {
 		const dir = mkdtempSync(join(tmpdir(), 'create-block-symlink-'));
 		try {
@@ -424,7 +425,10 @@ describe('CLI entry point', () => {
 				t.skip(`symlink creation unsupported: ${code}`);
 				return undefined;
 			}
-			return spawnSync(process.execPath, [join(dir, entry), '--help'], { encoding: 'utf-8', timeout: 30_000 });
+			return spawnSync(process.execPath, [...nodeArgs, join(dir, entry), '--help'], {
+				encoding: 'utf-8',
+				timeout: 30_000,
+			});
 		} finally {
 			rmSync(dir, { recursive: true, force: true });
 		}
@@ -440,6 +444,22 @@ describe('CLI entry point', () => {
 
 	test('runs when the path to the entry file contains a symlinked directory', (t) => {
 		const result = helpThroughSymlink(t, distDir, 'junction', 'linked-dist', join('linked-dist', 'index.js'));
+		if (!result) return;
+		assert.strictEqual(result.status, 0, result.stderr);
+		assert.match(result.stdout, /Usage:\n {2}npm create @aws-cdk-blocks\/block@latest <ClassName>/);
+	});
+
+	// With this flag Node keeps the symlink path as the entry module's URL, so both sides of the guard need resolving.
+	// The link is to the package directory (as `npm link` makes), so `templates/` stays next to `dist/`.
+	test('runs through a symlinked package directory when Node preserves symlinks for the main module', (t) => {
+		const result = helpThroughSymlink(
+			t,
+			join(distDir, '..'),
+			'junction',
+			'linked-package',
+			join('linked-package', 'dist', 'index.js'),
+			['--preserve-symlinks-main'],
+		);
 		if (!result) return;
 		assert.strictEqual(result.status, 0, result.stderr);
 		assert.match(result.stdout, /Usage:\n {2}npm create @aws-cdk-blocks\/block@latest <ClassName>/);
