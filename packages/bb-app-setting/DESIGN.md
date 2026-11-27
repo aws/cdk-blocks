@@ -56,7 +56,7 @@ CloudFormation cannot natively create SSM SecureString parameters. The CDK imple
 
 ## Serialization & Validation
 
-Values are always serialized with `JSON.stringify()` on write and deserialized with `JSON.parse()` on read, regardless of type. This ensures consistent round-tripping for all value types (strings, numbers, booleans, objects). Both the AWS runtime (SSM parameter) and the mock (disk file) store the same JSON-encoded string.
+`put()` validates the JSON representation produced by `JSON.stringify()`. The AWS runtime sends that JSON to SSM; the mock parses it and stores the resulting value in `settings.json`. The original value is not serialized again as a property of the settings map, where `toJSON(key)` could produce different data from the value that passed validation.
 
 The table below shows the AWS runtime (SSM) representation:
 

@@ -187,7 +187,7 @@ export class AppSetting<T = string> extends Scope {
 		assertValueWithinSizeLimit(serialized, this.isSecret);
 
 		const settings = readSettings(this);
-		settings[this.fullId] = value;
+		settings[this.fullId] = JSON.parse(serialized);
 		writeSettings(this, settings);
 	}
 }

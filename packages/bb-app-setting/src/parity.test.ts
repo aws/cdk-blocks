@@ -151,6 +151,24 @@ describe('AppSetting.put() validates the same input the same way on mock and AWS
 		await assert.rejects(() => setting.put('b'.repeat(5000)), /value must start with "ok"/);
 	});
 
+	test('stores the same validated JSON locally as it sends to SSM', async (t) => {
+		const input = { toJSON: (key: string) => ({ enabled: key === '' }) };
+		const scope = new Scope('app');
+		const mockSetting = new MockAppSetting<unknown>(scope, uniqueId(), { value: { enabled: false } });
+		const awsSetting = new AwsAppSetting<unknown>(scope, uniqueId(), { value: { enabled: false } });
+		const values: string[] = [];
+		t.mock.method(SSMClient.prototype, 'send', async (cmd: { input: { Value: string } }) => {
+			values.push(cmd.input.Value);
+			return {};
+		});
+
+		await awsSetting.put(input);
+		await mockSetting.put(input);
+
+		assert.deepStrictEqual(values, ['{"enabled":true}']);
+		assert.deepStrictEqual(await mockSetting.get(), { enabled: true });
+	});
+
 	// The fixed message must not quote the value: a circular TypeError names the
 	// closing key, which on a secret setting could be sensitive. The engine
 	// error is kept only as a non-enumerable `cause` for server-side logs.
