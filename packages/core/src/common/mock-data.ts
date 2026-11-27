@@ -1,7 +1,7 @@
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import type { Stats } from 'node:fs';
 import {
 	copyFileSync,
@@ -148,10 +148,15 @@ function markerDir(): string {
 	return join(process.cwd(), MOCK_DATA_DIR, '..', '.carried-over.d');
 }
 
-/** One marker name per unit. `root: true` files are namespaced so a block cannot collide with them. */
+/**
+ * Keep existing marker names when they fit. Otherwise hash the original, namespaced
+ * name so long entries stay distinct without exceeding the 255-byte filename limit.
+ */
 function markerPath(name: string, rootFile: boolean): string {
-	const safe = (rootFile ? `file.${name}` : `unit.${name}`).replace(/[^\w.@-]/g, '_');
-	return join(markerDir(), safe);
+	const key = rootFile ? `file.${name}` : `unit.${name}`;
+	const safe = key.replace(/[^\w.@-]/g, '_');
+	const basename = safe.length <= 255 ? safe : `hash.${createHash('sha256').update(key).digest('hex')}`;
+	return join(markerDir(), basename);
 }
 
 function isCarried(name: string, rootFile: boolean): boolean {
@@ -172,9 +177,8 @@ function markCarried(name: string, rootFile: boolean): void {
 		mkdirSync(markerDir(), { recursive: true });
 		writeFileSync(markerPath(name, rootFile), '', { flag: 'wx' });
 	} catch {
-		// Already marked by a concurrent call is success. Any other failure costs a
-		// repeated copy, which is correct but slower, and must never fail the call
-		// that only wanted its data directory.
+		// A concurrent call may have marked it already. Other failures leave the
+		// copied data usable but do not record the migration for the next call.
 	}
 }
 

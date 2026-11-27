@@ -141,6 +141,25 @@ describe('getMockDataDir', () => {
 		assert.ok(!existsSync(carried), 'a deleted file must stay deleted');
 	});
 
+	void it('does not restore deleted files from units with long IDs', () => {
+		const prefix = 'x'.repeat(250);
+		const ids = [`${prefix}a`, `${prefix}b`];
+		for (const id of ids) {
+			const legacyUnit = join(project, LEGACY_MOCK_DATA_DIR, id);
+			mkdirSync(legacyUnit, { recursive: true });
+			writeFileSync(join(legacyUnit, 'store.json'), id);
+		}
+
+		for (const id of ids) {
+			const dir = getMockDataDir(scope(id));
+			const carried = join(dir, 'store.json');
+			assert.equal(readFileSync(carried, 'utf-8'), id);
+			rmSync(carried);
+			getMockDataDir(scope(id));
+			assert.ok(!existsSync(carried), 'a deleted file must stay deleted');
+		}
+	});
+
 	// A single shared record was a read-modify-write: concurrent first uses
 	// overwrote each other, and an unrecorded unit was carried again later and
 	// could restore data deleted in the new location. One marker file per unit has
@@ -181,6 +200,35 @@ describe('getMockDataDir', () => {
 		rmSync(carried);
 		getMockDataDir(scope('app-todos'), { root: true });
 		assert.ok(!existsSync(carried), 'a deleted shared file must stay deleted');
+	});
+
+	void it('records a long shared root filename that is already carried over', () => {
+		const name = `${'x'.repeat(246)}.json`;
+		mkdirSync(LEGACY_MOCK_DATA_DIR);
+		writeFileSync(join(LEGACY_MOCK_DATA_DIR, name), 'legacy');
+		// Start with the destination present to isolate marker handling from copy staging.
+		mkdirSync(MOCK_DATA_DIR, { recursive: true });
+		const carried = join(MOCK_DATA_DIR, name);
+		writeFileSync(carried, 'current');
+
+		getMockDataDir(scope('app-todos'), { root: true });
+		assert.equal(readFileSync(carried, 'utf-8'), 'current');
+		rmSync(carried);
+		getMockDataDir(scope('app-todos'), { root: true });
+		assert.ok(!existsSync(carried), 'a deleted shared file must stay deleted');
+	});
+
+	void it('still recognizes a carry-over marker written before long names were hashed', () => {
+		seedLegacy();
+		const markers = join(project, '.cdk-blocks', 'local', '.carried-over.d');
+		mkdirSync(markers, { recursive: true });
+		writeFileSync(join(markers, 'unit.app-todos'), '');
+		writeFileSync(join(markers, 'file.settings.json'), '');
+
+		const dir = getMockDataDir(scope('app-todos'));
+		const root = getMockDataDir(scope('app-todos'), { root: true });
+		assert.ok(!existsSync(join(dir, 'store.json')));
+		assert.ok(!existsSync(join(root, 'settings.json')));
 	});
 	// `check:data-ignored` writes the `*` marker itself and then asks git about it,
 	// so on its own it only tests git's `.gitignore` semantics: it would still pass
