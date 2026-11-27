@@ -525,6 +525,28 @@ describe('ApiError status ↔ JSON-RPC error code', () => {
     );
   });
 
+  it('encodes an ApiError-like error with a status outside 100-599 as code 500', () => {
+    // A foreign-copy ApiError (or a branded error with a hand-set status) does not
+    // go through this copy's constructor, so the serializer applies the same range
+    // check before the status reaches the wire or the RawRoute HTTP status.
+    for (const status of [99, 600, 1.5]) {
+      const foreign = Object.assign(new Error('bad status'), { status });
+      Object.defineProperty(foreign, Symbol.for('aws-blocks.wireSafeError'), { value: true, enumerable: false });
+      assert.strictEqual(JSON.parse(errorResponseFromCatch(foreign, 1)).error.code, 500, `status ${status}`);
+      assert.strictEqual(rawRouteErrorFromCatch(foreign).status, 500, `status ${status}`);
+    }
+  });
+
+  it('decodes an error code outside 100-599 as status 500', () => {
+    for (const code of [99, 600, 1.5]) {
+      assert.throws(
+        () => decodeRpcResponse({ jsonrpc: '2.0', error: { code, message: 'x' }, id: 1 }),
+        (e: unknown) => e instanceof ApiError && e.status === 500,
+        `code ${code}`,
+      );
+    }
+  });
+
   it('decodes reserved -32xxx codes as status 500', () => {
     assert.throws(
       () => decodeRpcResponse({ jsonrpc: '2.0', error: { code: RpcErrorCode.InvalidRequest, message: 'Invalid Request' }, id: null }),

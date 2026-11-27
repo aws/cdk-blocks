@@ -76,7 +76,7 @@ try {
 
 `ApiError` takes:
 
-- `status`, the status code the client sees.
+- `status`, the status code the client sees. It must be an integer from 100 to 599. Any other value, such as `600` or `1.5`, is stored and sent as `500`.
 - `name`, optional. It defaults to `'ApiError'`, which counts as "no name" and is not sent.
 - `cause`, optional. It stays on the server.
 - `retriable`, optional, default `false`. It says whether the caller can retry the same step with corrected input without restarting the flow, for example a wrong MFA code in an auth challenge. An expired session or a lockout is not retriable. It describes the kind of failure, not a promise that a retry will succeed.
@@ -132,7 +132,7 @@ Protocol errors use the reserved JSON-RPC codes `-32601` (method not found) and 
 
 On an error response, only `Set-Cookie` headers that delete a cookie are kept. That lets `requireAuth` reject with a 401 and also clear a dead session cookie, but a method that sets a session and then throws never hands out that session.
 
-The client (`decodeRpcResponse`) turns the envelope back into `new ApiError(message, status, { name, retriable })`. `status` is `error.code`, or `500` for a reserved negative code.
+The client (`decodeRpcResponse`) turns the envelope back into `new ApiError(message, status, { name, retriable })`. `status` is `error.code`, or `500` for a reserved negative code or any code outside 100-599.
 
 ### Why a brand and not `instanceof`
 

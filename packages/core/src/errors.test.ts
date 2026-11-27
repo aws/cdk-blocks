@@ -32,6 +32,18 @@ describe('ApiError constructor', () => {
     assert.strictEqual(e.cause, cause);
   });
 
+  it('keeps an integer status in the HTTP range 100-599', () => {
+    for (const status of [100, 200, 302, 400, 418, 599]) {
+      assert.strictEqual(new ApiError('x', status).status, status);
+    }
+  });
+
+  it('maps a status outside the HTTP range 100-599, or not an integer, to 500', () => {
+    for (const status of [99, 600, 1.5, 0, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
+      assert.strictEqual(new ApiError('x', status).status, 500, `status ${status}`);
+    }
+  });
+
   it('stamps the non-enumerable cross-copy brand so a foreign-copy ApiError is wire-recognizable', () => {
     const e = new ApiError('boom', 500);
     // The brand is stamped...

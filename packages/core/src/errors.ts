@@ -38,7 +38,11 @@ export const DEFAULT_API_ERROR_NAME = 'ApiError';
  * ```
  */
 export class ApiError extends Error {
-	/** HTTP status code. */
+	/**
+	 * HTTP status code. An integer from 100 to 599; a value passed to the
+	 * constructor outside that range, or not an integer (`99`, `600`, `1.5`,
+	 * `NaN`), is stored as `500`.
+	 */
 	readonly status: number;
 	/**
 	 * Whether the caller can retry the same action without restarting the
@@ -59,7 +63,7 @@ export class ApiError extends Error {
 	constructor(message: string, status: number, options?: { name?: string; cause?: unknown; retriable?: boolean }) {
 		super(message, options?.cause ? { cause: options.cause } : undefined);
 		this.name = options?.name ?? DEFAULT_API_ERROR_NAME;
-		this.status = status;
+		this.status = toHttpErrorStatus(status);
 		this.retriable = options?.retriable ?? false;
 		// Stamp the cross-copy brand so the RPC serializer can recognize this as a
 		// wire-safe BB error even when it was constructed by a SEPARATELY bundled
@@ -71,6 +75,21 @@ export class ApiError extends Error {
 		// `asApiError` path is the known exception, tracked as a follow-up.
 		brandBlocksError(this);
 	}
+}
+
+/**
+ * `status` when it is an integer HTTP status code (100-599), else `500`.
+ *
+ * Applied by the `ApiError` constructor and again by the RPC serializer, which
+ * also sees ApiError-shaped errors that never ran this copy's constructor (a
+ * separately bundled core, or a branded error with a hand-set `status`). Without
+ * it, a status such as `600` or `1.5` would reach the client as `e.status`, and a
+ * RawRoute would answer with an invalid HTTP status.
+ *
+ * @internal
+ */
+export function toHttpErrorStatus(status: number): number {
+	return Number.isInteger(status) && status >= 100 && status <= 599 ? status : 500;
 }
 
 /**
