@@ -1,6 +1,7 @@
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import 'dart:async';
 import 'dart:convert';
 import 'dart:developer' as developer;
 
@@ -370,6 +371,17 @@ final class InMemorySessionStore implements SessionStore {
 /// once a read succeeds. [clear] is the exception: it deletes the stored
 /// session at once. A failed write is retried on the next change.
 ///
+/// The first read is bounded by `readTimeout`, 5 seconds unless the
+/// constructor is given another. A read that takes longer, as a secure
+/// storage read can hang rather than fail, is treated as a failed read: it
+/// is reported (a [TimeoutException]) and calls go ahead with the cookies
+/// held in memory. The read is not issued again while it is still running.
+/// If it completes later, it is applied as a read that succeeds after a
+/// failure is: a cookie set or removed meanwhile, and everything before a
+/// [clear], is newer than the stored copy and is kept, and a change made
+/// meanwhile is then written. If it fails later, the usual retry rules apply
+/// from then on. A [load] you call yourself is not bounded.
+///
 /// A Flutter app that depends on `blocks_runtime_flutter` doesn't build one:
 /// the plugin registers a store over `FlutterSecureStore` as the default
 /// before `main` runs (see `registerDefaultSessionStore`). Pure-Dart code and
@@ -392,25 +404,42 @@ final class PersistentSessionStore implements SessionStore {
     String storageKey = '_session_cookies',
     DateTime Function()? clock,
     void Function(Object error, StackTrace stackTrace)? onPersistError,
-  }) : _store = store,
+    Duration readTimeout = defaultReadTimeout,
+  }) : assert(readTimeout > Duration.zero, 'readTimeout must be positive'),
+       _store = store,
        _storageKey = storageKey,
        _onPersistError = onPersistError,
+       _readTimeout = readTimeout,
        _cache = InMemorySessionStore(clock: clock);
+
+  /// How long the first read of the backing store may take before calls go
+  /// ahead without it, when the constructor is given no `readTimeout`.
+  ///
+  /// Long enough for a slow but working secure storage read at a cold start,
+  /// and short enough that a read that hangs delays the app's first calls by
+  /// a few seconds rather than for good.
+  static const defaultReadTimeout = Duration(seconds: 5);
 
   final TokenStore _store;
   final String _storageKey;
   final void Function(Object error, StackTrace stackTrace)? _onPersistError;
+  final Duration _readTimeout;
 
   /// In-memory cache; parsing/serialization is delegated to an
   /// [InMemorySessionStore] so cookie logic stays in one place.
   final InMemorySessionStore _cache;
 
   /// The first successful [load], shared by every caller of [_ensureLoaded];
-  /// reset to null when a load fails, so the next caller tries again.
+  /// reset to null when a load fails or takes longer than [_readTimeout], so
+  /// a later caller tries again.
   Future<bool>? _loading;
 
   /// Whether a load has read the backing store. Nothing is written before.
   bool _loaded = false;
+
+  /// Whether a read of the backing store is still running, including one
+  /// that took longer than [_readTimeout] and was given up on.
+  bool _reading = false;
 
   /// The serialized cookie set the backing store holds, as far as this store
   /// knows: what [load] read, or what the last successful write wrote.
@@ -496,7 +525,8 @@ final class PersistentSessionStore implements SessionStore {
 
   /// Waits for the first read of the backing store (see the class
   /// documentation), then answers from memory. Never throws: when the read
-  /// fails, it is reported and the cookies held in memory are used.
+  /// fails, or takes longer than `readTimeout`, it is reported and the
+  /// cookies held in memory are used.
   @override
   Future<String?> cookieHeaderFor(Uri requestUri) async {
     await _ensureLoaded();
@@ -525,20 +555,58 @@ final class PersistentSessionStore implements SessionStore {
   }
 
   /// Loads the backing store once, before the first cookie read and the first
-  /// write. Completes with whether the store has been read; never throws.
+  /// write. Completes with whether the store has been read, within
+  /// [_readTimeout]; never throws.
   Future<bool> _ensureLoaded() {
     if (_loaded) return Future<bool>.value(true);
-    // A store that could not be read is not read again on every request: a
-    // change to the cookies tries it again, and so does a request once the
-    // retry interval has passed.
-    if (_loading == null &&
-        _failedLoadAt == _changes &&
-        _cache._now - _failedLoadTime < _loadRetryInterval.inMilliseconds) {
-      return Future<bool>.value(false);
+    if (_loading == null) {
+      // A read that timed out is still running and applies its result when it
+      // completes; reading again alongside it would only queue another read.
+      if (_reading) return Future<bool>.value(false);
+      // A store that could not be read is not read again on every request: a
+      // change to the cookies tries it again, and so does a request once the
+      // retry interval has passed.
+      if (_failedLoadAt == _changes &&
+          _cache._now - _failedLoadTime < _loadRetryInterval.inMilliseconds) {
+        return Future<bool>.value(false);
+      }
     }
-    return _loading ??= _loadReportingErrors();
+    return _loading ??= _loadWithin(_readTimeout);
   }
 
+  /// Reads the backing store, completing with `false` once [timeout] has
+  /// passed if the read has not completed by then. The read itself goes on,
+  /// and [_loadReportingErrors] applies its result whenever it completes.
+  Future<bool> _loadWithin(Duration timeout) {
+    final attempt = Completer<bool>();
+    _reading = true;
+    final timer = Timer(timeout, () {
+      if (attempt.isCompleted) return;
+      // The same state a failed read leaves, so the store degrades the same
+      // way; [_reading] keeps a second read from starting meanwhile.
+      _loading = null;
+      _failedLoadAt = _changes;
+      _failedLoadTime = _cache._now;
+      _report(
+        TimeoutException(
+          'Reading the stored session cookies took longer than '
+          '${timeout.inMilliseconds} ms',
+          timeout,
+        ),
+        StackTrace.current,
+      );
+      attempt.complete(false);
+    });
+    _loadReportingErrors().then((loaded) {
+      timer.cancel();
+      _reading = false;
+      if (!attempt.isCompleted) attempt.complete(loaded);
+    });
+    return attempt.future;
+  }
+
+  /// Never throws. Records the outcome of a read, whether or not the read
+  /// finished within [_readTimeout].
   Future<bool> _loadReportingErrors() async {
     try {
       await load();

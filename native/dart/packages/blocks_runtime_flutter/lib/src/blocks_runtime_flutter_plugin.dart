@@ -19,7 +19,8 @@ import 'package:flutter/services.dart';
 /// `WidgetsFlutterBinding.ensureInitialized()` from the app (see
 /// [FlutterSecureStore]).
 ///
-/// When the secure storage cannot be read or written, the session keeps
+/// When the secure storage cannot be read or written, or the first read takes
+/// longer than [PersistentSessionStore.defaultReadTimeout], the session keeps
 /// working from memory and the error is passed to `FlutterError.reportError`
 /// as a silent error: it reaches `FlutterError.onError` (and so a crash
 /// reporter hooked there) without showing in the console in release builds.

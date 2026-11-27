@@ -33,7 +33,8 @@ class BlocksClient {
   ///
   /// A [PersistentSessionStore] reads its storage before it answers the first
   /// call's cookies, so the session saved by an earlier run is sent on that
-  /// call.
+  /// call. That read is bounded by the store's `readTimeout`: a read that
+  /// hangs is reported, and calls go ahead with the session held in memory.
   final SessionStore sessionStore;
   final TokenStore tokenStore;
 
