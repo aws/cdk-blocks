@@ -82,6 +82,7 @@ import {
   withSsrCacheGuardNodeOption,
 } from './ssr_cache_guard.js';
 import { resolveHandlerModule } from './handler_module.js';
+import { forwardedHeadersTrustFor, withoutForwardedClientAddress } from './forwarded_headers.js';
 import { apiGatewayDoor } from './apigw_door.js';
 import { registerUploads } from './cf_helpers.js';
 import { ALB_LAMBDA_RESPONSE_LIMIT, LAMBDA_SYNC_RESPONSE_LIMIT, warnOversizedProxyAssets } from './proxy_limits.js';
@@ -994,6 +995,16 @@ export class HostingConstruct extends Construct {
               'otherwise send `Cache-Control: private` for that response.',
           }
         : {}),
+      // The forwarded headers the door sets (see forwarded_headers.ts): the
+      // server sees the public host, scheme and client address. A
+      // bring-your-own door and 'none' leave requests as they arrive.
+      forwarded: forwardedHeadersTrustFor(
+        typeof props.frontDoor === 'object' && props.frontDoor !== null
+          ? props.frontDoor.kind
+          : props.frontDoor === 'none'
+            ? 'none'
+            : undefined,
+      ),
     };
     // The computes the manifest routes requests to, other than the image
     // function: they render server responses (e.g. a Next.js split function
@@ -2792,10 +2803,15 @@ export class HostingConstruct extends Construct {
         `The SSR cache guard is not installed in front of compute '${name}': ${result.skipped}. ` +
           'Its responses are cached as their Cache-Control says, so routes that set cookies or depend on ' +
           "the request's cookies or Authorization should send `Cache-Control: private`, or list those " +
-          'credentials in cdn.cacheKeyCookies/cdn.cacheKeyHeaders.',
+          'credentials in cdn.cacheKeyCookies/cdn.cacheKeyHeaders. ' +
+          "Its requests' forwarded headers are not rewritten either: it sees the door's own Host, " +
+          'X-Forwarded-For and x-forwarded-proto, so read the public host and the client address with care.',
       );
     }
-    return { resource: result.resource, installed: result.resource !== resource };
+    const installed = result.resource !== resource;
+    // Without the rewrite, SvelteKit's getClientAddress() keeps reading the socket.
+    const out = installed && config.forwarded ? result.resource : withoutForwardedClientAddress(result.resource);
+    return { resource: out, installed };
   }
 
   /**

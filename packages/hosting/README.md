@@ -306,15 +306,56 @@ on the backend's `apiFrontDoor`:
 | `'cloudfront'` | ALB, API Gateway or bring-your-own | The backend's own distribution. |
 | `'apigateway'` (default) | Any | The backend's own API Gateway URL. |
 
-**The host the server sees.** The CloudFront door and the stacked door's edge
-set `x-forwarded-host` from the viewer's `Host`. Behind the ALB and API Gateway
-doors nothing sets it:
+**The host the server sees.** Behind every built-in door, Hosting rewrites
+each request before the server sees it, from the headers the door itself sets
+or appends: `Host` and `x-forwarded-host` both name the public host,
+`X-Forwarded-For` holds only the client's address, and `x-forwarded-proto` is
+the viewer's scheme. Behind the CloudFront and stacked doors, a Lambda event's
+`requestContext.identity.sourceIp` (REST) or `requestContext.http.sourceIp`
+(HTTP API) is the client's address too; behind API Gateway it already is.
+What each door is trusted for:
 
-- Next.js (OpenNext), Nitro's `aws-lambda` preset and SvelteKit are given the
-  viewer's `Host` instead.
-- Any other Lambda Web Adapter server (Astro's Node adapter, Nitro's
-  `node-server`) receives the request's headers as sent, so don't configure
-  it to trust `x-forwarded-host` behind these doors.
+| Door | Public host from | Client address from | Scheme from |
+|---|---|---|---|
+| CloudFront | `x-forwarded-host`, which the router sets from the viewer's `Host` over any value the client sent | `x-blocks-viewer-ip`, which the router sets from the viewer's address over any value the client sent | always `https` (every server route redirects HTTP to HTTPS) |
+| Stacked | `x-forwarded-host`, which the edge sets the same way | `x-blocks-viewer-ip`, which the edge sets the same way | always `https`, also when the edge → router hop is plain HTTP |
+| ALB | `Host` | the right-most `X-Forwarded-For` entry (the ALB appends its peer) | `x-forwarded-proto` (the ALB's listener) |
+| API Gateway | `Host` (the API's domain or the custom domain) | the event's `sourceIp`, API Gateway's own peer (a Lambda Web Adapter server reads it from the adapter's `x-amzn-request-context` header) | `x-forwarded-proto` |
+
+Values a client sends in `X-Forwarded-For` (or `x-blocks-viewer-ip`) are never
+used, and `x-blocks-viewer-ip` never reaches the server. A client-sent
+`x-forwarded-host` never reaches the server behind the ALB and API Gateway
+doors. Each server origin admits only its door (the CloudFront door's
+origin-verify header and origin access control, the stacked router's edge
+header), so a request that skips the door can't supply these values. When a
+request carries no value from the door (the Lambda Web Adapter's readiness
+check, for one), `X-Forwarded-For` is the address the server itself saw.
+Behind a bring-your-own door, with `frontDoor: 'none'`, and for a server the
+SSR cache guard can't be installed in front of (the
+`SsrCacheGuardNotInstalled` warning), requests reach the server as the door
+sent them.
+
+Per framework:
+
+- Next.js (OpenNext) and SvelteKit read the public host and scheme as they are.
+  SvelteKit's `getClientAddress()` reads `X-Forwarded-For` (`ADDRESS_HEADER`,
+  `XFF_DEPTH=1`), on Lambda and on Web Functions. Where requests aren't
+  rewritten (a bring-your-own door, `'none'`, or the guard not installed),
+  Hosting drops those two variables, so `getClientAddress()` reads the socket
+  as before (adapter-node would otherwise throw on a request without
+  `X-Forwarded-For`).
+- Nitro (Nuxt) reads the public host from `Host`, so `useRequestURL()` is the
+  public URL. For the client's address, use
+  `getRequestIP(event, { xForwardedFor: true })`.
+- Astro trusts none of these headers until `security.allowedDomains` names the
+  host: until then, `Astro.url` is `http://localhost:<port>/…` and
+  `Astro.clientAddress` the local proxy's. Add your domain (and, for the
+  default URL, the door's: `{ hostname: '**.cloudfront.net', protocol: 'https' }`,
+  `{ hostname: '**.execute-api.<region>.amazonaws.com', protocol: 'https' }` or
+  `{ hostname: '**.elb.amazonaws.com' }`). Astro then reads the address from
+  `X-Forwarded-For`, which holds only the client's.
+- Any other Node.js HTTP server (Lambda Web Adapter or Web Function) sees the
+  rewritten headers.
 
 Behind the ALB, multi-value headers are on, so several `Set-Cookie` headers
 survive.

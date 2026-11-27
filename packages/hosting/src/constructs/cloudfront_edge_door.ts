@@ -49,6 +49,11 @@
  *
  * The router still sees `x-forwarded-proto: http` on the edge → router hop
  * when that hop is plain HTTP (the ALB sets the header from its listener).
+ * The server doesn't: every router behavior redirects HTTP to HTTPS, so
+ * Hosting sets it to `https`, and sets `X-Forwarded-For` to the viewer's
+ * address the edge function put in `x-blocks-viewer-ip` (never an entry the
+ * client sent), before the server sees the request (see
+ * `forwarded_headers.ts`).
  */
 import { Annotations, Duration } from 'aws-cdk-lib';
 import { AWS_DEFAULT_QUOTAS } from './quota_budget.js';
@@ -78,6 +83,7 @@ import { ASSET_BEHAVIOR_OPTIONS, assetsS3Origin, cf, inlineFunction, trimSlashes
 import { customErrorResponses, withServerErrorsNotCached } from './error_responses.js';
 import { type DoorInput, type DoorUpstream, defineFrontDoor, type FrontDoorResult } from './front_door.js';
 import { proxyRulesJs } from './proxy_rules.js';
+import { VIEWER_IP_JS } from './forwarded_headers.js';
 import { createSecurityHeadersPolicy } from './security_headers.js';
 
 /** The edge's input: the {@link DoorInput} plus the router it fronts (`upstream`) and internal-only edge settings. */
@@ -537,12 +543,14 @@ const planEdgeBehaviors = (
 /**
  * The viewer-request function of the router behaviors (CloudFront Functions,
  * JS 2.0): the viewer's `Host` as `x-forwarded-host` (the origin request
- * carries the router's host).
+ * carries the router's host), and the viewer's address as
+ * `x-blocks-viewer-ip` (see `forwarded_headers.ts`).
  */
 const FORWARDED_HOST_CODE = `function handler(event) {
   var request = event.request;
   var host = request.headers.host && request.headers.host.value;
   if (host) { request.headers['x-forwarded-host'] = { value: host }; }
+  ${VIEWER_IP_JS}
   return request;
 }`;
 

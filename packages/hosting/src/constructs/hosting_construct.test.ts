@@ -242,6 +242,7 @@ void describe('HostingConstruct — SSR mode', () => {
             port: 3000,
             placement: 'regional',
             runtime: 'nodejs24.x',
+            environment: { ADDRESS_HEADER: 'x-forwarded-for', XFF_DEPTH: '1' },
           },
         },
         staticAssets: { directory: staticDir },
@@ -257,6 +258,9 @@ void describe('HostingConstruct — SSR mode', () => {
       Environment: {
         Variables: Match.objectLike({
           NODE_OPTIONS: `${SSR_CACHE_GUARD_NODE_OPTION} --enable-source-maps`,
+          // Behind the default door the guard rewrites X-Forwarded-For, so these stay.
+          ADDRESS_HEADER: 'x-forwarded-for',
+          XFF_DEPTH: '1',
         }),
       },
     });
@@ -280,6 +284,8 @@ void describe('HostingConstruct — SSR mode', () => {
             port: 3000,
             placement: 'regional',
             runtime: 'nodejs24.x',
+            // As SvelteKit's adapter sets them, for the rewritten X-Forwarded-For.
+            environment: { ADDRESS_HEADER: 'x-forwarded-for', XFF_DEPTH: '1', ORIGIN_KEEP: 'yes' },
           },
         },
         staticAssets: { directory: staticDir },
@@ -294,6 +300,18 @@ void describe('HostingConstruct — SSR mode', () => {
       '*',
       Match.stringLikeRegexp("SSR cache guard is not installed in front of compute 'default'.*does not start a Node\\.js server"),
     );
+    // Nor are the forwarded headers rewritten, and the warning says so.
+    Annotations.fromStack(stack).hasWarning(
+      '*',
+      Match.stringLikeRegexp("compute 'default'.*forwarded headers are not rewritten"),
+    );
+    // Without the rewrite, getClientAddress() keeps reading the socket.
+    const vars = Object.values(Template.fromStack(stack).findResources('AWS::Lambda::Function'))
+      .map((r) => r.Properties.Environment?.Variables as Record<string, unknown> | undefined)
+      .find((v) => v?.ORIGIN_KEEP === 'yes');
+    assert.ok(vars, 'the server keeps its own environment');
+    assert.equal(vars.ADDRESS_HEADER, undefined);
+    assert.equal(vars.XFF_DEPTH, undefined);
     // The guard is not loaded, so NODE_OPTIONS stays as given.
     Template.fromStack(stack).hasResourceProperties('AWS::Lambda::Function', {
       Handler: 'run.sh',
@@ -359,6 +377,26 @@ void describe('HostingConstruct — SSR mode', () => {
 
     // No CloudFront cache in front of the server: Vary is not read.
     assert.equal(guardFor({ kind: 'alb' }).keyed, null);
+  });
+
+  void it('bakes the forwarded headers each door sets into the server bundle', () => {
+    const forwardedFor = (frontDoor: ConstructorParameters<typeof HostingConstruct>[2]['frontDoor']): unknown => {
+      const staticDir = createStaticDir();
+      const bundleDir = createBundleDir();
+      const manifest = ssrManifest(staticDir, bundleDir);
+      manifest.compute.default = { ...manifest.compute.default, streaming: false };
+      new HostingConstruct(createStack(), 'Hosting', { manifest, frontDoor, skipRegionValidation: true });
+      const guard = fs.readFileSync(path.join(bundleDir, SSR_CACHE_GUARD_FILE), 'utf-8');
+      const line = /^const FORWARDED = (.*);$/m.exec(guard);
+      assert.ok(line?.[1], 'the guard module carries the forwarded-headers trust');
+      return JSON.parse(line[1]);
+    };
+    const cloudFront = { clientHeader: 'x-blocks-viewer-ip', hostHeader: 'x-forwarded-host', proto: 'https' };
+    assert.deepStrictEqual(forwardedFor(undefined), cloudFront);
+    assert.deepStrictEqual(forwardedFor('cloudfront'), cloudFront);
+    assert.deepStrictEqual(forwardedFor({ kind: 'stackedRouter' }), cloudFront);
+    assert.deepStrictEqual(forwardedFor({ kind: 'alb' }), { clientHop: 1, hostHeader: 'host' });
+    assert.deepStrictEqual(forwardedFor({ kind: 'apiGateway' }), { clientHop: 1, hostHeader: 'host' });
   });
 
   void it('bakes cdn.cacheGuardIgnoredCookies into the SSR cache guard, and keeps them out of the cache key', () => {
