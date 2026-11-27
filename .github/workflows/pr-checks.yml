@@ -278,6 +278,15 @@ jobs:
       - name: Check runtime mock-guard coverage
         run: npm run check:runtime-guard
 
+      # A TLA+ model passes on the code it was written for. The runner fails
+      # when a function a model describes changes, and when an invariant holds
+      # on the known-bad variant kept to prove it can fail.
+      - name: Test the formal-model runner
+        run: node --test scripts/check-formal-models.test.mjs
+
+      - name: Check the formal models
+        run: npm run check:formal
+
       # The hidden `.cdk-blocks` folder is reached by separate join() calls across
       # five packages, shell steps that seed the installation id, and the
       # templates' tsconfig includes. One left on the old name still builds, lints
