@@ -9,7 +9,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert';
 import { ApiNamespace } from './api.js';
-import { createDispatcher, type DispatchRequest } from './dispatch.js';
+import { createDispatcher, type DispatchRequest, type DispatchResponse } from './dispatch.js';
 
 const scope = { id: 'app' };
 
@@ -55,6 +55,12 @@ function rpcRequest(method: string): DispatchRequest {
   };
 }
 
+/** The JSON of an RPC response, whose body is always text (only a RawRoute sends bytes). */
+function jsonBody(response: DispatchResponse): unknown {
+  assert.ok(typeof response.body === 'string', 'an RPC response body is text');
+  return JSON.parse(response.body);
+}
+
 describe('createDispatcher: result field', () => {
   const dispatch = createDispatcher(backend);
 
@@ -62,24 +68,24 @@ describe('createDispatcher: result field', () => {
     it(`sends "result": null for a method that returns undefined (${method})`, async () => {
       const response = await dispatch(rpcRequest(`api.${method}`));
       assert.strictEqual(response.kind, 'rpc-result');
-      assert.deepStrictEqual(JSON.parse(response.body), { jsonrpc: '2.0', result: null, id: 1 });
+      assert.deepStrictEqual(jsonBody(response), { jsonrpc: '2.0', result: null, id: 1 });
     });
   }
 
   it('sends "result": null for a method that returns null', async () => {
     const response = await dispatch(rpcRequest('api.nullValue'));
-    assert.deepStrictEqual(JSON.parse(response.body), { jsonrpc: '2.0', result: null, id: 1 });
+    assert.deepStrictEqual(jsonBody(response), { jsonrpc: '2.0', result: null, id: 1 });
   });
 
   it('sends the value a method returns', async () => {
     const response = await dispatch(rpcRequest('api.value'));
-    assert.deepStrictEqual(JSON.parse(response.body), { jsonrpc: '2.0', result: 'hi', id: 1 });
+    assert.deepStrictEqual(jsonBody(response), { jsonrpc: '2.0', result: 'hi', id: 1 });
   });
 
   for (const [method, value] of [['zero', 0], ['no', false], ['empty', '']] as const) {
     it(`keeps a falsy result: ${JSON.stringify(value)} (${method})`, async () => {
       const response = await dispatch(rpcRequest(`api.${method}`));
-      assert.deepStrictEqual(JSON.parse(response.body), { jsonrpc: '2.0', result: value, id: 1 });
+      assert.deepStrictEqual(jsonBody(response), { jsonrpc: '2.0', result: value, id: 1 });
     });
   }
 });

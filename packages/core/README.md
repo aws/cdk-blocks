@@ -342,7 +342,8 @@ A deployed `BlocksStack` / `BlocksBackend` puts one shared API Gateway REST API 
 - **Container computes.** The gateway reaches a namespace on a `container` compute through a VPC link and an internal Application Load Balancer that the compute provisions in the app's VPC. Namespaces without a compute, `RawRoute`s and the auth routes stay on the default compute. On the `cloudfront` tier, CloudFront reaches a container namespace straight from the distribution instead (see [API front door](#api-front-door)), so the gateway's throttling, access logs and limits don't apply to it.
 - **Throttling** is on by default from `defaults.throttling` (sandbox 200 requests/s with a 400 burst, production 1000/2000).
 - **Access logs** are opt-in via `defaults.accessLogging`. Each entry's `resourcePath` is the route template, so requests served by the catch-all resources (every namespace on the default compute, every `RawRoute`) log as their `{proxy+}` resource, not the path called.
-- **Limits:** the gateway times out a request after 29 seconds and caps payloads at 10 MB. Run longer work in an `AsyncJob`.
+- **Limits:** the gateway times out a request after 29 seconds. It accepts payloads up to 10 MB, but a Lambda invocation carries at most 6 MB and the gateway hands the Lambda every request body base64-encoded (see below), so a request body reaching a Lambda compute is limited to about 4.5 MB, and so is a byte response from a `RawRoute`. Run longer work in an `AsyncJob`, and move large files with `FileBucket`'s presigned `putUrl()`/`getUrl()`.
+- **Binary payloads.** The REST API sets `binaryMediaTypes: ['*/*']`, so `RawRoute` bodies keep their bytes in both directions. The setting is API-wide: an integration you add to `gateway` yourself receives every request body as binary too. A Lambda proxy integration gets it base64-encoded with `isBase64Encoded: true` (decode `event.body` when that flag is set); a non-proxy integration whose mapping template expects text needs `contentHandling: ContentHandling.CONVERT_TO_TEXT` (from `aws-cdk-lib/aws-apigateway`).
 
 ### API WAF (`apiWaf`)
 
@@ -530,7 +531,7 @@ The handler returns nothing; you write the response through `ctx.response`:
 | On `ctx.response` | Notes |
 |---|---|
 | `status: number` | Assignable. Defaults to `200`. |
-| `headers: Headers` | Standard `Headers`. Set `Content-Type` yourself; a string body is sent as-is, an object is serialized as JSON. |
+| `headers: Headers` | Standard `Headers`. Set `Content-Type` yourself; a string body is sent as-is, a `Buffer`/`Uint8Array`/`ArrayBuffer` as raw bytes, anything else as JSON. Without a `Content-Type`, a byte body is sent as `application/octet-stream` and anything else as `application/json`. |
 | `send(body)` | Call once with the body. `send('')` for an empty body (redirects, `204`). |
 
 And what you read from `ctx.request`:
@@ -540,7 +541,7 @@ And what you read from `ctx.request`:
 | `params` | Path parameters, e.g. route `/users/{id}` + request `/users/42` → `{ id: '42' }`. Always `{}` for RPC methods. |
 | `url` | Absolute `URL` of the request. Use `url.searchParams` for the query string. `url.pathname` is the route path, the same under `npm run dev` and deployed: it never includes the API Gateway stage (`/prod`). Behind a front door such as `Hosting`, `url.origin` is the API Gateway host the backend received, not the browser's, so don't build public links from it. |
 | `headers` | Request `Headers`, including `cookie`. |
-| `json()` / `text()` / `body` | Body as parsed JSON, raw text, or a `ReadableStream`. |
+| `json()` / `text()` / `body` | Body as parsed JSON, UTF-8 text, or a `ReadableStream<Uint8Array>` of the exact bytes the client sent. |
 | `signal` | `AbortSignal` that fires just before the platform's timeout response. Pass it to `fetch`/SDK calls. `undefined` in local dev. |
 
 Reading a path parameter and a query parameter:
@@ -556,6 +557,25 @@ new RawRoute(scope, 'user', {
 });
 // GET /users/42?q=hello → {"id":"42","q":"hello"}
 ```
+
+Binary bodies pass through unchanged, locally and on AWS: `ctx.request.body` yields the bytes the client sent (signed-webhook HMAC checks, uploads, protobuf), and a byte body sent through `send()` reaches the client as-is:
+
+```typescript
+import { createHash } from 'node:crypto';
+
+new RawRoute(scope, 'upload', {
+  method: 'PUT',
+  path: '/upload',
+  handler: async (ctx) => {
+    const bytes = new Uint8Array(await new Response(ctx.request.body).arrayBuffer());
+    ctx.response.headers.set('Content-Type', 'application/octet-stream');
+    // Send back the SHA-256 digest of the upload as 32 raw bytes.
+    ctx.response.send(createHash('sha256').update(bytes).digest());
+  },
+});
+```
+
+On AWS, API Gateway hands every request body to the Lambda base64-encoded, and a byte response goes back the same way, which adds a third to its size. Within Lambda's 6 MB payload limit, that leaves roughly 4.5 MB for a request body or a byte response. Move larger files directly to and from S3 with `FileBucket`'s presigned `putUrl()`/`getUrl()`.
 
 Path syntax: exact (`/health`), named parameter capturing one segment (`/users/{id}`), or a trailing wildcard capturing the rest (`/files/*`, available as `params['*']`). One wildcard per route, last segment only. A route can't be registered at the root, and the root path (`/`) matches no route, not even `/*`: it answers `404`. Named parameters are URL-decoded; wildcard captures are not, so validate them before touching a filesystem or an S3 key.
 
