@@ -33,8 +33,8 @@ function testScope() {
  * recorded so the test can assert its shape. `input(i)` strips `TableName`
  * (the store's fullId, unique per test) so expectations can be literal.
  */
-function awsStore(id: string, options?: any, respond: (command: any) => any = () => ({})) {
-	const store = new AwsKVStore(testScope(), id, options as never) as any;
+function awsStore(id: string, options?: any, respond: (command: any) => any = () => ({}), scope = testScope()) {
+	const store = new AwsKVStore(scope, id, options as never) as any;
 	const sent: any[] = [];
 	store.docClient = {
 		send: async (command: any) => {
@@ -52,8 +52,8 @@ function awsStore(id: string, options?: any, respond: (command: any) => any = ()
 }
 
 /** A mock store with loosely typed options, for the parity cases driven by plain JavaScript values. */
-function mockStore(id: string, options?: any): any {
-	return new KVStore(testScope(), id, options as never);
+function mockStore(id: string, options?: any, scope = testScope()): any {
+	return new KVStore(scope, id, options as never);
 }
 
 /** The one table a batch command addresses, and its requests. */
@@ -437,9 +437,11 @@ describe('AWS query', () => {
 		assert.equal(input().Limit, 2);
 		assert.deepEqual(JSON.parse(Buffer.from(first.cursor, 'base64url').toString()), {
 			v: 1,
+			store: store.model.cursorTag,
 			index: null,
 			key: { pk: 'p', sk: 2 },
 		});
+		assert.match(store.model.cursorTag, /^[A-Za-z0-9_-]{16}$/);
 		await Array.fromAsync(store.query({ where: { pk: { equals: 'p' } }, cursor: first.cursor }));
 		assert.deepEqual(input(1).ExclusiveStartKey, { pk: 'p', sk: 2 });
 		// An index cursor carries the index key and the table key.
@@ -453,17 +455,26 @@ describe('AWS query', () => {
 	});
 
 	test('the mock and AWS produce the same cursor for the same item', async () => {
-		const mock = mockStore('t', options);
+		// One scope for both, as in an app: the same store has the same fullId, and so the same cursor tag.
+		const scope = testScope();
+		const mock = mockStore('t', options, scope);
 		await mock.put({ pk: 'p', sk: 1 }, { n: 'a' });
 		const m = mock.query({ where: { pk: { equals: 'p' } }, limit: 1 });
 		await Array.fromAsync(m);
-		const { store } = awsStore('t', options, () => ({
-			Items: [{ pk: 'p', sk: 1, n: 'a' }],
-			LastEvaluatedKey: { pk: 'p', sk: 1 },
-		}));
+		const { store } = awsStore(
+			't',
+			options,
+			() => ({
+				Items: [{ pk: 'p', sk: 1, n: 'a' }],
+				LastEvaluatedKey: { pk: 'p', sk: 1 },
+			}),
+			scope,
+		);
 		const a = store.query({ where: { pk: { equals: 'p' } }, limit: 1 });
 		await Array.fromAsync(a);
 		assert.equal(a.cursor, m.cursor);
+		// A cursor of the mock reads on in the AWS runtime of the same store.
+		await Array.fromAsync(store.query({ where: { pk: { equals: 'p' } }, limit: 1, cursor: m.cursor }));
 	});
 
 	test('both runtimes reject a partition value, a sort operand and a cursor key value that fail the key check, with the same error', async () => {
@@ -509,6 +520,48 @@ describe('AWS query', () => {
 			);
 			await rejects(() => s.scan({ cursor: 'garbage' }), KVStoreErrors.InvalidQuery);
 		}
+	});
+
+	test('both runtimes reject a cursor of another store with the same key shape, and accept an untagged cursor', async () => {
+		// Two stores with the same key shape: before cursors named their store,
+		// a cursor of one read on in the other.
+		const other = mockStore('t-other', options);
+		await other.put({ pk: 'p', sk: 1 }, { n: 'a' });
+		await other.put({ pk: 'p', sk: 2 }, { n: 'b' });
+		const page = other.query({ where: { pk: { equals: 'p' } }, limit: 1 });
+		await Array.fromAsync(page);
+		const scanPage = other.scan({ limit: 1 });
+		await Array.fromAsync(scanPage);
+		assert.ok(page.cursor && scanPage.cursor);
+
+		const mock = mockStore('t', options);
+		const { store: aws, sent } = awsStore('t', options);
+		const fromMock = await rejects(
+			() => mock.query({ where: { pk: { equals: 'p' } }, cursor: page.cursor }),
+			KVStoreErrors.InvalidQuery,
+		);
+		const fromAws = await rejects(
+			() => aws.query({ where: { pk: { equals: 'p' } }, cursor: page.cursor }),
+			KVStoreErrors.InvalidQuery,
+		);
+		assert.equal(fromAws.message, fromMock.message);
+		await rejects(() => mock.scan({ cursor: scanPage.cursor }), KVStoreErrors.InvalidQuery);
+		await rejects(() => aws.scan({ cursor: scanPage.cursor }), KVStoreErrors.InvalidQuery);
+		assert.equal(sent.length, 0, 'a foreign cursor is rejected before a DynamoDB call');
+
+		// A cursor of 1.0.0 has no store tag and still reads on, on both runtimes.
+		const untagged = Buffer.from(JSON.stringify({ v: 1, index: null, key: { pk: 'p', sk: 1 } })).toString(
+			'base64url',
+		);
+		await mock.put({ pk: 'p', sk: 1 }, { n: 'a' });
+		await mock.put({ pk: 'p', sk: 2 }, { n: 'b' });
+		const rest = await Array.fromAsync(mock.query({ where: { pk: { equals: 'p' } }, cursor: untagged }));
+		assert.deepEqual(
+			rest.map((e: any) => e.key),
+			[{ pk: 'p', sk: 2 }],
+		);
+		await Array.fromAsync(aws.query({ where: { pk: { equals: 'p' } }, cursor: untagged }));
+		assert.deepEqual(sent.at(-1).input.ExclusiveStartKey, { pk: 'p', sk: 1 });
 	});
 });
 
@@ -829,8 +882,8 @@ describe('the mock stores and returns copies that went through the DocumentClien
 			Number.MAX_SAFE_INTEGER + 1,
 		];
 		for (const data of rejected) {
-			await assert.rejects(store.put(key, { ...key, data }), `put ${String(data)}`);
-			await assert.rejects(store.putBatch([{ key, value: { ...key, data } }]), `putBatch ${String(data)}`);
+			await rejects(store.put(key, { ...key, data }), KVStoreErrors.ValidationFailed);
+			await rejects(store.putBatch([{ key, value: { ...key, data } }]), KVStoreErrors.ValidationFailed);
 		}
 		assert.equal(await store.get(key), null);
 	});
@@ -1071,6 +1124,149 @@ describe('inputs DynamoDB rejects fail the same way on the mock and the AWS runt
 		assert.deepEqual(sortKeys(await Array.fromAsync(inRange)), ['\uFF61', '\uFFFD', '\u{1F600}']);
 		const above = store.query({ where: { pk: { equals: 'u' }, sk: { greaterThan: '\uFFFD' } } });
 		assert.deepEqual(sortKeys(await Array.fromAsync(above)), ['\u{1F600}', '\u{1F601}']);
+	});
+
+	test('a value the DocumentClient cannot marshal is a named ValidationFailed error, with the field path', async () => {
+		class Point {
+			x = 1;
+		}
+		class Tags extends Set<string> {}
+		class Fields extends Map<string, number> {}
+		const cases: [string, unknown, RegExp][] = [
+			['nan', Number.NaN, /: value field 'data' holds NaN, which DynamoDB cannot store$/],
+			['inf', Number.NEGATIVE_INFINITY, /: value field 'data' holds -Infinity, which/],
+			['date', new Date(0), /: value field 'data' holds a Date, which/],
+			['symbol', Symbol('s'), /: value field 'data' holds a symbol, which/],
+			['class', new Point(), /: value field 'data' holds an instance of Point, which/],
+			['empty-set', new Set(), /: value field 'data' holds an empty Set, which/],
+			['set-nan', new Set([1, Number.NaN]), /: value field 'data' holds NaN, which/],
+			['unsafe', 2 ** 53 + 2, /: value field 'data' holds the number 9007199254740994, outside Number\.MIN_SAFE/],
+			['1e21', 1e21, /: value field 'data' holds the number 1e\+21, outside/],
+			['neg-1e21', -1e21, /: value field 'data' holds the number -1e\+21, outside/],
+			['nested', { list: [1, { at: Number.NaN }] }, /: value field 'data\.list\[1\]\.at' holds NaN, which/],
+			['map', new Map([['m', new Date(0)]]), /: value field 'data\.m' holds a Date, which/],
+			[
+				'constructor-field',
+				{ constructor: 'Toyota' },
+				/: value field 'data' holds an object with a field named 'constructor', which/,
+			],
+			['set-of-booleans', new Set([true]), /: value field 'data' holds a Set of boolean values, which/],
+			['set-of-objects', new Set([{}]), /: value field 'data' holds a Set of objects, which/],
+			['set-of-undefined', new Set([undefined]), /: value field 'data' holds an empty Set, which/],
+			['set-subclass', new Tags(['a']), /: value field 'data' holds an instance of Tags, which/],
+			['map-subclass', new Fields([['a', 1]]), /: value field 'data' holds an instance of Fields, which/],
+			['boxed-nan', new Number(Number.NaN), /: value field 'data' holds NaN, which/],
+		];
+		for (const [id, data, message] of cases) {
+			const error = await rejects(
+				mockStore(`unmarshallable-cause-${id}`, options).put(key('a'), { data }),
+				KVStoreErrors.ValidationFailed,
+			);
+			assert.ok(error.cause instanceof Error, `${id}: the marshaller's error is kept as cause`);
+			assert.ok(!Object.keys(error).includes('cause'), `${id}: cause is not enumerable`);
+			assert.match(
+				await failsOnBoth(`unmarshallable-${id}`, KVStoreErrors.ValidationFailed, (store) =>
+					store.put(key('a'), { data }),
+				),
+				message,
+			);
+			await failsOnBoth(`unmarshallable-batch-${id}`, KVStoreErrors.ValidationFailed, (store) =>
+				store.putBatch([{ key: key('a'), value: { data } }]),
+			);
+		}
+	});
+
+	test('a non-object value the DocumentClient cannot marshal is rejected on a string store too', async () => {
+		for (const [i, value] of [Number.NaN, Number.POSITIVE_INFINITY, new Date(0), Symbol('s'), 1e21].entries()) {
+			const aws = awsStore(`unmarshallable-top-${i}`);
+			const messages: string[] = [];
+			for (const store of [mockStore(`unmarshallable-top-${i}`), aws.store]) {
+				messages.push((await rejects(() => store.put('k', value), KVStoreErrors.ValidationFailed)).message);
+			}
+			assert.equal(messages[0], messages[1]);
+			assert.match(messages[0], /: value is .+, which DynamoDB cannot store$/);
+			assert.equal(aws.sent.length, 0);
+		}
+	});
+
+	test('a bigint is stored as a number on both runtimes, so a safe one reads back as a number', async () => {
+		const aws = awsStore('bigint', options);
+		await aws.store.put(key('a'), { n: 10n });
+		assert.equal(aws.input().Item.n, 10n, 'the AWS runtime sends the bigint, which DynamoDB stores as a number');
+		const store = mockStore('bigint', options);
+		await store.put(key('a'), { n: 10n });
+		assert.equal((await store.get(key('a'))).n, 10);
+	});
+
+	test('a number key, query operand or cursor value outside the safe integer range is rejected', async () => {
+		const numeric = {
+			schema: z.object({ pk: z.string(), sk: z.number() }),
+			key: { partitionKey: 'pk', sortKey: 'sk' },
+		};
+		async function bothReject(id: string, call: (store: any) => unknown): Promise<string> {
+			const aws = awsStore(id, numeric);
+			const messages: string[] = [];
+			for (const store of [mockStore(id, numeric), aws.store]) {
+				messages.push((await rejects(() => call(store), KVStoreErrors.ValidationFailed)).message);
+			}
+			assert.equal(messages[0], messages[1]);
+			assert.equal(aws.sent.length, 0);
+			return messages[0];
+		}
+		assert.match(
+			await bothReject('num-key-put', (store) => store.put({ pk: 'p', sk: 1e21 }, {})),
+			/: key field 'sk' is 1e\+21; a number key must be between Number\.MIN_SAFE_INTEGER and Number\.MAX_SAFE_INTEGER$/,
+		);
+		await bothReject('num-key-get', (store) => store.get({ pk: 'p', sk: -(2 ** 53) - 2 }));
+		await bothReject('num-key-query', (store) =>
+			Array.fromAsync(store.query({ where: { pk: { equals: 'p' }, sk: { greaterThan: 1e21 } } })),
+		);
+		await bothReject('num-key-get-batch', (store) => store.getBatch([{ pk: 'p', sk: 1e21 }]));
+		await bothReject('num-key-delete-batch', (store) => store.deleteBatch([{ pk: 'p', sk: 1e21 }]));
+		// A cursor's key values pass the same check, and a cursor reports a failure as a bad cursor.
+		const unsafeCursor = Buffer.from(JSON.stringify({ v: 1, index: null, key: { pk: 'p', sk: 1e21 } })).toString(
+			'base64url',
+		);
+		const aws = awsStore('num-key-cursor', numeric);
+		for (const s of [mockStore('num-key-cursor', numeric), aws.store]) {
+			await rejects(
+				() => Array.fromAsync(s.query({ where: { pk: { equals: 'p' } }, cursor: unsafeCursor })),
+				KVStoreErrors.InvalidQuery,
+			);
+		}
+		assert.equal(aws.sent.length, 0);
+		const store = mockStore('num-key-safe', numeric);
+		await store.put({ pk: 'p', sk: Number.MAX_SAFE_INTEGER }, {});
+		await store.put({ pk: 'p', sk: 1.5 }, {});
+		assert.equal((await Array.fromAsync(store.query({ where: { pk: { equals: 'p' } } }))).length, 2);
+	});
+
+	test('a ttlSeconds whose expiry overflows the safe integer range is rejected', async () => {
+		assert.match(
+			await failsOnBoth('ttl-overflow', KVStoreErrors.ValidationFailed, (store) =>
+				store.put(key('a'), {}, { ttlSeconds: 1e16 }),
+			),
+			/: put: `ttlSeconds` is too large: the expiry it gives is above Number\.MAX_SAFE_INTEGER seconds \(received 10000000000000000\)$/,
+		);
+		await failsOnBoth('expires-at-underflow', KVStoreErrors.ValidationFailed, (store) =>
+			store.put(key('a'), {}, { expiresAt: -1e300 }),
+		);
+		await mockStore('ttl-large-ok', options).put(key('a'), {}, { ttlSeconds: 1e9 });
+	});
+
+	test('a condition operand the DocumentClient cannot marshal is rejected before any request', async () => {
+		assert.match(
+			await failsOnBoth('cond-value-nan', KVStoreErrors.ValidationFailed, (store) =>
+				store.put(key('a'), { n: 1 }, { ifValueEquals: Number.NaN }),
+			),
+			/: ifValueEquals is NaN, which DynamoDB cannot store$/,
+		);
+		assert.match(
+			await failsOnBoth('cond-fields-date', KVStoreErrors.ValidationFailed, (store) =>
+				store.delete(key('a'), { ifFieldEquals: { at: new Date(0) } }),
+			),
+			/: ifFieldEquals field 'at' holds a Date, which DynamoDB cannot store$/,
+		);
 	});
 });
 

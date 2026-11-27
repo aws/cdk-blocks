@@ -102,6 +102,7 @@ import { s3WebsiteDoor } from './s3_website_door.js';
 import type { AccessLogFormat, AccessLogPartitioning } from './access_logging.js';
 import { ComputeConstruct } from './compute_construct.js';
 import { DnsConstruct } from './dns_construct.js';
+import { CdnInvalidationConstruct } from './cdn_invalidation.js';
 import { MonitoringConstruct } from './monitoring_construct.js';
 import { UsEast1MonitoringStack } from './us_east_1_monitoring_stack.js';
 import { DEFAULT_NODE_RUNTIME } from './node_runtime.js';
@@ -121,6 +122,43 @@ const CFN_MAX_RESOURCES_PER_STACK = 500;
 const CFN_RESOURCE_WARNING_THRESHOLD = 450;
 /** Stable id of the plain-HTTP front-door warning; also the `acknowledgeWarning` id. */
 const PLAIN_HTTP_FRONT_DOOR_WARNING_ID = '@aws-cdk-blocks/hosting:PlainHttpFrontDoor';
+/** Stable id of the annotation on a CloudFront 5xx alarm created in an environment-agnostic stack. */
+const CLOUDFRONT_ALARM_REGION_UNRESOLVED_ID = '@aws-cdk-blocks/hosting:CloudFrontAlarmRegionUnresolved';
+
+/**
+ * The level and text of that annotation, by the region the CDK CLI targets.
+ *
+ * `AWS/CloudFront` metrics only publish in us-east-1, so the alarm works only
+ * when the stack is deployed there. The stack does not say where it goes, but
+ * the CDK CLI exports `CDK_DEFAULT_REGION` and deploys an environment-agnostic
+ * stack to that region:
+ *
+ * - `'us-east-1'`: an info (D-033). The alarm works there, but the same
+ *   assembly can be deployed to another region later.
+ * - any other region: a warning. The alarm never fires in this deployment.
+ * - unset (a synth outside the CDK CLI): a warning. The target is unknown.
+ */
+const cloudFrontAlarmRegionNote = (
+  cliRegion: string | undefined,
+): { level: 'info' | 'warning'; message: string } => {
+  const where =
+    cliRegion === 'us-east-1'
+      ? `which is where the CDK CLI deploys this stack (CDK_DEFAULT_REGION), so ` +
+        `the alarm works there. Deployed to any other region it will never fire.`
+      : cliRegion
+        ? `and the CDK CLI deploys this stack to '${cliRegion}' ` +
+          `(CDK_DEFAULT_REGION), so the alarm will never fire.`
+        : `so if this app deploys outside us-east-1 the alarm will never fire.`;
+  return {
+    level: cliRegion === 'us-east-1' ? 'info' : 'warning',
+    message:
+      `The hosting stack is environment-agnostic (region is an unresolved ` +
+      `token), so the CloudFront 5xx alarm is created in the stack itself. ` +
+      `AWS/CloudFront metrics only publish in us-east-1, ${where} Set env: ` +
+      `{ account, region } on the stack so the alarm can be placed in a ` +
+      `us-east-1 support stack (issue #481).`,
+  };
+};
 
 // ---- Public types ----
 
@@ -1742,6 +1780,25 @@ export class HostingConstruct extends Construct {
       this._distribution = cdn.distribution;
       this.distributionUrl = cdn.distributionUrl;
 
+      // ---- 9d. On-demand revalidation → CloudFront invalidation ----
+      // ISR pages reach the edge with `s-maxage=<remaining revalidate>`, so a
+      // `revalidateTag` / `revalidatePath` is only visible there once the
+      // server invalidates the distribution. The adapter sets
+      // `cache.cdnInvalidation` when the server bundle carries the handler.
+      if (manifest.cache?.cdnInvalidation && manifest.cache.driver !== 'nitro-s3') {
+        const server =
+          this.computeFunctions.get(manifest.cache.computeResource) ??
+          this.computeWebFunctions.get(manifest.cache.computeResource);
+        // A Lambda@Edge server has no environment to carry the parameter name.
+        if (server instanceof LambdaFunction || server instanceof WebFunctionConstruct) {
+          new CdnInvalidationConstruct(this, 'CdnInvalidation', {
+            distribution: cdn.distribution,
+            server,
+            basePath: manifest.basePath,
+          });
+        }
+      }
+
       // Output the CloudFront distribution domain when custom domain is configured.
       // BYO domain users need this to set up their external DNS CNAME.
       if (resolvedDomainNames.length > 0) {
@@ -1793,27 +1850,20 @@ export class HostingConstruct extends Construct {
         //   - region === 'us-east-1'      → alarm created locally (correct).
         //   - region resolved, off-region → alarm deferred to the us-east-1
         //     support stack below.
-        //   - region UNRESOLVED (token)   → we cannot decide at synth where
-        //     the app deploys, so the alarm is created locally. If that
-        //     deploy target turns out NOT to be us-east-1, the alarm can
-        //     never fire (the #481 bug). We can't fix that at synth, but we
-        //     refuse to do it silently. Warn so it's visible in build
-        //     output rather than a green-but-dead alarm.
+        //   - region UNRESOLVED (token)   → the alarm is created locally and
+        //     the synth output says so; see `cloudFrontAlarmRegionNote`.
         const hostingStack = Stack.of(this);
         const region = hostingStack.region;
         const regionResolved = !Token.isUnresolved(region);
         const offRegion = regionResolved && region !== 'us-east-1';
 
         if (!regionResolved && this._distribution) {
-          Annotations.of(this).addWarningV2(
-            '@aws-cdk-blocks/hosting:CloudFrontAlarmRegionUnresolved',
-            `The hosting stack is environment-agnostic (region is an ` +
-              `unresolved token), so the CloudFront 5xx alarm is created ` +
-              `locally. AWS/CloudFront metrics only publish in us-east-1, so ` +
-              `if this app deploys outside us-east-1 the alarm will never ` +
-              `fire. Set env: { account, region } on the stack so the alarm ` +
-              `can be placed in a us-east-1 support stack (issue #481).`,
-          );
+          const note = cloudFrontAlarmRegionNote(process.env.CDK_DEFAULT_REGION);
+          if (note.level === 'info') {
+            Annotations.of(this).addInfoV2(CLOUDFRONT_ALARM_REGION_UNRESOLVED_ID, note.message);
+          } else {
+            Annotations.of(this).addWarningV2(CLOUDFRONT_ALARM_REGION_UNRESOLVED_ID, note.message);
+          }
         }
 
         const monitoring = new MonitoringConstruct(this, 'Monitoring', {
@@ -2376,8 +2426,19 @@ export class HostingConstruct extends Construct {
     // Cache-Control split (3 tiers):
     //
     //   1. Hashed assets (`immutablePaths`): `max-age=31536000, immutable`
-    //   2. HTML files: `no-cache, no-store, must-revalidate` — browsers
-    //      must always revalidate so new deploys propagate immediately.
+    //   2. HTML files: `max-age=0, must-revalidate` — browsers and
+    //      CloudFront must revalidate on every request, so a new deploy's
+    //      HTML is served on the first request after it. No `no-store`: with
+    //      the SSR cache policy's minimum TTL of 0, CloudFront honors
+    //      `no-store`/`no-cache` by never keeping the object, so it could not
+    //      answer a viewer's `If-None-Match` with 304 and every repeat visit
+    //      downloaded the full page. `max-age=0` lets the edge keep a copy and
+    //      revalidate it against S3 each time. This cannot serve a previous
+    //      build's HTML: the router rewrites every HTML request to the CURRENT
+    //      build's `builds/<id>/` key before the cache lookup (HTML ignores the
+    //      skew cookie), so a deploy changes the cache key, and these objects
+    //      are prerendered, public files (never per-user responses).
+    //      `noCachePaths` keep `no-cache, no-store, must-revalidate`.
     //   3. Other mutable assets (images, JSON, etc.):
     //      `s-maxage=31536000, max-age=0, must-revalidate` — CloudFront
     //      edge caches for 1y. Each deploy writes them under a fresh
@@ -2404,7 +2465,8 @@ export class HostingConstruct extends Construct {
       const noCachePaths = manifest.staticAssets.noCachePaths;
       const mutableCacheControl =
         manifest.staticAssets.cacheControl ?? 'public, s-maxage=31536000, max-age=0, must-revalidate';
-      const htmlCacheControl = 'no-cache, no-store, must-revalidate';
+      const htmlCacheControl = 'max-age=0, must-revalidate';
+      const noStoreCacheControl = 'no-cache, no-store, must-revalidate';
       const htmlGlobs = ['*.html', '**/*.html'];
       const staticSource = Source.asset(manifest.staticAssets.directory);
       // Track the asset deployments so the per-extension font Content-
@@ -2425,22 +2487,6 @@ export class HostingConstruct extends Construct {
         memoryLimit: props.storage?.deployment?.memoryLimit ?? 1024,
         ephemeralStorageSize: Size.mebibytes(props.storage?.deployment?.ephemeralStorageMiB ?? 1024),
       };
-
-      // Deploy no-cache paths (e.g. config.json) — always revalidate.
-      if (noCachePaths && noCachePaths.length > 0) {
-        assetDeployments.push(
-          new BucketDeployment(this, 'AssetDeploymentNoCache', {
-            sources: [staticSource],
-            destinationBucket: this.bucket,
-            destinationKeyPrefix: `builds/${buildId}/`,
-            exclude: ['*'],
-            include: noCachePaths,
-            cacheControl: [CacheControl.fromString(htmlCacheControl)],
-            prune: false,
-            ...deploymentSizing,
-          }),
-        );
-      }
 
       if (immutablePaths && immutablePaths.length > 0) {
         assetDeployments.push(
@@ -2503,6 +2549,27 @@ export class HostingConstruct extends Construct {
           }),
         );
       }
+      // Deploy no-cache paths (e.g. config.json) — never stored, always revalidate.
+      // The HTML pass includes every `*.html`, so a `noCachePaths` entry that is
+      // itself HTML would get the HTML tier if that pass ran after this one. This
+      // pass is created last and depends on the others so its `no-store` wins.
+      // (Created last so it does not own the shared CLI layer, which the
+      // earlier deployments use; depending on it would form a cycle.)
+      if (noCachePaths && noCachePaths.length > 0) {
+        const noCacheDeployment = new BucketDeployment(this, 'AssetDeploymentNoCache', {
+          sources: [staticSource],
+          destinationBucket: this.bucket,
+          destinationKeyPrefix: `builds/${buildId}/`,
+          exclude: ['*'],
+          include: noCachePaths,
+          cacheControl: [CacheControl.fromString(noStoreCacheControl)],
+          prune: false,
+          ...deploymentSizing,
+        });
+        for (const dep of assetDeployments) noCacheDeployment.node.addDependency(dep);
+        assetDeployments.push(noCacheDeployment);
+      }
+
       buildAssetDeployments.push(...assetDeployments);
 
       // ---- 12b. Font Content-Type pass ----

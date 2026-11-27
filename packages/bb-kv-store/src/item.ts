@@ -15,7 +15,9 @@
  * - An expiry goes in `_bkv_ttl`, unless the `ttl` option names a field of the
  *   value.
  */
+import { createHash } from 'node:crypto';
 import type { ChildLogger } from '@aws-cdk-blocks/bb-logger';
+import { marshall } from '@aws-sdk/util-dynamodb';
 import type { StandardSchemaV1 } from '@standard-schema/spec';
 import {
 	applyReadValidation,
@@ -112,6 +114,12 @@ export interface KeyModel {
 	/** The schema of the store, if it has one. */
 	readonly schema: StandardSchemaV1 | undefined;
 	/**
+	 * The tag that the cursors of this store carry, derived from the store's
+	 * `fullId` (see {@link cursorStoreTag}). `undefined` when the model is built
+	 * without a store id; its cursors then carry no tag and any tag is accepted.
+	 */
+	readonly cursorTag?: string;
+	/**
 	 * The DynamoDB attribute type of each key field of the table and of the indexes,
 	 * `'S'` or `'N'`. The type is probed from the schema on first use (see
 	 * {@link probeKeyType}) and then kept, so a store that is never read by key does
@@ -168,8 +176,11 @@ function keyType(model: KeyModel, field: string): 'S' | 'N' {
 	return type;
 }
 
-/** Build the key model from the constructor options. */
-export function resolveKeyModel(options: unknown): KeyModel {
+/**
+ * Build the key model from the constructor options. `storeId` is the `fullId`
+ * of the store; when given, the cursors of the store are tagged with it.
+ */
+export function resolveKeyModel(options: unknown, storeId?: string): KeyModel {
 	const { schema, key, indexes, ttl } = looseOptions(options);
 	// An array of index configs would declare indexes named '0', '1', and so on.
 	if (indexes !== undefined && indexes !== null && !isPlainObject(indexes)) {
@@ -182,6 +193,7 @@ export function resolveKeyModel(options: unknown): KeyModel {
 		ttlAttribute: ttl ?? TTL_ATTRIBUTE,
 		ttlInValue: ttl !== undefined,
 		schema,
+		cursorTag: storeId === undefined ? undefined : cursorStoreTag(storeId),
 		keyTypes: new Map(key ? [] : [[PK_ATTRIBUTE, 'S']]),
 	};
 }
@@ -209,7 +221,9 @@ function describe(value: unknown): string {
  * @throws {KVStoreErrors.InvalidQuery} If the value does not have the type of the field (this
  *   includes `NaN` and an infinite number).
  * @throws {KVStoreErrors.ValidationFailed} If the value is an empty string, or a string over
- *   `maxBytes` UTF-8 bytes (the partition key limit unless the field is a sort key).
+ *   `maxBytes` UTF-8 bytes (the partition key limit unless the field is a sort key), or a number
+ *   outside `Number.MIN_SAFE_INTEGER` to `Number.MAX_SAFE_INTEGER`, which the DocumentClient
+ *   cannot send.
  */
 function checkKeyValue(
 	field: string,
@@ -225,7 +239,14 @@ function checkKeyValue(
 		}
 		return value;
 	}
-	if (type === 'N' && typeof value === 'number' && Number.isFinite(value)) return value;
+	if (type === 'N' && typeof value === 'number' && Number.isFinite(value)) {
+		// The DocumentClient refuses a number beyond the safe integer range with a plain
+		// Error, so reject it here with a named error (as for a string over its byte limit).
+		if (value > Number.MAX_SAFE_INTEGER || value < Number.MIN_SAFE_INTEGER) {
+			throw blocksError(KVStoreErrors.ValidationFailed, KVStoreMessages.keyNumberUnsafe(field, value));
+		}
+		return value;
+	}
 	throw blocksError(KVStoreErrors.InvalidQuery, KVStoreMessages.keyFieldType(field, type, describe(value)));
 }
 
@@ -321,6 +342,150 @@ function nestsTooDeep(value: unknown, depth: number): boolean {
 	return depth > MAX_NESTING_DEPTH || children.some((child) => nestsTooDeep(child, depth + 1));
 }
 
+/** The path of a field below `path`, as an error message shows it. */
+function fieldPath(path: string, field: string): string {
+	return path === '' ? field : `${path}.${field}`;
+}
+
+/** The class names that the marshaller stores as binary (`isBinary` in `@aws-sdk/util-dynamodb`). */
+const BINARY_TYPES = new Set([
+	'ArrayBuffer',
+	'Blob',
+	'Buffer',
+	'DataView',
+	'File',
+	'Int8Array',
+	'Uint8Array',
+	'Uint8ClampedArray',
+	'Int16Array',
+	'Uint16Array',
+	'Int32Array',
+	'Uint32Array',
+	'Float32Array',
+	'Float64Array',
+	'BigInt64Array',
+	'BigUint64Array',
+]);
+
+/** Why the marshaller refuses a number, or `undefined` if it takes it. */
+function unstorableNumber(value: number): string | undefined {
+	if (!Number.isFinite(value)) return String(value);
+	if (value > Number.MAX_SAFE_INTEGER || value < Number.MIN_SAFE_INTEGER) {
+		return `the number ${value}, outside Number.MIN_SAFE_INTEGER to Number.MAX_SAFE_INTEGER`;
+	}
+	return undefined;
+}
+
+/** The first part that the marshaller refuses among `items`, each given with its path. */
+function firstUnstorable(items: Iterable<[string, unknown]>): { path: string; part: string } | undefined {
+	for (const [path, item] of items) {
+		const found = unstorablePart(item, path);
+		if (found) return found;
+	}
+	return undefined;
+}
+
+/**
+ * Find the first part of a value that the DocumentClient's marshaller refuses, for
+ * the error message of {@link assertStorable}. It follows `convertToAttr` in
+ * `@aws-sdk/util-dynamodb` (with {@link MARSHALL_OPTIONS}) in the same order: the
+ * marshaller tells a Set, a Map, a plain object or binary data by the `name` of
+ * its constructor, not by `instanceof`, so this does too. A Set takes the type of
+ * its first member. It only describes: `marshall` itself decides, and a value it
+ * refuses for a reason not modelled here gets a message without a part.
+ */
+function unstorablePart(value: unknown, path: string): { path: string; part: string } | undefined {
+	// Undefined is dropped, and a function is skipped in a list or a map.
+	if (value === undefined || value === null || typeof value === 'function') return undefined;
+	if (typeof value === 'number') {
+		const part = unstorableNumber(value);
+		return part === undefined ? undefined : { path, part };
+	}
+	if (typeof value === 'symbol') return { path, part: 'a symbol' };
+	if (typeof value !== 'object') return undefined;
+	if (Array.isArray(value)) return firstUnstorable(value.map((item, i) => [`${path}[${i}]`, item]));
+	// `constructor` can be a field of the object, so read its name with care.
+	const ctor: unknown = (value as { constructor?: unknown }).constructor;
+	const name = (ctor as { name?: unknown } | null | undefined)?.name;
+	if (name === 'Set') {
+		const members = [...(value as Set<unknown>)].filter((member) => member !== undefined);
+		if (members.length === 0) return { path, part: 'an empty Set' };
+		const first = members[0];
+		if (typeof first === 'number') {
+			for (const member of members) {
+				const part = typeof member === 'number' ? unstorableNumber(member) : undefined;
+				if (part !== undefined) return { path, part };
+			}
+			return undefined;
+		}
+		const firstName = (first as { constructor?: { name?: unknown } } | null)?.constructor?.name;
+		if (
+			typeof first === 'bigint' ||
+			typeof first === 'string' ||
+			firstName === 'NumberValue' ||
+			BINARY_TYPES.has(String(firstName))
+		) {
+			return undefined;
+		}
+		return { path, part: `a Set of ${typeof first === 'object' ? 'objects' : `${typeof first} values`}` };
+	}
+	if (name === 'Map') {
+		return firstUnstorable(
+			[...(value as Map<unknown, unknown>)].map(([k, item]) => [fieldPath(path, String(k)), item]),
+		);
+	}
+	if (name === 'Object' || !ctor) {
+		const fields: [string, unknown][] = [];
+		for (const field in value) fields.push([fieldPath(path, field), (value as Record<string, unknown>)[field]]);
+		return firstUnstorable(fields);
+	}
+	if (BINARY_TYPES.has(String(name)) || name === 'Boolean' || name === 'String' || name === 'NumberValue') {
+		return undefined;
+	}
+	if (name === 'Number') {
+		const part = unstorableNumber(Number(value));
+		return part === undefined ? undefined : { path, part };
+	}
+	// A plain object whose own `constructor` field is not the Object function.
+	if (isPlainObject(value) && Object.hasOwn(value, 'constructor')) {
+		return { path, part: "an object with a field named 'constructor'" };
+	}
+	if (value instanceof Date) return { path, part: 'a Date' };
+	return { path, part: `an instance of ${typeof name === 'string' && name !== '' ? name : 'a class'}` };
+}
+
+/**
+ * Check that the DocumentClient can marshal a value, with the options the AWS
+ * runtime passes to it ({@link MARSHALL_OPTIONS}). The marshaller is the rule, so
+ * the check matches what the AWS runtime would send. It refuses `NaN`, an
+ * infinite number, a number outside the safe integer range, a `Date`, a symbol, a
+ * class instance (a subclass of Set or Map too), an empty Set, a Set of values
+ * other than numbers, strings or binary data, and an object with a field named
+ * `constructor`, at any depth. Without this check the AWS runtime would throw the
+ * marshaller's plain `Error` or `TypeError`, which a client sees as a 500 with no
+ * error name.
+ *
+ * `subject` names the value in the message: `value`, `ifValueEquals` or `ifFieldEquals`.
+ * The marshaller's error is kept as a non-enumerable `cause`, so it stays
+ * server-side: its message can hold the raw value.
+ *
+ * @throws {KVStoreErrors.ValidationFailed} If the marshaller refuses the value.
+ */
+export function assertStorable(value: unknown, subject: string): void {
+	try {
+		marshall({ value }, MARSHALL_OPTIONS);
+	} catch (cause) {
+		const found = unstorablePart(value, '');
+		const err = blocksError(
+			KVStoreErrors.ValidationFailed,
+			KVStoreMessages.unstorableValue(subject, found?.path ?? '', found?.part),
+		);
+		// Non-enumerable, as `new Error(message, { cause })` sets it, so serializing the error never includes it.
+		Object.defineProperty(err, 'cause', { value: cause, enumerable: false, writable: true, configurable: true });
+		throw err;
+	}
+}
+
 /**
  * Build the stored item for a write: the key attributes, the value laid out
  * flat (an object) or in `_bkv_value` (anything else), and the expiry.
@@ -409,7 +574,8 @@ function fullValue(
  * @throws {KVStoreErrors.ValidationFailed} If the value fails the schema,
  *   disagrees with its key, has a reserved field, has a field name that DynamoDB
  *   cannot store, or has an empty string in a key field or an indexed field.
- *   Also if the expiry is not usable.
+ *   Also if the value holds data that the DocumentClient cannot marshal
+ *   ({@link assertStorable}), or if the expiry is not usable.
  */
 export async function prepareItem(
 	model: KeyModel,
@@ -421,7 +587,9 @@ export async function prepareItem(
 	const expiresAt = resolveTtlEpochSeconds(expiry);
 	const full = fullValue(model, keyAttrs, value, expiresAt);
 	await validateSchema(model.schema, full);
-	return { keyAttrs, item: itemOfFullValue(model, keyAttrs, full, expiresAt) };
+	const item = itemOfFullValue(model, keyAttrs, full, expiresAt);
+	assertStorable(full, 'value');
+	return { keyAttrs, item };
 }
 
 /**
@@ -608,8 +776,11 @@ type ValueCheckPlan =
  * - `ifValueEquals` must not be a plain object: the block spreads an object
  *   value over attributes, so DynamoDB cannot compare it in one expression.
  * - Both together are rejected.
+ * - Each compared value must be one the DocumentClient can marshal
+ *   ({@link assertStorable}): the AWS runtime sends it in the condition.
  *
- * @throws {KVStoreErrors.InvalidQuery} For each rule above.
+ * @throws {KVStoreErrors.InvalidQuery} For each shape rule above.
+ * @throws {KVStoreErrors.ValidationFailed} If a compared value cannot be marshalled.
  */
 function planValueCheck(options: Conditions | undefined): ValueCheckPlan {
 	const fields = options?.ifFieldEquals;
@@ -622,10 +793,12 @@ function planValueCheck(options: Conditions | undefined): ValueCheckPlan {
 			throw blocksError(KVStoreErrors.InvalidQuery, KVStoreMessages.ifFieldEqualsNotObject);
 		const entries = Object.entries(fields).filter(([, v]) => v !== undefined);
 		if (entries.length === 0) throw blocksError(KVStoreErrors.InvalidQuery, KVStoreMessages.emptyIfFieldEquals);
+		assertStorable(Object.fromEntries(entries), 'ifFieldEquals');
 		return { kind: 'fields', entries };
 	}
 	if (value !== undefined) {
 		if (isPlainObject(value)) throw blocksError(KVStoreErrors.InvalidQuery, KVStoreMessages.ifValueEqualsObject);
+		assertStorable(value, 'ifValueEquals');
 		return { kind: 'value', expected: value };
 	}
 	return undefined;
@@ -1025,13 +1198,29 @@ export function normalizeLimit(limit: unknown): number | undefined {
  * A cursor marks the position after the last entry an iterator returned. It
  * encodes the DynamoDB `LastEvaluatedKey` of that position in a readable
  * (base64url JSON) form. The key holds the key attributes of the table, plus
- * those of the index for an index query. It is not a secret and not a
- * permission.
+ * those of the index for an index query. `store` is a tag of the store that
+ * issued the cursor, so a store with the same key shape rejects it. It is not a
+ * secret and not a permission.
  */
 interface CursorPayload {
 	v: 1;
+	/**
+	 * The tag of the issuing store. Cursors issued by earlier versions have no
+	 * `store`, and are still accepted by any store with the same key shape.
+	 */
+	store?: string;
 	index: string | null;
 	key: Record<string, KeyValue>;
+}
+
+/**
+ * The cursor tag of a store: the first 16 base64url characters of the SHA-256
+ * of its `fullId`. A hash keeps the store id (and the table name that derives
+ * from it) out of a cursor that a client can read. The mock and the AWS entry
+ * share a `fullId`, so they tag the same store alike.
+ */
+export function cursorStoreTag(storeId: string): string {
+	return createHash('sha256').update(storeId, 'utf8').digest('base64url').slice(0, 16);
 }
 
 /** The attributes a `LastEvaluatedKey` holds for a read of the table or of an index. */
@@ -1046,7 +1235,10 @@ function cursorFields(model: KeyModel, indexName: string | undefined): string[] 
 export function encodeCursor(model: KeyModel, indexName: string | undefined, item: Item): string {
 	const key: Record<string, KeyValue> = {};
 	for (const field of cursorFields(model, indexName)) key[field] = item[field] as KeyValue;
-	const payload: CursorPayload = { v: 1, index: indexName ?? null, key };
+	const payload: CursorPayload =
+		model.cursorTag === undefined
+			? { v: 1, index: indexName ?? null, key }
+			: { v: 1, store: model.cursorTag, index: indexName ?? null, key };
 	return Buffer.from(JSON.stringify(payload), 'utf8').toString('base64url');
 }
 
@@ -1057,8 +1249,10 @@ export function encodeCursor(model: KeyModel, indexName: string | undefined, ite
  * not arrive here: {@link presentOptions} takes it out of the options at the
  * method entry.
  *
- * The cursor must pass four checks:
+ * The cursor must pass five checks:
  * - It decodes.
+ * - If it carries a store tag, the tag is that of this store. A cursor with no
+ *   tag (issued before stores tagged cursors) skips this check.
  * - It names the same index as the call.
  * - It holds exactly the key attributes of that table or index, each one a value
  *   that {@link checkKeyValue} accepts for its field.
@@ -1083,6 +1277,11 @@ export function decodeCursor(
 		payload = undefined;
 	}
 	if (!isPlainObject(payload) || payload.v !== 1 || !isPlainObject(payload.key)) {
+		throw blocksError(KVStoreErrors.InvalidQuery, KVStoreMessages.cursorInvalid);
+	}
+	// A tag that is present must be this store's. A missing tag is a cursor of an
+	// earlier version, accepted so that a cursor held across an upgrade still works.
+	if (payload.store !== undefined && model.cursorTag !== undefined && payload.store !== model.cursorTag) {
 		throw blocksError(KVStoreErrors.InvalidQuery, KVStoreMessages.cursorInvalid);
 	}
 	const cursorIndex = typeof payload.index === 'string' ? payload.index : undefined;

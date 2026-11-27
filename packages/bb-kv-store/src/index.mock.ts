@@ -150,7 +150,7 @@ export class KVStore<
 		// emits, so this doesn't add noise. Callers can pass their own logger.
 		this.log = options?.logger ?? new Logger(this, 'logger', { level: 'warn' });
 		this.dataDir = getMockDataDir(this);
-		this.model = resolveKeyModel(options);
+		this.model = resolveKeyModel(options, this.fullId);
 		this.reader = createReader(this.model, options?.readValidation ?? 'coerce', this.log, { store: this.fullId });
 		const loaded = loadMockFile(this.dataDir, this.model, this.log, { store: this.fullId });
 		this.data = new Map(loaded.items.map((item) => [serializeKey(this.model, item), item]));
@@ -208,7 +208,11 @@ export class KVStore<
 	 * @throws {KVStoreErrors.ValidationFailed} If the value fails the schema,
 	 *   disagrees with its key, has a top-level field that starts with `_bkv_`, has
 	 *   a field named `__proto__` at any depth (DynamoDB cannot store that field
-	 *   name), or has an empty string in a key field or an indexed field.
+	 *   name), or has an empty string in a key field or an indexed field. Also if
+	 *   the value or a condition operand holds data the AWS SDK cannot send to
+	 *   DynamoDB (`NaN`, an infinite number, a number outside the safe integer
+	 *   range, a `Date`, a symbol, a class instance, an empty Set), or a number key
+	 *   field is outside the safe integer range.
 	 * @throws {KVStoreErrors.ItemTooLarge} If the serialized item exceeds the 400 KB
 	 *   DynamoDB per-item size limit.
 	 * @throws {KVStoreErrors.InvalidQuery} If `ifValueEquals` is given an object, or
@@ -339,7 +343,7 @@ export class KVStore<
 	 *   partition value or a sort value does not have the type of its field, or if
 	 *   the sort condition is not one of the conditions above.
 	 * @throws {KVStoreErrors.ValidationFailed} If the partition value or a sort
-	 *   value is an empty string.
+	 *   value is an empty string, or a number outside the safe integer range.
 	 */
 	query(options: QueryOptions<Out, K, I>): Results<Out, K> {
 		const plan = planQuery(this.model, presentOptions(options));

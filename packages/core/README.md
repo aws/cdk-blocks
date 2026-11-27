@@ -33,11 +33,22 @@ see the `@aws-cdk-blocks/bb-compute` README for what follows it.
 A block's resource names (its table, bucket or queue, and its local `.cdk-blocks/local/data`
 directory) come from its `fullId`: the scope ids from the root down, joined with
 `-`. Two different scope paths that join to the same string, such as
-`'user-service' > 'sessions'` and `'user' > 'service-sessions'`, share those
-resources and overwrite each other's data. Constructing the second one logs a
-warning naming both paths (a `blocks:scope:fullIdCollision` warning at `cdk
-synth`); rename one of the scopes. Constructing the same path again is
-accepted.
+`'user-service' > 'sessions'` and `'user' > 'service-sessions'`, get the same
+resource names. Constructing the second one logs a warning naming both paths (a
+`blocks:scope:fullIdCollision` warning at `cdk synth`); rename one of the
+scopes. Constructing the same path again is accepted. What happens next
+depends on where the app runs:
+
+- Locally the two blocks share their `.cdk-blocks/local/data` directory and
+  read and overwrite each other's data.
+- On AWS the two cannot both deploy, because CloudFormation rejects a second
+  table, queue, schedule, bucket, secret, parameter, log group or Lambda
+  function with a name that already exists in the stack. `cdk synth` fails
+  instead, listing the name and the construct paths of the resources that use
+  it. Colliding scopes that create no resource with a name still synth, with
+  the warning. Only names that are literal strings at synth are compared, and
+  a resource behind a CloudFormation `Condition` is skipped, because it may be
+  the only one of its name that deploys.
 
 Use lowercase letters, digits and hyphens in scope and block ids. An id is part
 of the name of each resource created under it, unescaped, and every service
@@ -63,7 +74,7 @@ An id is checked at `cdk synth`, not when the scope is constructed:
 
 ## ApiNamespace
 
-`new ApiNamespace<T>(scope: ScopeParent, label: string, handler: ApiHandler<T>, options?: ApiNamespaceOptions): AsyncAPI<T>`, where `handler` is `(context: BlocksContext) => T`. Each method of the returned object becomes an RPC endpoint and a method of the typed client. Clients call the namespace by the name it is exported under, not by `label`.
+`new ApiNamespace<T extends ApiMethodMap<T>>(scope: ScopeParent, label: string, handler: (context: BlocksContext) => T, options?: ApiNamespaceOptions): AsyncAPI<T>`, where `T` is a plain object or a class instance whose public members are all methods. Each method of the returned object becomes an RPC endpoint and a method of the typed client. Clients call the namespace by the name it is exported under, not by `label`.
 
 ```typescript
 import { ApiNamespace } from '@aws-cdk-blocks/core';
@@ -313,7 +324,7 @@ Start `defaults` from `BlocksPresets.sandbox` or `BlocksPresets.production` and 
 | `pointInTimeRecovery` | `boolean \| { retentionDays: number }` | `false` | `true` | Continuous backups on stateful resources that support them (DynamoDB point-in-time recovery: 1–35 days). |
 | `logRetention` | `RetentionDays` | `RetentionDays.ONE_WEEK` | `RetentionDays.ONE_YEAR` | Retention of the CloudWatch log groups CDK Blocks manages. |
 | `throttling` | `BlocksThrottling` (`{ rateLimit: number; burstLimit: number }`) | `{ rateLimit: 200, burstLimit: 400 }` | `{ rateLimit: 1000, burstLimit: 2000 }` | Requests per second and burst on the shared REST API stage; messages per second on the `Realtime` WebSocket stage. |
-| `accessLogging` | `boolean` | `false` | `false` | JSON access logs on the shared REST API and Realtime WebSocket stages. Hosting's CloudFront SSR origin uses `frontDoor.features.serverOrigin.accessLogging` instead. This is also the fallback for `storageAccessLogging`. The API Gateway CloudWatch Logs role is account- and region-wide; enable it in one CDK Blocks stack per account and region. While it is off and `removalPolicy` is not `DESTROY`, synth warns `blocks:apigateway:access-logging-disabled`. |
+| `accessLogging` | `boolean` | `false` | `false` | JSON access logs on the shared REST API and Realtime WebSocket stages. Hosting's CloudFront SSR origin uses `frontDoor.features.serverOrigin.accessLogging` instead. This is also the fallback for `storageAccessLogging`. The API Gateway CloudWatch Logs role is account- and region-wide; enable it in one CDK Blocks stack per account and region. While it is off and `removalPolicy` is not `DESTROY`, synth prints the info `blocks:apigateway:access-logging-disabled` (an info, not a warning: it does not fail `cdk synth --strict`). To hide it, call `Annotations.of(stack).acknowledgeInfo('blocks:apigateway:access-logging-disabled')` on the stack or backend that `create()` returns. |
 | `storageAccessLogging` | `boolean` | unset | unset | S3 server access logs for CDK Blocks-provisioned FileBucket buckets. Unset falls back to `accessLogging`. Configure logging on imported buckets separately. |
 | `secretsStore` | `BlocksSecretsStore` (`'ssm' \| 'secrets-manager'`) | `'ssm'` | `'secrets-manager'` | Where CDK Blocks stores the secrets it generates (the `Auth` session secret, the `Realtime` connection token key). Changing it on a deployed stack creates new keys, which signs every `Auth` user out once. |
 | `vpc` | `BlocksVpcOptions` | unset | unset | A VPC for the app's compute and VPC-resident resources. |
@@ -607,6 +618,8 @@ The `framework` option selects the frontend type: `'spa' | 'static' | 'nextjs'`.
 
 `buildRetentionDays` (default 30) is how many days superseded builds are kept for rollback. It maps to the hosting construct's `storage.buildRetentionDays` and must be ≥ `skewProtection.maxAge` in days. The [`@aws-cdk-blocks/hosting` README](../hosting/README.md) has the retention and cleanup rules.
 
+**The Lambda@Edge stack.** An app with Lambda@Edge functions (a Next.js `runtime: 'edge'` route, or middleware built as Lambda@Edge) in a stack outside `us-east-1` gets a second stack in `us-east-1` that holds them. CDK names it `edge-lambda-stack-<hash>`, a name that doesn't say which app it belongs to; with `defaults.appIdentity` set, `Hosting` names it `<id>-edge` (see [Running many apps in one AWS account](#running-many-apps-in-one-aws-account-a-shared-platform)). `NODE_OPTIONS="--conditions=cdk" npx cdk ls` lists it with the app's stacks, and `npm run sandbox:destroy` deletes it with the sandbox. `npm run destroy` doesn't select stacks, so delete a production app's stacks by name, the app stack first; the `@aws-cdk-blocks/hosting` README's "Edge routes" section has the steps.
+
 ### Front door and its settings
 
 `frontDoor` picks the public entry point:
@@ -692,6 +705,8 @@ if (!sandboxMode || previewMode) {
 
 Tear a preview sandbox down with `npm run sandbox:destroy`.
 
+A top-level prop that `Hosting` doesn't read, such as a misspelled setting or a prop of `@aws-cdk-blocks/hosting`'s `HostingConstruct` like `cdn`, gets a synth warning, `@aws-cdk-blocks/core:UnknownHostingProp`, naming the key. It has no effect. TypeScript already rejects such a key in an object literal; the warning covers config written in JavaScript, read from JSON or spread from another object. Set the door's settings in `frontDoor.features` (or the top-level `Hosting` settings) instead.
+
 ## Building Blocks
 
 `npm run docs` lists every Building Block, and `npm run docs <Block>` prints one block's README. The `Pipeline` CI/CD construct is documented in the [`@aws-cdk-blocks/pipeline` README](../pipeline/README.md).
@@ -741,13 +756,15 @@ At startup the dev server regenerates `cdk-blocks/client.js` from your backend. 
 
 ## Script output (`BLOCKS_LOG_LEVEL`)
 
-The lifecycle scripts in `@aws-cdk-blocks/core/scripts` (`deploy`, `destroy`, `startSandbox`, `destroySandbox`, `startDevServer`, which the generated `npm run deploy` / `sandbox` / `sandbox:destroy` / `destroy` / `dev` scripts call) read the `BLOCKS_LOG_LEVEL` environment variable to decide how much to print:
+The lifecycle scripts in `@aws-cdk-blocks/core/scripts` (`deploy`, `destroy`, `startSandbox`, `destroySandbox`, `startDevServer`, which the generated `npm run deploy` / `sandbox` / `sandbox:destroy` / `destroy` / `dev` scripts call) read the `BLOCKS_LOG_LEVEL` environment variable to decide how much to print.
+
+The generated scripts run these through the `aws-cdk-blocks` task runner, which sets `BLOCKS_LOG_LEVEL` for them: `normal` by default, `quiet` with `--quiet`, `verbose` with `--verbose`, `debug` with `--debug`, or the value you set yourself (`BLOCKS_LOG_LEVEL=verbose npm run deploy`). So `normal` is what `npm run deploy` prints unless you choose another level. The "unset" row applies when your own code calls the scripts directly.
 
 | `BLOCKS_LOG_LEVEL` | What prints |
 |---|---|
 | unset (or any other value) | Everything: every progress step and the raw CDK output, as at `verbose`, plus the dev server's RPC error stack traces. |
-| `quiet` | Errors and final results only. CDK output is hidden while it runs. |
-| `normal` | Short progress steps and results. CDK output is condensed into a few lines (`Synthesizing app...`, a resource count); failure and rollback lines still print as they happen. |
+| `quiet` | Errors and final results only. CDK output, synth warnings included, is hidden while it runs. |
+| `normal` | Short progress steps and results. CDK output is condensed into a few lines (`Synthesizing app...`, a resource count); failure and rollback lines still print as they happen, and so does every synth warning (a CDK warning annotation, such as `@aws-cdk-blocks/hosting:PlainHttpFrontDoor`), once, with its construct path and how to acknowledge it. |
 | `verbose` | The same lines as unset: every progress step plus the raw CDK output (the dev server leaves out RPC error stack traces, see below). |
 | `debug` | `verbose` plus stack traces for errors the scripts catch and report as warnings. |
 
