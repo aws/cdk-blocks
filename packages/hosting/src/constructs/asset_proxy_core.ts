@@ -123,6 +123,7 @@ export type AssetProxyOptions = ProxyRules & {
  * which resolves to `{ statusCode, headers, body, isBase64Encoded }`.
  *
  * @param opts the prefix to strip, the SPA fallback, and the app's rules and error pages.
+ * @param env the environment variables that name the bucket and the build's key prefix.
  * @returns the source, to inline ahead of an envelope handler.
  */
 /**
@@ -136,13 +137,16 @@ export const imagePathPrefixes = (prefixes: readonly string[] = []): string[] =>
   ...new Set(['/_ipx', ...prefixes].map((p) => `/${trimTrailingSlashes(p.replace(/^\/+/, ''))}`).filter((p) => p !== '/')),
 ];
 
-export const assetProxyCoreJs = (opts: AssetProxyOptions): string => {
+export const assetProxyCoreJs = (
+  opts: AssetProxyOptions,
+  env: { readonly bucket: string; readonly keyPrefix: string } = { bucket: 'ASSET_BUCKET', keyPrefix: 'ASSET_KEY_PREFIX' },
+): string => {
   const pageKey = (page: string | undefined): string => JSON.stringify((page ?? '').replace(/^\/+/, ''));
   return `const { S3Client, GetObjectCommand } = require('@aws-sdk/client-s3');
 const zlib = require('node:zlib');
 const s3 = new S3Client({});
-const BUCKET = process.env.ASSET_BUCKET;
-const KEY_PREFIX = process.env.ASSET_KEY_PREFIX || '';
+const BUCKET = process.env.${env.bucket};
+const KEY_PREFIX = process.env.${env.keyPrefix} || '';
 const STRIP_PREFIX = ${JSON.stringify(opts.stripPrefix ?? '')};
 const SPA_FALLBACK = ${opts.spaFallback ? 'true' : 'false'};
 const NOT_FOUND_PAGE = ${pageKey(opts.errorPages?.notFound)};

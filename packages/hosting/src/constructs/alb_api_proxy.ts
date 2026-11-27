@@ -45,10 +45,18 @@ import { type ProxyRules, proxyRulesJs } from './proxy_rules.js';
  *
  * @param opts.headers the app's header rules. @default none
  */
-export const generateAlbApiProxyCode = (opts: Pick<ProxyRules, 'headers'> = {}): string => {
+export const generateAlbApiProxyCode = (opts: Pick<ProxyRules, 'headers'> = {}): string =>
+  albApiProxyCode(opts, 'API_GW_BASE');
+
+/**
+ * {@link generateAlbApiProxyCode} reading the API Gateway base from `baseEnv`.
+ *
+ * @internal Framework-only: the app router reads it from a `BLOCKS_`-prefixed variable.
+ */
+export const albApiProxyCode = (opts: Pick<ProxyRules, 'headers'>, baseEnv: string): string => {
   return `const https = require('node:https');
 ${proxyRulesJs({ headers: opts.headers })}
-const BASE = (process.env.API_GW_BASE || '').replace(/\\/+$/, ''); // https://<id>.execute-api.<region>.amazonaws.com/prod
+const BASE = (process.env.${baseEnv} || '').replace(/\\/+$/, ''); // https://<id>.execute-api.<region>.amazonaws.com/prod
 const target = new URL(BASE);
 
 // Request headers never forwarded upstream: hop-by-hop, the ones this

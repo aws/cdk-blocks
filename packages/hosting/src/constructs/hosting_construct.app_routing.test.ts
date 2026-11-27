@@ -29,6 +29,7 @@ import { HostingConstruct, type HostingConstructProps } from './hosting_construc
 import { SSR_CACHE_GUARD_HANDLER_FILE, SSR_CACHE_GUARD_NODE_OPTION } from './ssr_cache_guard.js';
 
 const API_URL = 'https://abc123.execute-api.us-west-2.amazonaws.com/prod/cdk-blocks/api';
+const API_GW_BASE = 'https://abc123.execute-api.us-west-2.amazonaws.com/prod';
 
 type Template_ = ReturnType<typeof Template.fromStack>;
 type FnResource = {
@@ -183,10 +184,18 @@ describe("HostingConstruct — a door with routing: 'app'", () => {
 		const router = functions(t)[added[0]];
 		assert.equal(router.Properties.Handler, 'index.handler');
 		assert.match(router.Properties.Code.ZipFile ?? '', /the app router/);
+		// No server and no image function: the router answers the image endpoints with the source image.
+		assert.match(router.Properties.Code.ZipFile ?? '', /const IMAGE_FALLBACK = true;/);
 		const env = router.Properties.Environment?.Variables ?? {};
-		assert.equal(env.ASSET_KEY_PREFIX, 'builds/approute-spa');
-		assert.ok(env.ASSET_BUCKET);
-		assert.ok(env.API_GW_BASE, 'the backend base, for the same-origin API');
+		assert.equal(env.BLOCKS_ASSET_KEY_PREFIX, 'builds/approute-spa');
+		assert.ok(env.BLOCKS_ASSET_BUCKET);
+		// The backend base, for the same-origin API: the URL without its `/cdk-blocks/api` suffix.
+		assert.equal(env.BLOCKS_API_GW_BASE, API_GW_BASE);
+		assert.deepEqual(
+			Object.keys(env).filter((name) => !name.startsWith('BLOCKS_')),
+			[],
+			'every variable the router reads is BLOCKS_-prefixed',
+		);
 		// It forwards the backend subtree and its legacy alias, as every door does.
 		const apiPaths = /const ROUTER_API_PATHS = (\[[^\n]*\]);/.exec(router.Properties.Code.ZipFile ?? '')?.[1];
 		assert.ok(apiPaths, 'the router lists its API paths');
@@ -216,9 +225,12 @@ describe("HostingConstruct — a door with routing: 'app'", () => {
 		) ?? ['', undefined];
 		assert.ok(serverFn, 'the server function runs the router');
 		const env = serverFn.Properties.Environment?.Variables ?? {};
-		assert.equal(env.ASSET_KEY_PREFIX, 'builds/approute-ssr');
-		assert.ok(env.ASSET_BUCKET);
-		assert.ok(env.API_GW_BASE);
+		assert.equal(env.BLOCKS_ASSET_KEY_PREFIX, 'builds/approute-ssr');
+		assert.ok(env.BLOCKS_ASSET_BUCKET);
+		assert.equal(env.BLOCKS_API_GW_BASE, API_GW_BASE);
+		for (const name of ['ASSET_BUCKET', 'ASSET_KEY_PREFIX', 'API_GW_BASE']) {
+			assert.equal(env[name], undefined, `no unprefixed ${name} on the app's server function`);
+		}
 		for (const upload of uploads(t)) assert.ok(serverFn.DependsOn?.includes(upload), `depends on ${upload}`);
 
 		// The router sits next to the handler and delegates server routes to it,
@@ -228,6 +240,9 @@ describe("HostingConstruct — a door with routing: 'app'", () => {
 		assert.ok(router.includes(`"./${SSR_CACHE_GUARD_HANDLER_FILE}"`), 'the router calls the guarded handler');
 		assert.match(fs.readFileSync(path.join(bundle, SSR_CACHE_GUARD_HANDLER_FILE), 'utf-8'), /\.\/index\.mjs/);
 		assert.match(router, /const ROUTER_SERVER = "handler"/);
+		// No image function, but a server: the framework's image endpoint is the
+		// server's to answer, so the router has no source-image fallback.
+		assert.match(router, /const IMAGE_FALLBACK = false;/);
 
 		// The server's role reads the assets bucket.
 		const role = (

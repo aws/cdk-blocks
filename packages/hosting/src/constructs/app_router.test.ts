@@ -117,9 +117,9 @@ const load = (opts: AppRouterOptions, lo: LoadOptions = {}): { handler: Handler;
 		throw new Error(`unexpected require: ${id}`);
 	};
 	const env = {
-		ASSET_BUCKET: 'bucket',
-		ASSET_KEY_PREFIX: PREFIX,
-		API_GW_BASE: 'https://abc.execute-api.us-west-2.amazonaws.com/prod',
+		BLOCKS_ASSET_BUCKET: 'bucket',
+		BLOCKS_ASSET_KEY_PREFIX: PREFIX,
+		BLOCKS_API_GW_BASE: 'https://abc.execute-api.us-west-2.amazonaws.com/prod',
 		BLOCKS_IMAGE_FUNCTION: 'image-fn',
 	};
 	const fakeProcess = { env, execPath: process.execPath };
@@ -386,6 +386,39 @@ describe('app router — dispatch', () => {
 		assert.deepEqual(res.multiValueHeaders?.['x-app-rule'], ['yes']);
 		assert.deepEqual(res.multiValueHeaders?.['strict-transport-security'], ['max-age=31536000']);
 		assert.equal(calls.s3.length, 0);
+	});
+
+	it('gives the server the client address from the event, never a client-written x-forwarded-for hop', async () => {
+		const { handler } = load(ssr(), { dir });
+		const sourceIpOf = async (event: unknown) =>
+			JSON.parse(bodyOf(await handler(event))).requestContext.http.sourceIp as string;
+		// ALB: the event has no address; the ALB appends the peer it saw as the last hop.
+		assert.equal(
+			await sourceIpOf(albEvent('/page/1', { headers: { 'x-forwarded-for': '6.6.6.6, 203.0.113.7' } })),
+			'203.0.113.7',
+		);
+		assert.equal(
+			await sourceIpOf(albEvent('/page/1', { headers: { 'x-forwarded-for': '6.6.6.6, 203.0.113.7' } }, false)),
+			'203.0.113.7',
+		);
+		// REST API: requestContext.identity.sourceIp.
+		const rest = v1Event('/page/1', { headers: { 'X-Forwarded-For': '6.6.6.6' } });
+		assert.equal(
+			await sourceIpOf({
+				...rest,
+				requestContext: { ...rest.requestContext, identity: { sourceIp: '198.51.100.4' } },
+			}),
+			'198.51.100.4',
+		);
+		// HTTP API / Function URL: requestContext.http.sourceIp.
+		const v2 = v2Event('/page/1', { headers: { 'x-forwarded-for': '6.6.6.6' } });
+		assert.equal(
+			await sourceIpOf({
+				...v2,
+				requestContext: { ...v2.requestContext, http: { ...v2.requestContext.http, sourceIp: '192.0.2.9' } },
+			}),
+			'192.0.2.9',
+		);
 	});
 
 	it('serves static routes of an SSR app from S3, not the server', async () => {

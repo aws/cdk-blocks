@@ -38,12 +38,13 @@ function is constructed).
 - **No server** (SPA, static site). `appEntryFunction` creates one function,
   `AppRouter`, with the same router as inline code (`index.handler`).
 
-Either way `appEntryFunction` then gives the entry:
+Either way `appEntryFunction` then gives the entry, under `BLOCKS_`-prefixed
+names so none meets one of the app's own variables on its server function:
 
-- `ASSET_BUCKET` and `ASSET_KEY_PREFIX` (`assetProxyEnvironment`, the build
-  prefix `builds/<buildId>`), and read on the assets bucket;
-- `API_GW_BASE`, the backend base without the `/cdk-blocks/api` suffix, when
-  the app has an API;
+- `BLOCKS_ASSET_BUCKET` and `BLOCKS_ASSET_KEY_PREFIX` (`appRouterEnvironment`,
+  the build prefix `builds/<buildId>`), and read on the assets bucket;
+- `BLOCKS_API_GW_BASE`, the backend base without the `/cdk-blocks/api` suffix
+  (`backendBaseUrl`), when the app has an API;
 - `BLOCKS_IMAGE_FUNCTION` and `lambda:InvokeFunction` on the image function,
   when there is one.
 
@@ -51,7 +52,9 @@ The router's settings (`appRouterOptions`) come from the same inputs as the
 `DoorInput`: the plan (route entries, redirects, header rules, basePath,
 assetPrefix), the error pages (the app's, else the framework build's, else the
 default 404 page of a multi-page static site), the API paths
-(`/cdk-blocks/*`, its legacy `/aws-blocks/*` alias, plus the raw routes) and the image endpoints. They are built
+(`/cdk-blocks/*`, its legacy `/aws-blocks/*` alias, plus the raw routes) and the image endpoints. The
+source-image fallback for the image endpoints is on only when there is no image function and no server
+(or the app sets `skipImageOptimization`): otherwise a server answers its own image endpoint. They are built
 before the compute because of the bundle constraint above; the door's own
 plan is built later, from the same inputs.
 
@@ -79,8 +82,8 @@ doors already ship, not a rewrite:
   `proxy_rules.ts` the edge router's own matcher (`matchPattern`,
   `blocksRedirect`, `blocksHeaders`, `stripBasePath`).
 - `alb_api_proxy.ts` (`generateAlbApiProxyCode`) runs unchanged inside its own
-  function scope, built on the first API request (it reads `API_GW_BASE` when
-  it loads). The router hands it an ALB multi-value event, so the forwarder's
+  function scope, built on the first API request (it reads `BLOCKS_API_GW_BASE`
+  when it loads). The router hands it an ALB multi-value event, so the forwarder's
   request hygiene (hop-by-hop headers, the origin-verify secret, client-sent
   forwarding headers, the query as delivered) applies as on the ALB door.
 
@@ -90,7 +93,11 @@ Per request:
    and Function URL: `version: '2.0'`), and REST payload 1.0 become one shape:
    method, raw path, raw query (an ALB delivers it percent-encoded, a REST API
    decoded, so the REST one is re-encoded), lower-cased headers with every
-   value, and the body bytes. Any other event (a scheduled warmup) goes to the
+   value, the client address, and the body bytes. The client address is the
+   event's (`requestContext.identity.sourceIp` on REST,
+   `requestContext.http.sourceIp` on payload 2.0); an ALB event has none, so
+   it is the last `x-forwarded-for` hop, the one the ALB appended (earlier
+   hops are the client's to write). Any other event (a scheduled warmup) goes to the
    native server handler unchanged.
 2. **Redirects**, first match.
 3. **API paths** → the forwarder.
@@ -99,8 +106,8 @@ Per request:
 5. **The route table**, first match (`/about/` also matches `/about`);
    unmatched → `server` when there is one, else `static`.
    - `image` → the image function, invoked with a payload 2.0 event (what its
-     Function URL would send), basePath stripped. Without an image function,
-     the image endpoints get the asset proxies' fallback.
+     Function URL would send), basePath stripped. Without an image function
+     and without a server, the image endpoints get the asset proxies' fallback.
    - `server` → the framework (below).
    - `static` → `blocksServe`, basePath stripped.
 6. **Server and image responses** get the error pages (a 404 or 500 with a

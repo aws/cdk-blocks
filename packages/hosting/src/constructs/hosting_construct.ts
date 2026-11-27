@@ -88,14 +88,16 @@ import { ALB_LAMBDA_RESPONSE_LIMIT, LAMBDA_SYNC_RESPONSE_LIMIT, warnOversizedPro
 import { cloudFrontDoor } from './cloudfront_door.js';
 import { buildFrontDoor, doorRoutingOf } from './custom_door.js';
 import { BLOCKS_API_SUBTREE, buildDoorInput, LEGACY_BLOCKS_API_SUBTREE } from './door_input.js';
+import { backendBaseUrl } from './apigw_routes.js';
 import {
+  APP_ROUTER_API_BASE_ENV,
   APP_ROUTER_FILE,
   APP_ROUTER_HANDLER,
   APP_ROUTER_IMAGE_FUNCTION_ENV,
   type AppRouterOptions,
+  appRouterEnvironment,
   generateAppRouterCode,
 } from './app_router.js';
-import { assetProxyEnvironment } from './asset_proxy_core.js';
 import { DEFAULT_NOT_FOUND_PAGE_HTML, needsDefaultNotFoundPage } from './default_not_found.js';
 import type { DoorInput, FrontDoorResult } from './front_door.js';
 import {
@@ -2900,7 +2902,12 @@ export class HostingConstruct extends Construct {
           }
         : {}),
       image: hasImage,
-      ...(hasImage ? {} : { imageFallback: { hosts: imageRemoteHosts(manifest), pathPrefixes: imagePathEndpoints(manifest) } }),
+      // No image function: the router answers the image endpoints with the
+      // source image only when no server would answer them (or the app skips
+      // image optimization), as the API Gateway door does.
+      ...(hasImage || (server !== undefined && !props.skipImageOptimization)
+        ? {}
+        : { imageFallback: { hosts: imageRemoteHosts(manifest), pathPrefixes: imagePathEndpoints(manifest) } }),
     };
   }
 
@@ -2908,8 +2915,8 @@ export class HostingConstruct extends Construct {
    * The app's entry function for a door that routes at the app: the server
    * function (its bundle already carries the router, see `withAppRouter`), or
    * for an app without one a router function created here. Either way it
-   * reads the build's assets (`assetProxyEnvironment` + read on the bucket),
-   * forwards the API (`API_GW_BASE`) and invokes the image function.
+   * reads the build's assets (`appRouterEnvironment` + read on the bucket),
+   * forwards the API (`BLOCKS_API_GW_BASE`) and invokes the image function.
    */
   private appEntryFunction(
     router: AppRouterOptions,
@@ -2928,13 +2935,13 @@ export class HostingConstruct extends Construct {
             timeout: Duration.seconds(30),
             memorySize: 512,
           });
-    for (const [name, value] of Object.entries(assetProxyEnvironment({ bucket: this.bucket, prefix: `builds/${buildId}` }))) {
+    for (const [name, value] of Object.entries(appRouterEnvironment({ bucket: this.bucket, prefix: `builds/${buildId}` }))) {
       fn.addEnvironment(name, value);
     }
     this.bucket.grantRead(fn);
     if (backendApiUrl && router.apiPaths) {
-      // The backend base WITHOUT the `/aws-blocks/api` suffix, as the ALB door's forwarder reads it.
-      fn.addEnvironment('API_GW_BASE', Fn.select(0, Fn.split('/aws-blocks/api', backendApiUrl)));
+      // The backend base WITHOUT the `/cdk-blocks/api` suffix, as the API forwarder reads it.
+      fn.addEnvironment(APP_ROUTER_API_BASE_ENV, backendBaseUrl(backendApiUrl));
     }
     const image = this.computeFunctions.get('image-optimization');
     if (router.image && image instanceof LambdaFunction) {
