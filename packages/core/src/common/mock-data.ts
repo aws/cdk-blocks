@@ -16,7 +16,7 @@ import {
 	unlinkSync,
 	writeFileSync,
 } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import type { Scope } from './index.js';
 
 /** Building Block mock-data path relative to the project root. */
@@ -77,28 +77,32 @@ function entries(dir: string): string[] {
 }
 
 /**
- * Copy `source` to `target` through a staging name, so an interrupted copy
- * leaves no partial file. A partial file at the final path would be treated as
- * the migrated copy by the next run, which skips any entry that already exists.
+ * Keep staging outside the block data so an interrupted copy cannot show up
+ * as an object in a FileBucket listing. Publish only the completed copy.
  */
 function copyFileAtomically(source: string, target: string): void {
-	const staged = `${target}.${randomUUID()}.tmp`;
-	try {
-		copyFileSync(source, staged);
-		// `linkSync` REFUSES an existing target (EEXIST) where `renameSync` would
-		// replace it, so "never overwrite" no longer rests on the caller's earlier
-		// `existsSync`. That window is reachable: a second dev process, `npm run
-		// secret`, or a parallel test worker can write the real value in it, and
-		// the legacy copy would clobber that write.
+	const stagingDir = join(process.cwd(), MOCK_DATA_DIR, '..', '.carry-staging');
+	mkdirSync(stagingDir, { recursive: true });
+	for (const dir of [stagingDir, dirname(target)]) {
+		const staged = join(dir, `${basename(target)}.${randomUUID()}.tmp`);
 		try {
-			linkSync(staged, target);
-		} catch (error) {
-			if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+			copyFileSync(source, staged);
+			try {
+				// A link, unlike rename, never replaces a concurrent write to target.
+				linkSync(staged, target);
+			} catch (error) {
+				const code = (error as NodeJS.ErrnoException).code;
+				// If the data lives on a separate mount, keep staging beside the
+				// target rather than losing atomic, no-overwrite publication.
+				if (code === 'EXDEV' && dir === stagingDir) continue;
+				if (code !== 'EEXIST') throw error;
+			}
+			return;
+		} finally {
+			try {
+				unlinkSync(staged);
+			} catch {}
 		}
-	} finally {
-		try {
-			unlinkSync(staged);
-		} catch {}
 	}
 }
 
