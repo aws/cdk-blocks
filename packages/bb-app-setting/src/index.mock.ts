@@ -30,11 +30,20 @@ export { SECRETS_BULK_CONSTRUCT_ID } from './secrets-bulk.js';
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
-function readSettings(scope: Scope): Record<string, unknown> {
+// Preserve numeric literals that would change when the settings map is written again.
+function preserveRawNumbers(_key: string, value: unknown, context?: { source?: string }): unknown {
+	const source = context?.source;
+	if (typeof value === 'number' && source !== undefined && source !== String(value) && 'rawJSON' in JSON && typeof JSON.rawJSON === 'function') {
+		return JSON.rawJSON(source);
+	}
+	return value;
+}
+
+function readSettings(scope: Scope, reviver?: typeof preserveRawNumbers): Record<string, unknown> {
 	const fp = join(getMockDataDir(scope, { root: true }), 'settings.json');
 	if (!existsSync(fp)) return {};
 	try {
-		return JSON.parse(readFileSync(fp, 'utf8'));
+		return JSON.parse(readFileSync(fp, 'utf8'), reviver);
 	} catch {
 		return {};
 	}
@@ -133,7 +142,7 @@ export class AppSetting<T = string> extends Scope {
 		registerSdkIdentifiers(this.fullId, { parameterName: this.parameterName });
 
 		// Persist initial value to settings.json if not already present
-		const settings = readSettings(this);
+		const settings = readSettings(this, preserveRawNumbers);
 		if (!(this.fullId in settings)) {
 			settings[this.fullId] = this.initialValue;
 			writeSettings(this, settings);
@@ -186,8 +195,8 @@ export class AppSetting<T = string> extends Scope {
 		const serialized = serializeValue(value);
 		assertValueWithinSizeLimit(serialized, this.isSecret);
 
-		const settings = readSettings(this);
-		settings[this.fullId] = JSON.parse(serialized);
+		const settings = readSettings(this, preserveRawNumbers);
+		settings[this.fullId] = JSON.parse(serialized, preserveRawNumbers);
 		writeSettings(this, settings);
 	}
 }

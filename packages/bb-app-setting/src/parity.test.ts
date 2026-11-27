@@ -169,6 +169,32 @@ describe('AppSetting.put() validates the same input the same way on mock and AWS
 		assert.deepStrictEqual(await mockSetting.get(), { enabled: true });
 	});
 
+	test('preserves raw JSON numbers when writing this or another setting', async (t) => {
+		assert.ok('rawJSON' in JSON && typeof JSON.rawJSON === 'function');
+		const { rawJSON } = JSON;
+		const input = { numbers: [rawJSON('-0'), rawJSON('1e400')] };
+		const scope = new Scope('app');
+		const mockSetting = new MockAppSetting<unknown>(scope, uniqueId(), { value: {} });
+		const awsSetting = new AwsAppSetting<unknown>(scope, uniqueId(), { value: {} });
+		const values: string[] = [];
+		t.mock.method(SSMClient.prototype, 'send', async (cmd: { input: { Value: string } }) => {
+			values.push(cmd.input.Value);
+			return {};
+		});
+
+		await awsSetting.put(input);
+		await mockSetting.put(input);
+		assert.deepStrictEqual(values, ['{"numbers":[-0,1e400]}']);
+		const expected = { numbers: [-0, Infinity] };
+		assert.deepStrictEqual(await mockSetting.get(), expected);
+
+		const other = new MockAppSetting(scope, uniqueId(), { value: 'initial' });
+		assert.deepStrictEqual(await mockSetting.get(), expected);
+		await other.put('updated');
+		assert.deepStrictEqual(await mockSetting.get(), expected);
+		assert.strictEqual(await other.get(), 'updated');
+	});
+
 	// The fixed message must not quote the value: a circular TypeError names the
 	// closing key, which on a secret setting could be sensitive. The engine
 	// error is kept only as a non-enumerable `cause` for server-side logs.
