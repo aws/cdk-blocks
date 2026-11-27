@@ -1,3 +1,8 @@
+## Unreleased
+
+- The package page links to the `aws/cdk-blocks` repository and its issue
+  tracker.
+
 ## 1.0.0
 
 ### Breaking

@@ -1,3 +1,12 @@
+## Unreleased
+
+- `OidcClient.refresh()` and `onAuthFailure()` no longer sign out a cookie
+  session. With no refresh token stored, which is always the case for a
+  cookie session, they send no request and leave the auth state as it is.
+  They used to emit `OidcSignedOut` while the session cookie still worked.
+- The package page links to the `aws/cdk-blocks` repository and its issue
+  tracker.
+
 ## 1.0.0
 
 ### Breaking
