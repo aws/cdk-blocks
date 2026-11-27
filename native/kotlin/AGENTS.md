@@ -177,20 +177,17 @@ If you find yourself needing to break one of these rules, something is wrong wit
 3. If you changed `BlocksClient` or transferable hydration, verify the example app runs on an emulator
 4. If you changed an Android-only source (storage, cookies, context wiring), run `./run-e2e.sh --target android` against a booted emulator — the host JVM has no equivalent of those paths
 5. If you changed the Android credential store (`KeyValueStore.android.kt`,
-   `EncryptedPreferencesLegacySource.android.kt`), the step above covers its normal reads and
-   writes: the e2e sign-in tests reach the real Keystore through the cookie jar. What they do not
-   reach is the one-time read of an `EncryptedSharedPreferences` file left by an earlier version,
-   since a fresh install has none, and the API 33+ `KeyStoreException` fault classification.
-   Exercise those on an emulator before release, covering the migration, a downgraded file, `clear`
-   against a file not yet migrated, a lost key, a corrupted value, and a legacy file holding one
-   entry that will not decrypt. Two cases a modern image cannot reach at all: on an API 23–32 image,
-   an `EncryptedSharedPreferences.create` fault below 33 cannot be told apart from a lost
-   `MasterKey`, so the store drops the earlier session rather than retry; and on API 24+, `clear`
-   against a legacy file written by an earlier process and never opened in this one, which is where
-   `deleteSharedPreferences` is reported to return false on some builds. Do not drop
-   `androidx.security:security-crypto` until that run has covered this list: once
-   `EncryptedPreferencesLegacySource` is deleted, a fault in the legacy read cannot be caught at
-   all.
+   `LegacyPrefsFile.android.kt`), the step above covers its normal reads and writes: the e2e
+   sign-in tests reach the real Keystore through the cookie jar. What they do not reach is the
+   deletion of an `EncryptedSharedPreferences` file left by 0.2.0 or earlier, since a fresh install
+   has none, and the API 33+ `KeyStoreException` fault classification. Exercise those on an emulator
+   before release: install a 0.2.0 build and sign in, upgrade, and check that
+   `shared_prefs/cookies.xml` is gone while the `_androidx_security_master_key_` alias is kept; check
+   that a plain `cookies.xml` the application wrote itself is left alone; and, on API 24+, check the
+   deletion of a file written by an earlier process and never opened in this one, which is where
+   `deleteSharedPreferences` is reported to return false on some builds. The runtime no longer
+   depends on `androidx.security:security-crypto`, so it reads nothing from that file: never add the
+   library back to read it.
 
 ### After changing the plugin DSL
 

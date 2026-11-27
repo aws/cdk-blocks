@@ -5,6 +5,7 @@ package com.aws.blocks.kotlin
 
 import android.content.SharedPreferences
 import io.kotest.assertions.throwables.shouldThrow
+import io.kotest.matchers.collections.shouldBeEmpty
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.maps.shouldBeEmpty
 import io.kotest.matchers.nulls.shouldBeNull
@@ -23,9 +24,15 @@ class AndroidKeyValueStoreTest {
 
     private val prefs = FakeSharedPreferences()
     private val keys = FakeKeySource()
-    private val legacy = FakeLegacySource()
+    private val legacy = FakeLegacyFile()
+    private val warnings = mutableListOf<String>()
 
-    private fun store() = AndroidKeyValueStore(prefs = { prefs }, keys = keys, legacy = legacy)
+    private fun store() = AndroidKeyValueStore(
+        prefs = { prefs },
+        keys = keys,
+        legacy = legacy,
+        warn = { _, failure -> warnings += failure.message.orEmpty() },
+    )
 
     @Test
     fun `round trips a value on a fresh install and stores it encrypted with a nonce in front`() = runTest {
@@ -62,206 +69,92 @@ class AndroidKeyValueStoreTest {
     }
 
     @Test
-    fun `moves the entries of the earlier file over on first access and deletes that file`() = runTest {
-        legacy.entries = mutableMapOf("jar" to "old-session")
+    fun `a file left by an earlier version is deleted on first access and its entries are not imported`() = runTest {
+        legacy.present = true
 
-        store().get("jar") shouldBe "old-session"
+        store().get("jar").shouldBeNull()
 
-        legacy.exists() shouldBe false
-        prefs.values.getValue("jar") shouldNotContain "old-session"
-        // Nothing of the migration's own is left behind once the file is gone.
+        legacy.present shouldBe false
+        legacy.deletes shouldBe 1
+        prefs.values.shouldBeEmpty()
+        warnings.shouldBeEmpty()
+    }
+
+    @Test
+    fun `no file left by an earlier version means nothing is deleted`() = runTest {
+        store().put("jar", "hello")
+
+        legacy.deletes shouldBe 0
+        warnings.shouldBeEmpty()
+    }
+
+    @Test
+    fun `a file that cannot be deleted does not fail any access and is retried by the next instance`() = runTest {
+        legacy.present = true
+        legacy.deleteFailure = IllegalStateException("file busy")
+        val store = store()
+
+        store.get("jar").shouldBeNull()
+        store.put("jar", "hello")
+        store.get("jar") shouldBe "hello"
+        store.clear()
+        store.get("jar").shouldBeNull()
+
+        // Once per instance: the cleanup runs with the first access, not with every one.
+        legacy.attempts shouldBe 1
+        warnings shouldContainExactly listOf("file busy")
+        legacy.present shouldBe true
+
+        legacy.deleteFailure = null
+        store().get("jar").shouldBeNull()
+        legacy.present shouldBe false
+        legacy.attempts shouldBe 2
+    }
+
+    @Test
+    fun `a file whose presence cannot be checked does not fail any access`() = runTest {
+        legacy.existsFailure = IllegalStateException("cannot read")
+
+        store().put("jar", "hello")
+        store().get("jar") shouldBe "hello"
+
+        warnings.size shouldBe 2
+        legacy.deletes shouldBe 0
+    }
+
+    @Test
+    fun `a sign-out holds while a file left by an earlier version is present`() = runTest {
+        store().put("jar", "session")
+        legacy.present = true
+        legacy.deleteFailure = IllegalStateException("file busy")
+
+        store().clear()
+
+        store().get("jar").shouldBeNull()
+        prefs.values.shouldBeEmpty()
+    }
+
+    @Test
+    fun `the record left by the earlier migration is removed`() = runTest {
+        store().put("jar", "hello")
+        prefs.values["__migrated"] = "1700000000000:512"
+
+        store().get("jar") shouldBe "hello"
+
         prefs.values.keys shouldContainExactly setOf("jar")
     }
 
     @Test
-    fun `a file written by a downgraded build overwrites the entries the store holds under the same names`() = runTest {
-        store().put("jar", "pre-downgrade")
-        legacy.entries = mutableMapOf("jar" to "downgraded-session")
-
-        store().get("jar") shouldBe "downgraded-session"
-
-        legacy.exists() shouldBe false
-        legacy.deletes shouldBe 1
-    }
-
-    @Test
-    fun `a file that could not be deleted is reported once and never copied over the store again`() = runTest {
-        legacy.entries = mutableMapOf("jar" to "old")
-        legacy.deleteFailure = IllegalStateException("file busy")
-
-        shouldThrow<KeyValueStoreException> { store().get("jar") }
-
-        val copied = prefs.values.getValue("jar")
-        legacy.deletes shouldBe 0
-
-        // The entries are here, so the next access neither copies them again nor fails: the file
-        // is stale, and putting it back would overwrite whatever has been written since.
-        store().put("jar", "live")
-        store().get("jar") shouldBe "live"
-        prefs.values.getValue("jar") shouldNotBe copied
-
-        legacy.deleteFailure = null
-        store().get("jar") shouldBe "live"
-        legacy.deletes shouldBe 1
-        legacy.exists() shouldBe false
-    }
-
-    @Test
-    fun `a file written by a downgraded build after the migration is taken over in its turn`() = runTest {
-        legacy.entries = mutableMapOf("jar" to "old-session")
-        store().get("jar") shouldBe "old-session"
-        legacy.exists() shouldBe false
-
-        // The downgraded build writes the earlier file again; its stamp is not the one recorded.
-        legacy.writes = 1
-        legacy.entries = mutableMapOf("jar" to "downgraded-session")
-
-        store().get("jar") shouldBe "downgraded-session"
-        legacy.deletes shouldBe 2
-    }
-
-    @Test
-    fun `a file that could not be deleted and is then rewritten by a downgraded build is taken over`() = runTest {
-        legacy.entries = mutableMapOf("jar" to "old")
-        legacy.deleteFailure = IllegalStateException("file busy")
-        shouldThrow<KeyValueStoreException> { store().get("jar") }
-
-        // The file is still there and a downgraded build writes a newer session into it.
-        legacy.writes = 1
-        legacy.entries = mutableMapOf("jar" to "downgraded-session")
-
-        // Not the file that was recorded, so it is taken over in turn and its delete reported.
-        shouldThrow<KeyValueStoreException> { store().get("jar") }
-
-        store().get("jar") shouldBe "downgraded-session"
-    }
-
-    @Test
-    fun `a key lost while an undeletable file is present does not read that file back in`() = runTest {
-        legacy.entries = mutableMapOf("jar" to "old")
-        legacy.deleteFailure = IllegalStateException("file busy")
-        shouldThrow<KeyValueStoreException> { store().get("jar") }
-
-        // The key goes, so the entries it wrote are dropped on the next read.
+    fun `the record left by the earlier migration is not kept when a lost key drops the store`() = runTest {
+        store().put("jar", "hello")
+        prefs.values["__migrated"] = "1700000000000:512"
+        prefs.removalsFail = true
         keys.key = null
-        store().get("jar").shouldBeNull()
-
-        // The dropped store must not take the stale file as a session to restore.
-        store().get("jar").shouldBeNull()
-        store().put("jar", "fresh")
-        store().get("jar") shouldBe "fresh"
-    }
-
-    @Test
-    fun `a sign-out holds when the earlier file cannot be deleted`() = runTest {
-        legacy.entries = mutableMapOf("jar" to "old-session")
-        legacy.deleteFailure = IllegalStateException("file busy")
-
-        shouldThrow<KeyValueStoreException> { store().clear() }
-
-        // The file is still there, but it has been recorded, so it is not read back in.
-        legacy.exists() shouldBe true
-        store().get("jar") shouldBe null
-    }
-
-    @Test
-    fun `a file that cannot be read and cannot be deleted stops failing every access`() = runTest {
-        legacy.entries = mutableMapOf("jar" to "old")
-        legacy.failure = LegacyKeyLostException()
-        legacy.deleteFailure = IllegalStateException("file busy")
-
-        shouldThrow<KeyValueStoreException> { store().get("jar") }
-
-        store().put("jar", "fresh")
-        store().get("jar") shouldBe "fresh"
-    }
-
-    @Test
-    fun `the same instance retries the migration on its next access after a failure`() = runTest {
-        legacy.entries = mutableMapOf("jar" to "old")
-        legacy.deleteFailure = IllegalStateException("file busy")
-        val store = store()
-
-        shouldThrow<KeyValueStoreException> { store.get("jar") }
-
-        legacy.deleteFailure = null
-        // The lazy `store` did not cache the failed initializer: the same instance migrates now.
-        store.get("jar") shouldBe "old"
-        legacy.deletes shouldBe 1
-        legacy.exists() shouldBe false
-    }
-
-    @Test
-    fun `clear reports a file that could not be deleted`() = runTest {
-        legacy.entries = mutableMapOf("jar" to "old")
-        legacy.deleteFailure = IllegalStateException("file busy")
-
-        shouldThrow<KeyValueStoreException> { store().clear() }
-
-        prefs.values.keys shouldContainExactly setOf("__migrated")
-        legacy.deletes shouldBe 0
-    }
-
-    @Test
-    fun `clear after the migration empties the store and removes the file but keeps the key`() = runTest {
-        legacy.entries = mutableMapOf("jar" to "old-session")
-        val store = store()
-        store.get("jar") shouldBe "old-session"
-
-        store.clear()
-
-        prefs.values.shouldBeEmpty()
-        legacy.exists() shouldBe false
-        keys.deleted shouldBe false
-        store.put("jar", "after")
-        store().get("jar") shouldBe "after"
-    }
-
-    @Test
-    fun `clear on a store that was never read deletes the earlier file even when that file cannot be read`() = runTest {
-        legacy.entries = mutableMapOf("jar" to "old-session")
-        legacy.failure = IllegalStateException("keystore busy")
-
-        store().clear()
-
-        legacy.deletes shouldBe 1
-        legacy.exists() shouldBe false
-        prefs.values.shouldBeEmpty()
-    }
-
-    @Test
-    fun `a file that cannot be read yet is a read failure and is left in place`() = runTest {
-        legacy.entries = mutableMapOf("jar" to "old-session")
-        legacy.failure = IllegalStateException("keystore busy")
-
-        shouldThrow<KeyValueStoreException> { store().get("jar") }
-
-        legacy.exists() shouldBe true
-        prefs.values.shouldBeEmpty()
-    }
-
-    @Test
-    fun `a file whose master key is gone is removed without a copy`() = runTest {
-        legacy.entries = mutableMapOf("jar" to "old-session")
-        legacy.failure = LegacyKeyLostException()
 
         store().get("jar").shouldBeNull()
 
-        legacy.exists() shouldBe false
-        legacy.deletes shouldBe 1
         prefs.values.shouldBeEmpty()
-    }
-
-    @Test
-    fun `a migration whose write did not reach disk is a read failure and leaves the file`() = runTest {
-        legacy.entries = mutableMapOf("jar" to "old-session")
-        prefs.commitFails = true
-
-        shouldThrow<KeyValueStoreException> { store().get("jar") }
-
-        legacy.exists() shouldBe true
-        legacy.deletes shouldBe 0
-        prefs.values.shouldBeEmpty()
+        keys.deleted shouldBe true
     }
 
     @Test
@@ -444,25 +337,22 @@ private class FakeKeySource : KeySource {
     }
 }
 
-private class FakeLegacySource : LegacySource {
-    var entries: MutableMap<String, String>? = null
-    var failure: Exception? = null
+private class FakeLegacyFile : LegacyFile {
+    var present = false
+    var existsFailure: Exception? = null
     var deleteFailure: Exception? = null
+    var attempts = 0
     var deletes = 0
-    var writes = 0
 
-    override fun exists(): Boolean = entries != null
-
-    override fun readAll(): Map<String, String> {
-        failure?.let { throw it }
-        return entries.orEmpty()
+    override fun exists(): Boolean {
+        existsFailure?.let { throw it }
+        return present
     }
 
-    override fun stamp(): String = "$writes:${entries.orEmpty()}"
-
     override fun delete() {
+        attempts += 1
         deleteFailure?.let { throw it }
-        entries = null
+        present = false
         deletes += 1
     }
 }
@@ -472,6 +362,9 @@ private class FakeSharedPreferences : SharedPreferences {
 
     /** When set, every commit reports that it did not reach disk and changes nothing. */
     var commitFails = false
+
+    /** When set, a commit that only removes entries reports that it did not reach disk. */
+    var removalsFail = false
 
     override fun getAll(): MutableMap<String, *> = values.toMutableMap()
 
@@ -524,6 +417,7 @@ private class FakeSharedPreferences : SharedPreferences {
 
         override fun commit(): Boolean {
             if (commitFails) return false
+            if (removalsFail && !clear && pending.values.all { it == null }) return false
             if (clear) values.clear()
             pending.forEach { (key, value) -> if (value == null) values.remove(key) else values[key] = value }
             return true

@@ -53,7 +53,6 @@ kotlin {
 
         androidMain.dependencies {
             implementation(libs.ktor.client.okhttp)
-            implementation(libs.androidx.security.crypto)
             implementation(libs.androidx.startup.runtime)
             implementation(libs.androidx.browser)
             implementation(libs.androidx.activity.ktx)
