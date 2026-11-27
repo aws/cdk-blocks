@@ -126,6 +126,7 @@
     "check:rename-traps": "node --experimental-strip-types scripts/dot-folder-guard.ts verify-rename-traps",
     "check:packed-assets": "npx tsx scripts/check-packed-assets.ts",
     "check:headers": "node scripts/check-license-headers.mjs",
+    "check:test-scripts": "node scripts/check-test-scripts.mjs",
     "lint": "biome lint --skip=correctness/noUndeclaredDependencies --reporter=github --changed --since=origin/main --no-errors-on-unmatched packages/",
     "lint:deps": "npx tsx scripts/lint-deps.ts",
     "update:api": "bash scripts/update-api-reports.sh",

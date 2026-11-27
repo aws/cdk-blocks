@@ -246,6 +246,14 @@ jobs:
       - name: Lint deps (blocking)
         run: npm run lint:deps
 
+      # A hand-kept file list in `scripts.test` can miss a test file, and `sh`
+      # expands an unquoted `dist/**` glob one directory deep only.
+      - name: Test the test-script guard
+        run: node --test scripts/check-test-scripts.test.mjs
+
+      - name: Check every test file is run
+        run: npm run check:test-scripts
+
       # Every tracked source file under packages/, native/ and scripts/ carries
       # the Apache-2.0 license header (exclusions listed in the script). The
       # checker's header detection, insertion and exclusions are tested first.
