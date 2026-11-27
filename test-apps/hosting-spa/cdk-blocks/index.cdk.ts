@@ -2,6 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import * as cdk from 'aws-cdk-lib';
+import { HttpApi } from 'aws-cdk-lib/aws-apigatewayv2';
+import { HttpLambdaIntegration } from 'aws-cdk-lib/aws-apigatewayv2-integrations';
+import { defineFrontDoor } from '@aws-cdk-blocks/hosting/constructs';
 import { Hosting, BlocksStack, BlocksPresets, registerConfig } from 'aws-cdk-blocks/cdk';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
@@ -29,16 +32,43 @@ export const blocksStack = await BlocksStack.create(app, stackName, {
   defaults: BlocksPresets.sandbox,
 });
 
+// HOSTING_FRONT_DOOR=app: a bring-your-own door that routes at the app
+// (`routing: 'app'`). It attaches only the app's entry function, as the
+// default route of an HTTP API, and the entry runs the whole route table:
+// the static files, the SPA fallback, the same-origin API and the error pages.
+const appRoutingDoor = defineFrontDoor({
+  service: 'e2e-http-api',
+  routing: 'app',
+  build(scope, { origins }) {
+    const api = new HttpApi(scope, 'AppRoutingApi', {
+      defaultIntegration: new HttpLambdaIntegration('Entry', origins.entry.fn),
+    });
+    return { url: api.apiEndpoint };
+  },
+});
+
+const frontDoor = (() => {
+  switch (process.env.HOSTING_FRONT_DOOR) {
+    case 'alb':
+      return { kind: 'alb' as const };
+    case 'app':
+      return { kind: 'custom' as const, door: appRoutingDoor };
+    default:
+      return undefined;
+  }
+})();
+
 // Hosting — SPA (static site). HOSTING_FRONT_DOOR=alb runs the same suite
-// behind the regional ALB door (plain HTTP, its own VPC with no NAT gateway);
-// unset is the default CloudFront door.
+// behind the regional ALB door (plain HTTP, its own VPC with no NAT gateway),
+// HOSTING_FRONT_DOOR=app behind the app-routing door above; unset is the
+// default CloudFront door.
 new Hosting(blocksStack, 'Hosting', {
   root: join(__dirname, '..'),
   buildCommand: 'npm run build',
   buildOutputDir: 'dist',
   framework: 'spa',
   api: blocksStack,
-  ...(process.env.HOSTING_FRONT_DOOR === 'alb' ? { frontDoor: { kind: 'alb' as const } } : {}),
+  ...(frontDoor ? { frontDoor } : {}),
 });
 
 // Sandbox e2e only — see "Sandbox e2e test support" in `index.ts`. The flag
