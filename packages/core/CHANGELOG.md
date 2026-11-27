@@ -2,6 +2,61 @@
 
 <!-- doc-snippet: skip-file — release notes show the API of past releases, including the removed AuthOIDC block -->
 
+## 1.0.2
+
+### Patch Changes
+
+- 62eb34e: `blocks:apigateway:access-logging-disabled` is now an info, not a warning. It reports that a deployment with a durable removal policy has API Gateway access logging off, which is the default of `BlocksPresets.production`, so every app that kept the preset got a warning and failed `cdk synth --strict`. `cdk synth` and `cdk deploy` still print it. To hide it, call `Annotations.of(stack).acknowledgeInfo('blocks:apigateway:access-logging-disabled')` on the stack or backend that `create()` returns; an `acknowledgeWarning` call for this id no longer hides it. The default and the synthesized template are unchanged.
+- 1e88d52: `ApiNamespace` now type-checks a handler that returns a class instance, such as `new ApiNamespace(scope, 'calc', () => new Calculator())`, which the runtime already dispatched.
+- 8fc2801: The npm discovery keyword is now `cdk-blocks`. Every published package carries it in place of `aws-blocks`, so find them with `npm search keywords:cdk-blocks`. If you publish your own Building Block, tag it `cdk-blocks` to be listed with them. `@aws-cdk-blocks/create-block` scaffolds the new keyword, and in every mode, not only outside the monorepo.
+
+  The Building Block catalog in the `aws-cdk-blocks` README lists keywords for every block. They come from the `keywords` of each package's `package.json`, without the `cdk-blocks` tag that every package carries. Before, the catalog read a `**Keywords:**` line in each README, which only `bb-async-job` and `bb-cron-job` had, so the other 19 rows were blank.
+
+  The `bb-async-job` and `bb-cron-job` READMEs no longer have that line. Its terms moved to the `keywords` of each package, so `npm search` finds them too: for example `worker`, `retry` and `batch` for `bb-async-job`, and `schedule`, `periodic` and `recurring` for `bb-cron-job`.
+
+  The README template of `@aws-cdk-blocks/create-block` no longer has a `**Keywords:**` line, and the next steps printed for a block scaffolded in this repository say to add keywords to its `package.json`.
+
+- d54eef0: The backend REST API's root path (`/` on the stage URL) now reaches the backend function, which answers `404 {"error":"Not Found"}` like any other unknown path. It used to answer `500 {"message": "Internal server error"}`: the root method had a mock integration without a request template.
+
+  The root path no longer matches a `/*` RawRoute. A `/*` wildcard used to match `/` with an empty capture, so with the root forwarded to the function (and under `npm run dev`), `GET /` would have run the catch-all handler. The root now answers `404 {"error":"Not Found"}` whichever routes are registered, and `/*` still matches every other path.
+
+- bc97b17: `cdk synth` now fails, naming both construct paths, when two resources in a backend get the same table, queue, schedule, bucket, secret, parameter, log group or Lambda function name, such as two blocks under scope paths `'a-b' > 'x'` and `'a' > 'b' > 'x'`, instead of synthesizing a stack that CloudFormation rejects at deploy.
+- 3b66b2a: `Hosting` warns at synth (`@aws-cdk-blocks/core:UnknownHostingProp`) for each top-level prop it doesn't read, such as a misspelled setting or a `HostingConstruct` prop like `cdn`, instead of dropping it silently. TypeScript already rejects such a key in an object literal; the warning covers config written in JavaScript, read from JSON or spread from another object. It is a warning, so an app that passes such a key still synthesizes.
+- 00d30e5: At the `normal` log level, a Next.js deploy behind the CloudFront door no longer prints OpenNext's `ERROR Wrapper aws-lambda-streaming and converter aws-apigw-v1 are not compatible` line. The Next.js adapter configures that pair on purpose and patches the bundle after the build, so the line is expected on every healthy build. It still prints with `--verbose`, next to the adapter's line that explains it, and every other OpenNext error still prints at `normal`.
+- 00d30e5: At the `normal` log level, which `npm run deploy`, `npm run sandbox` and the other generated tasks use by default, a deploy, sandbox or destroy now prints every synth warning (a CDK warning annotation, such as `@aws-cdk-blocks/hosting:PlainHttpFrontDoor` for a front door without a certificate) with its source locations, construct path and acknowledgement line, once each. That includes a warning that a `npm run sandbox` watch deploy raises after the initial deploy. Before, those warnings showed only with `--verbose` or when the deploy failed. The README's `BLOCKS_LOG_LEVEL` section now says that the generated tasks run at `normal` unless you choose another level.
+- 2bba814: fix(core): name the actual problem when a `RawRoute` path has a wildcard before its end
+
+  A path with a single `*` that isn't the last segment, such as `/a/*/b` or `/fi*les`, was rejected with an error saying it "contains multiple wildcards". It now says the wildcard must be the last segment, as in `/files/*`. Paths with two or more wildcards still report multiple wildcards. Which paths are accepted is unchanged.
+
+- 87dec66: The local dev server now matches the deployed API's status codes in two cases. A RawRoute or JSON-RPC request whose path holds a `%` not followed by two hex digits (such as `/users/%E0%A4%A` or `/users/100%`) gets a 400, as API Gateway answers it, instead of reaching the handler with the undecoded text as its parameter. The body is `{"error":"Bad Request"}`, following the dispatcher's error shape, where API Gateway sends an empty body. A request that matches no route, when no frontend dev server is running, gets the deployed dispatcher's 404 `{"error":"Not Found"}` with `Content-Type: application/json` instead of an empty body.
+- 67336fc: Docs: the hosting and core READMEs now describe three behaviours that were undocumented:
+
+  - The `us-east-1` stack that holds Lambda@Edge functions outside `us-east-1` keeps CDK's name, `edge-lambda-stack-<hash>`, unless `defaults.appIdentity` names it `<id>-edge` (or `HostingConstruct`'s `edgeStackId` is set). The READMEs say how to find it and how to delete it after the app stack.
+  - On the CloudFront door, a missing static file with no 404 page to map it to answers with S3's `NoSuchKey` XML (`404`, `application/xml`), while the ALB and API Gateway doors' asset proxy answers with the app's 404 page or a plain `Not Found`. The README no longer says the asset proxy answers "like the CloudFront door".
+  - A new "Header hygiene" section lists the internal headers Hosting removes and the request-id headers it keeps (`x-amzn-requestid`, `x-amz-apigw-id`, `apigw-requestid`, `lambda-web-request-id`), and shows how to remove the ones CloudFront allows with your own `frontDoor.features.responseHeadersPolicy`.
+
+- dc0957f: Behind the ALB and API Gateway front doors, which have no edge cache, synth now warns once per app (`@aws-cdk-blocks/hosting:NoEdgeCache`) when the app's header rules set a `Cache-Control` that asks a shared cache to store the response (`s-maxage` above zero, or `stale-while-revalidate` / `stale-if-error` on a `public` or `s-maxage` response, and neither `private` nor `no-store`; the Nitro adapter emits these for `swr` and `cache.maxAge` route rules). The warning names the routes (the first five, then a count) and points to the CloudFront and stacked doors, which cache at the edge. On these doors no shared cache stores such routes, so each visitor's requests reach the server (the browser's own cache still applies to `max-age`) and the header goes to the browser unchanged. The READMEs now say what caching still happens there per framework (Nitro's server-side cache, Next.js ISR through OpenNext's incremental cache unless `incrementalRegeneration: false`, none for Astro and SvelteKit), and that moving an app from the CloudFront door to one of these doors loses the edge cache.
+- ae00f24: The test helper that checks every IAM role carries `defaults.permissionsBoundary` and is listed in the IAM report now has one definition in `@aws-cdk-blocks/core` instead of a copy in five packages' tests. Behaviour is unchanged.
+- dcbc505: A SvelteKit 3 project (what `npx sv create` scaffolds) is now refused before any build runs. `Hosting` checks the installed `@sveltejs/kit` before it runs `buildCommand`, and `UnsupportedSvelteKitVersionError` names the SvelteKit 2 versions to pin (`@sveltejs/kit@^2`, `@sveltejs/adapter-node@^5`, `@sveltejs/vite-plugin-svelte@^5`, `vite@^6`). `create-blocks-app .` stops before it writes anything in a SvelteKit 3 project and prints the same versions. The Hosting README now states the supported range: SvelteKit 2 (`>=2.0.0 <3.0.0`). The new `assertFrameworkSupported(framework, projectDir)` from `@aws-cdk-blocks/hosting/adapters` runs these build-free checks.
+- Updated dependencies [cdac5f3]
+- Updated dependencies [ecc30c6]
+- Updated dependencies [8fc2801]
+- Updated dependencies [5b79256]
+- Updated dependencies [f94ed7f]
+- Updated dependencies [62eb34e]
+- Updated dependencies [67336fc]
+- Updated dependencies [17a2765]
+- Updated dependencies [0553cf2]
+- Updated dependencies [18304d2]
+- Updated dependencies [782e346]
+- Updated dependencies [dc0957f]
+- Updated dependencies [fb9bc31]
+- Updated dependencies [3fce2ab]
+- Updated dependencies [181fdbb]
+- Updated dependencies [dcbc505]
+  - @aws-cdk-blocks/hosting@1.0.1
+  - @aws-cdk-blocks/pipeline@1.0.1
+
 ## 1.0.1
 
 ### Patch Changes

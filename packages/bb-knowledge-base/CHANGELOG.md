@@ -1,5 +1,37 @@
 # @aws-cdk-blocks/bb-knowledge-base
 
+## 1.0.1
+
+### Patch Changes
+
+- 8fc2801: The npm discovery keyword is now `cdk-blocks`. Every published package carries it in place of `aws-blocks`, so find them with `npm search keywords:cdk-blocks`. If you publish your own Building Block, tag it `cdk-blocks` to be listed with them. `@aws-cdk-blocks/create-block` scaffolds the new keyword, and in every mode, not only outside the monorepo.
+
+  The Building Block catalog in the `aws-cdk-blocks` README lists keywords for every block. They come from the `keywords` of each package's `package.json`, without the `cdk-blocks` tag that every package carries. Before, the catalog read a `**Keywords:**` line in each README, which only `bb-async-job` and `bb-cron-job` had, so the other 19 rows were blank.
+
+  The `bb-async-job` and `bb-cron-job` READMEs no longer have that line. Its terms moved to the `keywords` of each package, so `npm search` finds them too: for example `worker`, `retry` and `batch` for `bb-async-job`, and `schedule`, `periodic` and `recurring` for `bb-cron-job`.
+
+  The README template of `@aws-cdk-blocks/create-block` no longer has a `**Keywords:**` line, and the next steps printed for a block scaffolded in this repository say to add keywords to its `package.json`.
+
+- 9f3dcff: `KnowledgeBase.retrieve()` now checks its `filter` before searching, in local development and on AWS, and rejects a filter that would not narrow the search with `KnowledgeBaseValidationError`. That covers `filter: null`, `filter: {}`, a key without a condition object, an operator other than `equals`, and an `equals` that is missing, not a string, or empty. Before, `null` and `{}` ran an unfiltered search on both runtimes, the local mock matched a condition without `equals` against every document that lacked the key, and AWS sent that condition to Bedrock without a value. Omitting `filter` (or passing `undefined`) still searches the whole knowledge base. Code that passed `filter: {}` or an `equals: ''` condition was previously accepted and now throws; omit `filter` to search everything. `asAgentTool()` uses the same check.
+- Updated dependencies [62eb34e]
+- Updated dependencies [1e88d52]
+- Updated dependencies [8fc2801]
+- Updated dependencies [d54eef0]
+- Updated dependencies [bc97b17]
+- Updated dependencies [3b66b2a]
+- Updated dependencies [00d30e5]
+- Updated dependencies [00d30e5]
+- Updated dependencies [2bba814]
+- Updated dependencies [87dec66]
+- Updated dependencies [67336fc]
+- Updated dependencies [dc0957f]
+- Updated dependencies [89d006b]
+- Updated dependencies [c6cd41c]
+- Updated dependencies [ae00f24]
+- Updated dependencies [dcbc505]
+  - @aws-cdk-blocks/core@1.0.2
+  - @aws-cdk-blocks/bb-logger@1.0.1
+
 ## 1.0.0
 
 The first stable release. The changes since 1.0.0-rc.1 are listed below. The notes for every other change since 0.x are under 1.0.0-rc.0 and 1.0.0-rc.1.

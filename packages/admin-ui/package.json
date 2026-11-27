@@ -1,6 +1,6 @@
 {
   "name": "@aws-cdk-blocks/admin-ui",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "CDK Blocks Admin UI — local dashboard for CDK Blocks applications: deployments, logs, resources, and environments.",
   "keywords": [
     "cdk-blocks",
@@ -76,7 +76,7 @@
     "typescript": "^5.3.0"
   },
   "devDependencies": {
-    "@aws-cdk-blocks/bb-kv-store": "^1.0.0",
+    "@aws-cdk-blocks/bb-kv-store": "^1.0.1",
     "@tailwindcss/postcss": "^4.0.0",
     "@types/node": "^20.0.0",
     "@types/react": "^19.0.0",

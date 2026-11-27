@@ -2,6 +2,162 @@
 
 <!-- doc-snippet: skip-file — release notes show the API of past releases, including the removed AuthBasic and AuthOIDC blocks -->
 
+## 1.1.0
+
+### Minor Changes
+
+- 8d9b5e7: `emit` and `emitBatch` now write every data point to its own EMF key without overwriting dimensions or the `_aws` envelope.
+
+  - A metric name equal to one of its dimension keys, or a metric name or dimension key of `_aws`, now throws `MetricsErrors.InvalidMetricName` or `MetricsErrors.InvalidDimensions`. Previously the metric value replaced the dimension value or the EMF metadata, so the metric was not published.
+  - A metric name repeated in one `emitBatch` call is written to a separate EMF document, so every value is recorded. Previously only the last value was kept. Metrics that hit this record more data points after upgrading, so their `Sum` and `SampleCount` statistics go up.
+  - Dimension sets are grouped by an unambiguous key, so `{ a: '1&b=2' }` and `{ a: '1', b: '2' }` are no longer reported under the same dimensions.
+  - Metrics with different timestamps in one batch are written with their own timestamps instead of the first metric's.
+  - A value that is not a finite number (`NaN`, `Infinity`) or a timestamp that is not a valid `Date` is now left out of the document with a warning through the `logger` option, and the rest of the batch is still written. Previously it was written as `null`, and an invalid timestamp made CloudWatch skip the whole document. Nothing is thrown, so a ratio that is `NaN` at zero traffic does not fail the request.
+  - `MetricUnit` now lists all 27 units CloudWatch accepts, including `Count/Second`, `Bytes/Second` and `Terabytes`. A unit outside that list throws the new `MetricsErrors.InvalidUnit`. Previously it was passed through unchecked.
+  - A metric named `__proto__` now gets its own value key instead of being written without a value.
+
+### Patch Changes
+
+- 62eb34e: `blocks:apigateway:access-logging-disabled` is now an info, not a warning. It reports that a deployment with a durable removal policy has API Gateway access logging off, which is the default of `BlocksPresets.production`, so every app that kept the preset got a warning and failed `cdk synth --strict`. `cdk synth` and `cdk deploy` still print it. To hide it, call `Annotations.of(stack).acknowledgeInfo('blocks:apigateway:access-logging-disabled')` on the stack or backend that `create()` returns; an `acknowledgeWarning` call for this id no longer hides it. The default and the synthesized template are unchanged.
+- 4134d59: `Agent.getConversation()` now throws `AgentErrors.InvalidUsage` for a `limit` that isn't an integer, where `1.5` used to return 2 messages and `NaN` or `Infinity` returned the whole history.
+- 1e88d52: `ApiNamespace` now type-checks a handler that returns a class instance, such as `new ApiNamespace(scope, 'calc', () => new Calculator())`, which the runtime already dispatched.
+- 74a0338: `AppSetting.put()` now throws `AppSettingErrors.ValidationFailed` for a value with no JSON representation (`undefined`, a function, a symbol, a bigint or a circular object) instead of a raw `TypeError` or SSM `ValidationException`, or, locally on a secret setting, silently storing nothing.
+- cdac5f3: Astro apps whose `redirects:` table uses route parameters now deploy on every front door. A source that ends in a rest parameter (`'/blog/[...slug]': '/posts/[...slug]'`) becomes a wildcard redirect at the front door, with the matched tail spliced into the destination; every other redirect with a route parameter is left to Astro's router. Before, the parameters reached the ALB and API Gateway doors unchanged and the deploy failed.
+- ecc30c6: Astro server builds now route the files copied from `public/` (such as `robots.txt`, favicons and downloads) to the assets bucket, like Nuxt and SvelteKit builds already do. Every front door serves them as static files instead of sending them to the Astro server, so the stacked door's CloudFront edge caches them and they skip the ALB router's 1 MB response limit. A `public/` folder is routed as a whole only when no page can render under it: no same-named page or folder in `src/pages`, no route an integration injects under it, and no top-level dynamic page. Otherwise it stays with the server. When the stacked door's edge is over its behavior budget, single-file static routes now give way before static prefixes, so hashed bundles such as `/_astro/*` keep their S3 behavior.
+- 2fdfac1: `AsyncJob.submit()` and `submitBatch()` now check `delaySeconds` before queueing anything. A value that is not an integer from 0 to 900 throws `AsyncJobErrors.ValidationFailed`, which keeps its name across the RPC boundary. Before, the local mock ran a negative delay immediately and accepted delays above 900 seconds, while on AWS the SQS rejection reached the client as an unnamed 500 error, or from `submitBatch()` as `BatchSubmitFailed`.
+- 4d0a639: `AsyncJob.submit()` and `submitBatch()` now throw `AsyncJobErrors.ValidationFailed`, in local dev and on AWS, for a payload that cannot be encoded as JSON (`undefined`, a function, a symbol, a bigint anywhere in the value, or a circular reference) instead of a raw `TypeError` that reached the client as an unnamed 500 error, and the local mock now passes the handler the payload's JSON form, as AWS does, rather than the submitted object.
+- e5c661f: The local user pool now refuses a password in the format Cognito refuses: one that begins or ends with whitespace, or contains a line break. `signUp`, `confirmResetPassword`, `updatePassword` (the old and the new password), `auth.admin.setUserPassword` and the `temporaryPassword` of `auth.admin.createUser` answer `InvalidParameterException` (status 400) for such a password under `npm run dev` and in tests, the same answer Cognito gives on AWS. Before, the local user pool stored the password, so a sign-up that worked locally failed after deploy. Other whitespace inside a password is still allowed.
+- e103a68: The local user pool now refuses usernames and passwords that Cognito refuses (an empty username, one over 128 characters or containing whitespace or control characters, and a password over 256 characters) with `InvalidParameterException` before storing anything.
+- 62eb34e: `Auth` reports `@aws-cdk-blocks/bb-auth:RemovalPolicyUnset` only when the user pool would be deleted outside a sandbox: `removalPolicy` is unset, the stack default is `RemovalPolicy.DESTROY`, and the deployment is not a sandbox. Before, every `Auth` without `removalPolicy` got the warning on every synth, including under `BlocksPresets.production`, which retains the pool, and in a sandbox, where the pool is meant to be deleted.
+- b5cc142: Removed an unused internal method of the `Auth` session store that replaced a session without checking that it was unchanged. Nothing called it, so behaviour is unchanged.
+- 8fc2801: The npm discovery keyword is now `cdk-blocks`. Every published package carries it in place of `aws-blocks`, so find them with `npm search keywords:cdk-blocks`. If you publish your own Building Block, tag it `cdk-blocks` to be listed with them. `@aws-cdk-blocks/create-block` scaffolds the new keyword, and in every mode, not only outside the monorepo.
+
+  The Building Block catalog in the `aws-cdk-blocks` README lists keywords for every block. They come from the `keywords` of each package's `package.json`, without the `cdk-blocks` tag that every package carries. Before, the catalog read a `**Keywords:**` line in each README, which only `bb-async-job` and `bb-cron-job` had, so the other 19 rows were blank.
+
+  The `bb-async-job` and `bb-cron-job` READMEs no longer have that line. Its terms moved to the `keywords` of each package, so `npm search` finds them too: for example `worker`, `retry` and `batch` for `bb-async-job`, and `schedule`, `periodic` and `recurring` for `bb-cron-job`.
+
+  The README template of `@aws-cdk-blocks/create-block` no longer has a `**Keywords:**` line, and the next steps printed for a block scaffolded in this repository say to add keywords to its `package.json`.
+
+- 5290e0a: The client response middleware of `Realtime` and `FileBucket` now keeps every own JSON key of an API response, including `__proto__`, as an ordinary data property, and every object it returns has `Object.prototype` as its prototype. Channel and file descriptors still hydrate into live client handles. Apps need no changes.
+- 1ae308a: `installCookieJar()` from `aws-cdk-blocks/utils` no longer replaces a `Cookie` header the caller set. A request with its own `Cookie` header (in `init.headers` or on a `Request`) is sent with that header unchanged, and a `Request` passed without `init` keeps its other headers when the jar adds its cookies.
+- bc97b17: `cdk synth` now fails, naming both construct paths, when two resources in a backend get the same table, queue, schedule, bucket, secret, parameter, log group or Lambda function name, such as two blocks under scope paths `'a-b' > 'x'` and `'a' > 'b' > 'x'`, instead of synthesizing a stack that CloudFormation rejects at deploy.
+- e657fe6: Reject CronJob schedules that EventBridge Scheduler would reject at deploy, in local dev and at synth instead of minutes into `cdk deploy`. A cron expression must set exactly one of day-of-month and day-of-week to `?`, so `cron(0 12 * * MON *)` and `cron(0 0 ? * ? *)` now throw `CronJobErrors.InvalidSchedule`. A day-of-month that no listed month has, such as `cron(0 0 30 2 ? *)`, now throws `CronJobErrors.InvalidSchedule` instead of logging a warning in the local mock. The local mock now throws `CronJobErrors.InvalidTimezone` for `timezone: ''`, as synth already did. A CronJob constructed in the AWS runtime now runs the same schedule and timezone checks as synth, so it rejects the same inputs as the local mock.
+- e1c5c6f: The CronJob local mock now sets `scheduledTime` to the schedule slot, formatted to whole seconds (for example `2026-03-01T00:10:00Z`), as EventBridge Scheduler does. It used to report the moment the local timer ran, with milliseconds.
+- 6a60256: Fix apps with several `Dashboard` blocks: each dashboard's redirect route now redirects to that dashboard, and `dashboard.url` on the AWS runtime is that dashboard's own console URL, built from `AWS_REGION` (else `AWS_DEFAULT_REGION`). Previously both pointed at the last dashboard constructed. The AWS runtime's `dashboardName` now also matches the deployed dashboard name (the `dashboardName` option, else the block's `fullId`).
+- bee8c56: `Database` migration files now run with the numbers in their names compared by value, so `1_create.sql`, `2_add_a.sql` and `10_add_b.sql` run in that order instead of `10_add_b.sql` first, locally and on AWS.
+- 4e74182: `Database.transaction()` is now also tested against a real PostgreSQL server with several pooled connections: a statement issued on the block inside the callback runs in that transaction and is rolled back with it. Behaviour is unchanged.
+- 20200b8: The tests of how `Database.transaction()` routes statements now run only against a real PostgreSQL server; the ones that asserted recorded engine calls are removed. Behaviour is unchanged.
+- f8de1e6: EmailClient: `send()` and `sendBatch()` now reject a message with no recipients (To, CC and BCC all empty or absent) with `InvalidInputException`, on the local mock and before calling SES on AWS. Previously the mock returned a message ID for `send({ to: [] })` while SES rejects it.
+- 5b79256: Next.js on Lambda no longer gzips a response that has no body. A `HEAD` request, or a `1xx`, `204`, `205` or `304` response, requested with `Accept-Encoding: gzip`, was sent with `content-encoding: gzip`, a 20-byte empty gzip body and, for `HEAD`, without its `Content-Length`. It is now sent uncompressed, with its headers as the app set them. The SSR cache guard on Node.js servers now reads the headers of `res.writeHead(status, undefined, headers)` and `res.writeHead(status, null, headers)`, which it skipped before, and no longer makes Node reject a `writeHead` call that passes its headers as an array of `[name, value]` pairs when the guard rewrites `Cache-Control`.
+- f94ed7f: The SSR cache guard now reads `Vary` behind the CloudFront door and the stacked door. CloudFront ignores `Vary`, so a shared-cacheable response that varies on a request header outside the server-route cache key (for example `Vary: Accept-Language` with `Cache-Control: public, s-maxage=60`) was stored once and served to every visitor whatever that header said. Such a response, and any shared-cacheable response with `Vary: *`, is now sent as `Cache-Control: private, no-store`, keeps its `Vary` header for the browser, and the server logs once per header name why. `Accept-Encoding`, the Next.js router headers and, on the CloudFront door, `cacheKeyHeaders` count as keyed, and `Vary: Cookie` is left to the existing cookie rule; add a header to `frontDoor.features.cacheKeyHeaders` to cache one copy per value instead. On the CloudFront door, a Next.js App Router page whose path an intercepting route can match carries `Vary: Next-Url`, so it is no longer edge-cached unless `next-url` is added to `cacheKeyHeaders`.
+- 62eb34e: An app that uses `Hosting` with its defaults no longer gets three warnings on every `cdk synth`, `cdk deploy` and `cdk explore`, so `cdk synth --strict` passes on it. No synthesized template changes.
+
+  - `@aws-cdk-blocks/hosting:MonitoringAlarmTopicHasNoSubscribers` (the alarm topic has no subscriber) is now an info. `cdk synth` still prints it until the topic is subscribed. To hide it, call `acknowledgeInfo(id)` on the stack that owns the topic; an existing `acknowledgeWarning(id)` call there keeps working.
+  - `@aws-cdk-blocks/hosting:CloudFrontAlarmRegionUnresolved` (a stack without `env` creates the CloudFront 5xx alarm in its own region) is an info when the CDK CLI deploys the stack to us-east-1, where the alarm works; hide that one with `acknowledgeInfo(id)`. For any other region it stays a warning, and now names the region.
+  - Hosting sets `minimumProtocolVersion` on the CloudFront distribution only with a custom certificate. CloudFront ignores the setting without one, and aws-cdk-lib 2.264.0 and later warn about it (`@aws-cdk/aws-cloudfront:minimumProtocolVersionWithoutCertificate`).
+
+- 67336fc: Docs: the hosting and core READMEs now describe three behaviours that were undocumented:
+
+  - The `us-east-1` stack that holds Lambda@Edge functions outside `us-east-1` keeps CDK's name, `edge-lambda-stack-<hash>`, unless `defaults.appIdentity` names it `<id>-edge` (or `HostingConstruct`'s `edgeStackId` is set). The READMEs say how to find it and how to delete it after the app stack.
+  - On the CloudFront door, a missing static file with no 404 page to map it to answers with S3's `NoSuchKey` XML (`404`, `application/xml`), while the ALB and API Gateway doors' asset proxy answers with the app's 404 page or a plain `Not Found`. The README no longer says the asset proxy answers "like the CloudFront door".
+  - A new "Header hygiene" section lists the internal headers Hosting removes and the request-id headers it keeps (`x-amzn-requestid`, `x-amz-apigw-id`, `apigw-requestid`, `lambda-web-request-id`), and shows how to remove the ones CloudFront allows with your own `frontDoor.features.responseHeadersPolicy`.
+
+- 17a2765: Retain a replaced Lambda@Edge function version instead of deleting it. A deploy that changed Next.js middleware or an Edge route waited several minutes on deletes that Lambda refuses while CloudFront still holds the old version's replicas, then warned that resources failed to delete. Replaced versions now stay in place without running. A retained version has no invocation charge, but its code still counts toward the `us-east-1` Lambda code storage quota, and each Next.js build adds one, so prune versions the distribution no longer uses once CloudFront has removed their replicas. Read the live version ARNs from the distribution's cache behaviors (`aws cloudfront get-distribution-config`, `LambdaFunctionAssociations`), not from the highest version number, which after a rolled-back deploy can be one CloudFront doesn't run. List each edge function's versions with `aws lambda list-versions-by-function --region us-east-1 --function-name <function-name>` and delete each unused one with `aws lambda delete-function --region us-east-1 --function-name <function-name> --qualifier <version>`; without `--qualifier` the command deletes the whole function. Lambda rejects the delete while replicas remain. The Hosting README's Next.js section has the full steps.
+- 0553cf2: Prerendered HTML behind the CloudFront door now answers a repeat request's `If-None-Match` with `304 Not Modified`. HTML files are uploaded with `Cache-Control: max-age=0, must-revalidate` instead of `no-cache, no-store, must-revalidate`, so CloudFront keeps a copy and revalidates it on every request. A deploy's new HTML is still served on the first request after it, because every HTML request resolves to the current build's key. Files listed in `staticAssets.noCachePaths` keep `no-cache, no-store, must-revalidate`. A `304` for an HTML page still moves the skew-protection cookie to the current build. On the ALB and API Gateway doors, HTML gets the same `Cache-Control`, and the asset proxy's `304 Not Modified` now carries the app's header rules, as its `200` does, so a reload keeps a configured header such as `Referrer-Policy`.
+- 18304d2: Fix the CloudFront door caching one image format for every viewer. Image optimization requests (Next.js `/_next/image`, the Nuxt and Astro image endpoints) are keyed by the default behavior's cache policy, which left out `Accept`, so the first viewer's format was served to every later one: a client without WebP support got a cached WebP, or a WebP-capable browser got the source PNG. On image routes the edge router now joins the viewer's `Accept` fields into one value, sends it to the image optimizer as its only `Accept` field, and writes a SHA-256 digest of it into an `x-blocks-image-accept` header that the SSR cache policy keys on when the app has an image optimizer. The optimizer negotiates on exactly the value the cache key covers, so a viewer that rejects a format (`image/webp;q=0`) never gets it from the cache, and a long `Accept` is not forwarded twice. The router keeps `Accept` on image routes even when `cacheKeyHeaders` lists it, and the IPX image function (Nuxt) reads every `Accept` field of an API Gateway event, not only the last. `Accept` stays out of the page cache key. With an image optimizer, `x-blocks-image-accept` is reserved and synth rejects it in `cacheKeyHeaders`; without one, the router leaves that header alone. The header takes a free cache-key header slot; an app whose `cacheKeyHeaders` already uses all five keeps its cache key and gets a `@aws-cdk-blocks/hosting:ImageAcceptNotInCacheKey` synth warning.
+- 782e346: Nuxt / Nitro `redirect` route rules with a `/**` destination now redirect to the same URL Nitro does: `'/blog/**': { redirect: '/posts/**' }` sends `/blog/a/b` to `/posts/a/b` (it sent `/posts/*a/b`) on every front door. A rule without a status now defaults to 307, as in Nitro, and a rule the door can't reproduce (a destination ending in a single `*`) is left to the Nitro server.
+- fb9bc31: A SvelteKit app whose server code imports a package from its `dependencies` (for example `withAuth` from `aws-cdk-blocks/server`) now runs after a deploy. Until now the server function shipped `build/` without `node_modules`, so every server-rendered page failed with `ERR_MODULE_NOT_FOUND` while the deploy reported success. The build now bundles the server's dependencies through a build-only Vite plugin (`ssr.noExternal: true`) that a Node.js preload adds without writing to your project, and synth fails with `SvelteKitUnbundledDependencyError` when the server still needs a module that `build/` can't provide. Optional imports that the code handles failing don't fail synth, and a destroy skips the check.
+- 9f3dcff: `KnowledgeBase.retrieve()` now checks its `filter` before searching, in local development and on AWS, and rejects a filter that would not narrow the search with `KnowledgeBaseValidationError`. That covers `filter: null`, `filter: {}`, a key without a condition object, an operator other than `equals`, and an `equals` that is missing, not a string, or empty. Before, `null` and `{}` ran an unfiltered search on both runtimes, the local mock matched a condition without `equals` against every document that lacked the key, and AWS sent that condition to Bedrock without a value. Omitting `filter` (or passing `undefined`) still searches the whole knowledge base. Code that passed `filter: {}` or an `equals: ''` condition was previously accepted and now throws; omit `filter` to search everything. `asAgentTool()` uses the same check.
+- 82bc015: `KVStore` cursors now carry a tag of the store that issued them, so `query()` and `scan()` reject a cursor from another store with the same key shape with `InvalidQueryException`, while cursors issued by 1.0.0 are still accepted.
+- e9f4af0: `KVStore` now throws a named `ValidationFailedException`, on the mock and on AWS, for a value, number key, condition operand or `ttlSeconds` that the AWS SDK cannot send to DynamoDB (such as `NaN`, `Infinity`, a `Date`, a symbol or a number outside the safe integer range), where AWS previously returned a 500 with no error name, and the mock now also rejects such a number key or query operand on `get`, `delete` and `query`, which it previously accepted.
+- 89d006b: `Logger` now validates its `level` option at runtime. A level is matched case-insensitively, so `'WARN'` works. An unknown level such as `'verbose'` falls back to `'info'` and logs one warning, where before it silently dropped every line, including `error()`. That warning includes the logger's `defaultContext`, and under `cdk synth` an unknown level also adds a CDK warning (`@aws-cdk-blocks/bb-logger:unknownLevel`). The aliases `'warning'`, `'trace'` and `'fatal'` are accepted as `'warn'`, `'debug'` and `'error'`.
+- c6cd41c: Serialize an object that appears more than once in a log context instead of marking it circular. `log.info('x', { a: o, b: o })` now logs `b` in full instead of `"[Circular]"`; only a reference back to an object on its own path is replaced with `"[Circular]"`. One object is written out at most 8 times per log entry, and later references to it are replaced with `"[Repeated]"`, so a deeply shared object graph cannot produce an oversized line.
+- 3fce2ab: Next.js on-demand revalidation (`revalidateTag`, `revalidatePath`, `res.revalidate`) now reaches the CloudFront cache. Behind the CloudFront door the Next.js server invalidates the revalidated pages on the distribution, so the edge stops serving the old page for the rest of its `s-maxage` (up to 1 day). The server gets `cloudfront:CreateInvalidation` on its own distribution only, and reads the distribution id from an SSM parameter. This applies when the adapter generates `open-next.config.ts` and the build uses `@opennextjs/aws` 4.1.14 or later; see "On-demand revalidation (Next.js)" in the Hosting README for the cases it doesn't cover and their workaround.
+- 181fdbb: Next.js on Lambda now gzips its streamed server responses for clients that accept gzip, behind the CloudFront door and behind `apiGateway` with `api: 'rest'`. Before, the server sent them with `content-encoding: identity` and no `Content-Length`, so CloudFront could not compress them and every page's HTML reached the browser uncompressed. A compressed response drops the page's uncompressed `Content-Length`, every response from the wrapper carries `Vary: Accept-Encoding`, and a client that refuses gzip with `q=0` gets an uncompressed body. The README now also states that the ALB and API Gateway doors otherwise compress static files only, how a Lambda Web Adapter server (Astro, SvelteKit, Nitro's `node-server` preset) can compress its own server responses there, and that Next.js on Lambda (its wrapper sets `Content-Encoding` itself) and Nitro's `aws-lambda` preset (its handler turns a text-typed body into a UTF-8 string, which corrupts a compressed one) must not.
+- 42e947d: The links to the design decisions in the `DESIGN.md` of `@aws-cdk-blocks/auth-common` and `@aws-cdk-blocks/bb-kv-store` now open on GitHub. They pointed at a file outside the published package, so they were dead on npm and in `node_modules`.
+- cb1dc82: Server-side `Realtime` subscribers in the same process now each receive their own copy of a published message, in the JSON form a WebSocket delivers. Before, the local mock (and, on AWS, same-process delivery before a subscriber's socket was live) handed every handler the publisher's object, so a handler that mutated its message changed it for the next handler and for the publisher, and values such as a `Date` arrived unconverted.
+- 1cd3cc2: `Secret.put()` now rejects an empty, non-string or over-65,536-byte value with `SecretErrors.ValidationFailed` and `Secret.get()` returns `null` for a version id Secrets Manager cannot accept, both locally and on AWS, and `AppSetting.put('')` on a `secret: true` setting, which used to succeed and leave every later `get()` failing, now throws `AppSettingErrors.ValidationFailed` on write.
+- ae00f24: The test helper that checks every IAM role carries `defaults.permissionsBoundary` and is listed in the IAM report now has one definition in `@aws-cdk-blocks/core` instead of a copy in five packages' tests. Behaviour is unchanged.
+- 750dd28: The local `Tracer` mock now keeps overlapping top-level `startSegment` calls, such as concurrent dev-server requests, in separate traces. Each keeps its own trace ID, root annotations, root metadata and child segments, and nested segments, including ones run in parallel, attach to the parent in their own async chain. When a segment's function throws a value that is not an `Error`, such as `undefined`, `null` or a string, the local mock now rethrows that value unchanged instead of a `TypeError`, as the AWS runtime does. The recorded segment error follows X-Ray: a string is recorded as the message, and `undefined`, `null` and other non-object values record no error.
+- Updated dependencies [62eb34e]
+- Updated dependencies [4134d59]
+- Updated dependencies [3c96912]
+- Updated dependencies [1e88d52]
+- Updated dependencies [74a0338]
+- Updated dependencies [cdac5f3]
+- Updated dependencies [ecc30c6]
+- Updated dependencies [2fdfac1]
+- Updated dependencies [4d0a639]
+- Updated dependencies [e5c661f]
+- Updated dependencies [e103a68]
+- Updated dependencies [62eb34e]
+- Updated dependencies [b5cc142]
+- Updated dependencies [8ab98f2]
+- Updated dependencies [8d9b5e7]
+- Updated dependencies [d59d548]
+- Updated dependencies [8fc2801]
+- Updated dependencies [5290e0a]
+- Updated dependencies [d54eef0]
+- Updated dependencies [bc97b17]
+- Updated dependencies [3b66b2a]
+- Updated dependencies [00d30e5]
+- Updated dependencies [00d30e5]
+- Updated dependencies [2bba814]
+- Updated dependencies [e657fe6]
+- Updated dependencies [e1c5c6f]
+- Updated dependencies [6a60256]
+- Updated dependencies [bee8c56]
+- Updated dependencies [4e74182]
+- Updated dependencies [20200b8]
+- Updated dependencies [87dec66]
+- Updated dependencies [f8de1e6]
+- Updated dependencies [5b79256]
+- Updated dependencies [f94ed7f]
+- Updated dependencies [62eb34e]
+- Updated dependencies [67336fc]
+- Updated dependencies [17a2765]
+- Updated dependencies [0553cf2]
+- Updated dependencies [18304d2]
+- Updated dependencies [782e346]
+- Updated dependencies [dc0957f]
+- Updated dependencies [fb9bc31]
+- Updated dependencies [9f3dcff]
+- Updated dependencies [82bc015]
+- Updated dependencies [e9f4af0]
+- Updated dependencies [89d006b]
+- Updated dependencies [c6cd41c]
+- Updated dependencies [3fce2ab]
+- Updated dependencies [181fdbb]
+- Updated dependencies [42e947d]
+- Updated dependencies [90a36ef]
+- Updated dependencies [cb1dc82]
+- Updated dependencies [1cd3cc2]
+- Updated dependencies [ae00f24]
+- Updated dependencies [dcbc505]
+- Updated dependencies [750dd28]
+  - @aws-cdk-blocks/core@1.0.2
+  - @aws-cdk-blocks/bb-agent@1.0.1
+  - @aws-cdk-blocks/bb-app-setting@1.0.1
+  - @aws-cdk-blocks/hosting@1.0.1
+  - @aws-cdk-blocks/bb-async-job@1.0.1
+  - @aws-cdk-blocks/bb-auth@1.0.1
+  - @aws-cdk-blocks/bb-file-bucket@1.0.1
+  - @aws-cdk-blocks/bb-metrics@1.1.0
+  - @aws-cdk-blocks/bb-realtime@1.0.1
+  - @aws-cdk-blocks/auth-common@1.0.1
+  - @aws-cdk-blocks/bb-compute@1.0.1
+  - @aws-cdk-blocks/bb-container-compute@1.0.1
+  - @aws-cdk-blocks/bb-cron-job@1.0.1
+  - @aws-cdk-blocks/bb-dashboard@1.0.1
+  - @aws-cdk-blocks/bb-database@1.0.1
+  - @aws-cdk-blocks/bb-email-client@1.0.1
+  - @aws-cdk-blocks/bb-knowledge-base@1.0.1
+  - @aws-cdk-blocks/bb-kv-store@1.0.1
+  - @aws-cdk-blocks/bb-lambda-compute@1.0.1
+  - @aws-cdk-blocks/bb-logger@1.0.1
+  - @aws-cdk-blocks/bb-secret@1.0.1
+  - @aws-cdk-blocks/bb-tracer@1.0.1
+
 ## 1.0.1
 
 ### Patch Changes

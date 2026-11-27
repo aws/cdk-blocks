@@ -1,5 +1,37 @@
 # @aws-cdk-blocks/bb-tracer
 
+## 1.0.1
+
+### Patch Changes
+
+- 8fc2801: The npm discovery keyword is now `cdk-blocks`. Every published package carries it in place of `aws-blocks`, so find them with `npm search keywords:cdk-blocks`. If you publish your own Building Block, tag it `cdk-blocks` to be listed with them. `@aws-cdk-blocks/create-block` scaffolds the new keyword, and in every mode, not only outside the monorepo.
+
+  The Building Block catalog in the `aws-cdk-blocks` README lists keywords for every block. They come from the `keywords` of each package's `package.json`, without the `cdk-blocks` tag that every package carries. Before, the catalog read a `**Keywords:**` line in each README, which only `bb-async-job` and `bb-cron-job` had, so the other 19 rows were blank.
+
+  The `bb-async-job` and `bb-cron-job` READMEs no longer have that line. Its terms moved to the `keywords` of each package, so `npm search` finds them too: for example `worker`, `retry` and `batch` for `bb-async-job`, and `schedule`, `periodic` and `recurring` for `bb-cron-job`.
+
+  The README template of `@aws-cdk-blocks/create-block` no longer has a `**Keywords:**` line, and the next steps printed for a block scaffolded in this repository say to add keywords to its `package.json`.
+
+- 750dd28: The local `Tracer` mock now keeps overlapping top-level `startSegment` calls, such as concurrent dev-server requests, in separate traces. Each keeps its own trace ID, root annotations, root metadata and child segments, and nested segments, including ones run in parallel, attach to the parent in their own async chain. When a segment's function throws a value that is not an `Error`, such as `undefined`, `null` or a string, the local mock now rethrows that value unchanged instead of a `TypeError`, as the AWS runtime does. The recorded segment error follows X-Ray: a string is recorded as the message, and `undefined`, `null` and other non-object values record no error.
+- Updated dependencies [62eb34e]
+- Updated dependencies [1e88d52]
+- Updated dependencies [8fc2801]
+- Updated dependencies [d54eef0]
+- Updated dependencies [bc97b17]
+- Updated dependencies [3b66b2a]
+- Updated dependencies [00d30e5]
+- Updated dependencies [00d30e5]
+- Updated dependencies [2bba814]
+- Updated dependencies [87dec66]
+- Updated dependencies [67336fc]
+- Updated dependencies [dc0957f]
+- Updated dependencies [89d006b]
+- Updated dependencies [c6cd41c]
+- Updated dependencies [ae00f24]
+- Updated dependencies [dcbc505]
+  - @aws-cdk-blocks/core@1.0.2
+  - @aws-cdk-blocks/bb-logger@1.0.1
+
 ## 1.0.0
 
 The first stable release, with no changes since 1.0.0-rc.2. The notes for every change since 0.x are under 1.0.0-rc.0, 1.0.0-rc.1 and 1.0.0-rc.2.

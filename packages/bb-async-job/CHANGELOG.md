@@ -1,5 +1,44 @@
 # @aws-cdk-blocks/bb-async-job
 
+## 1.0.1
+
+### Patch Changes
+
+- 2fdfac1: `AsyncJob.submit()` and `submitBatch()` now check `delaySeconds` before queueing anything. A value that is not an integer from 0 to 900 throws `AsyncJobErrors.ValidationFailed`, which keeps its name across the RPC boundary. Before, the local mock ran a negative delay immediately and accepted delays above 900 seconds, while on AWS the SQS rejection reached the client as an unnamed 500 error, or from `submitBatch()` as `BatchSubmitFailed`.
+- 4d0a639: `AsyncJob.submit()` and `submitBatch()` now throw `AsyncJobErrors.ValidationFailed`, in local dev and on AWS, for a payload that cannot be encoded as JSON (`undefined`, a function, a symbol, a bigint anywhere in the value, or a circular reference) instead of a raw `TypeError` that reached the client as an unnamed 500 error, and the local mock now passes the handler the payload's JSON form, as AWS does, rather than the submitted object.
+- 8fc2801: The npm discovery keyword is now `cdk-blocks`. Every published package carries it in place of `aws-blocks`, so find them with `npm search keywords:cdk-blocks`. If you publish your own Building Block, tag it `cdk-blocks` to be listed with them. `@aws-cdk-blocks/create-block` scaffolds the new keyword, and in every mode, not only outside the monorepo.
+
+  The Building Block catalog in the `aws-cdk-blocks` README lists keywords for every block. They come from the `keywords` of each package's `package.json`, without the `cdk-blocks` tag that every package carries. Before, the catalog read a `**Keywords:**` line in each README, which only `bb-async-job` and `bb-cron-job` had, so the other 19 rows were blank.
+
+  The `bb-async-job` and `bb-cron-job` READMEs no longer have that line. Its terms moved to the `keywords` of each package, so `npm search` finds them too: for example `worker`, `retry` and `batch` for `bb-async-job`, and `schedule`, `periodic` and `recurring` for `bb-cron-job`.
+
+  The README template of `@aws-cdk-blocks/create-block` no longer has a `**Keywords:**` line, and the next steps printed for a block scaffolded in this repository say to add keywords to its `package.json`.
+
+- Updated dependencies [62eb34e]
+- Updated dependencies [1e88d52]
+- Updated dependencies [8fc2801]
+- Updated dependencies [d54eef0]
+- Updated dependencies [bc97b17]
+- Updated dependencies [3b66b2a]
+- Updated dependencies [00d30e5]
+- Updated dependencies [00d30e5]
+- Updated dependencies [2bba814]
+- Updated dependencies [87dec66]
+- Updated dependencies [67336fc]
+- Updated dependencies [dc0957f]
+- Updated dependencies [82bc015]
+- Updated dependencies [e9f4af0]
+- Updated dependencies [89d006b]
+- Updated dependencies [c6cd41c]
+- Updated dependencies [42e947d]
+- Updated dependencies [ae00f24]
+- Updated dependencies [dcbc505]
+  - @aws-cdk-blocks/core@1.0.2
+  - @aws-cdk-blocks/bb-container-compute@1.0.1
+  - @aws-cdk-blocks/bb-kv-store@1.0.1
+  - @aws-cdk-blocks/bb-lambda-compute@1.0.1
+  - @aws-cdk-blocks/bb-logger@1.0.1
+
 ## 1.0.0
 
 The first stable release. The changes since 1.0.0-rc.2 are listed below. The notes for every other change since 0.x are under 1.0.0-rc.0, 1.0.0-rc.1 and 1.0.0-rc.2.
