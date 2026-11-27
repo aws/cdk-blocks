@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { type AssetProxyOptions, assetProxyCoreJs } from './asset_proxy_core.js';
+import { ALB_LAMBDA_RESPONSE_LIMIT, maxRangeBytes } from './proxy_limits.js';
 
 /**
  * Static asset-proxy Lambda for the ALB front door.
@@ -10,7 +11,8 @@ import { type AssetProxyOptions, assetProxyCoreJs } from './asset_proxy_core.js'
  * directly (and the assets bucket is private — BLOCK_ALL, no public read). So
  * the ALB routes static paths to this tiny Lambda TARGET, which reads the
  * object from `builds/<buildId>/<path>` in the private bucket and returns it
- * whole (base64, gzipped when compressible). This is the
+ * whole (base64, gzipped when compressible), or the single byte range the
+ * request asks for (206, never gzipped). This is the
  * ALB analogue of CloudFront's S3+OAC origin.
  *
  * The handler speaks the ALB↔Lambda contract (NOT API Gateway): the event is
@@ -47,9 +49,13 @@ import { type AssetProxyOptions, assetProxyCoreJs } from './asset_proxy_core.js'
  * @param opts.redirects     the app's redirects (first match wins), answered before any S3 read
  * @param opts.headers       the app's per-pattern response headers, applied to a successful response
  * @param opts.errorPages    the app's error pages (`404.html` / `500.html` keys under the build prefix)
+ * @param opts.maxRangeBytes the most bytes a 206 carries (default: what fits the ALB's 1 MB response limit)
  */
-export const generateAlbAssetProxyCode = (opts: AssetProxyOptions): string => `${assetProxyCoreJs(opts)}
-const STATUS_TEXT = { 200: 'OK', 301: 'Moved Permanently', 302: 'Found', 304: 'Not Modified', 307: 'Temporary Redirect', 308: 'Permanent Redirect', 400: 'Bad Request', 404: 'Not Found', 500: 'Internal Server Error' };
+export const generateAlbAssetProxyCode = (opts: AssetProxyOptions): string => `${assetProxyCoreJs({
+  ...opts,
+  maxRangeBytes: opts.maxRangeBytes ?? maxRangeBytes(ALB_LAMBDA_RESPONSE_LIMIT),
+})}
+const STATUS_TEXT = { 200: 'OK', 206: 'Partial Content', 301: 'Moved Permanently', 302: 'Found', 304: 'Not Modified', 307: 'Temporary Redirect', 308: 'Permanent Redirect', 400: 'Bad Request', 404: 'Not Found', 416: 'Range Not Satisfiable', 500: 'Internal Server Error' };
 
 exports.handler = async (event) => {
   const res = await blocksServe(event.path || '/', event.headers);

@@ -24,13 +24,25 @@
  *      is gzipped when the client accepts it (`Vary: accept-encoding`; the
  *      validator becomes weak), so it travels — and fits the door's response
  *      limit — compressed, as on CloudFront;
- *   5. a missing file → 404, with the app's not-found page when it has one;
+ *   5. a single byte range (`Range: bytes=0-9`, `bytes=500-`, `bytes=-500`) is
+ *      read from S3 as that range and answered `206` with `Content-Range`
+ *      (never gzipped, the validator stays strong). A range longer than
+ *      `maxRangeBytes` (what fits the door's response limit), an open-ended
+ *      `bytes=0-` included, is shortened to it: the `Content-Range` reports the
+ *      bytes sent and the client asks for the rest. A range no byte satisfies
+ *      (past the end, `bytes=-0`, any range of an empty file) is a `416` with
+ *      `Content-Range: bytes *\/<size>`; several ranges or a malformed one get
+ *      the whole file (`200`), as RFC 9110 allows. An `If-Range` that names
+ *      another version (a different strong ETag, a weak one, or another date)
+ *      gets the whole file instead of a `206` or a `416`. Every file response
+ *      carries `Accept-Ranges: bytes`;
+ *   6. a missing file → 404, with the app's not-found page when it has one;
  *      any other S3 failure → 500, with the app's server-error page (each page
  *      is read once per Lambda instance — the prefix is fixed per build);
- *   6. every matching header rule is applied to a successful (non-error,
+ *   7. every matching header rule is applied to a successful (non-error,
  *      non-redirect) response, a 304 included, as a CloudFront viewer-response
  *      function is;
- *   7. every response carries the baseline security headers the CloudFront
+ *   8. every response carries the baseline security headers the CloudFront
  *      door's policy adds (`Strict-Transport-Security: max-age=31536000`,
  *      `X-Content-Type-Options: nosniff`, `X-Frame-Options: SAMEORIGIN`,
  *      `Referrer-Policy: strict-origin-when-cross-origin`); an app header rule
@@ -115,6 +127,14 @@ export type AssetProxyOptions = ProxyRules & {
    * `runtimeConfig.ipx.baseURL`.
    */
   imageFallback?: { hosts: readonly string[]; pathPrefixes?: readonly string[] };
+  /**
+   * The most bytes one ranged (206) response carries. A longer range (an
+   * open-ended `bytes=0-`, as a browser's first media request is) is
+   * shortened to this, so it fits the door's response limit; the
+   * `Content-Range` reports the bytes sent and the client asks for the rest.
+   * @default what fits the door's response limit: about 704 KiB for the ALB proxy, 4.4 MiB for the API Gateway one
+   */
+  maxRangeBytes?: number;
 };
 
 /**
@@ -136,9 +156,12 @@ export const imagePathPrefixes = (prefixes: readonly string[] = []): string[] =>
   ...new Set(['/_ipx', ...prefixes].map((p) => `/${trimTrailingSlashes(p.replace(/^\/+/, ''))}`).filter((p) => p !== '/')),
 ];
 
-export const assetProxyCoreJs = (opts: AssetProxyOptions): string => {
+export const assetProxyCoreJs = (opts: AssetProxyOptions & { maxRangeBytes: number }): string => {
   const pageKey = (page: string | undefined): string => JSON.stringify((page ?? '').replace(/^\/+/, ''));
-  return `const { S3Client, GetObjectCommand } = require('@aws-sdk/client-s3');
+  if (!Number.isSafeInteger(opts.maxRangeBytes) || opts.maxRangeBytes < 1) {
+    throw new Error(`maxRangeBytes must be a positive integer, got ${opts.maxRangeBytes}`);
+  }
+  return `const { S3Client, GetObjectCommand, HeadObjectCommand } = require('@aws-sdk/client-s3');
 const zlib = require('node:zlib');
 const s3 = new S3Client({});
 const BUCKET = process.env.ASSET_BUCKET;
@@ -150,6 +173,7 @@ const IMAGE_FALLBACK = ${opts.imageFallback ? 'true' : 'false'};
 const IMAGE_REMOTE_HOSTS = ${JSON.stringify(opts.imageFallback?.hosts ?? [])};
 const IMAGE_PATH_PREFIXES = ${JSON.stringify(imagePathPrefixes(opts.imageFallback?.pathPrefixes))};
 const SERVER_ERROR_PAGE = ${pageKey(opts.errorPages?.serverError)};
+const MAX_RANGE_BYTES = ${opts.maxRangeBytes};
 
 ${proxyRulesJs(opts)}
 
@@ -214,9 +238,11 @@ async function fetchKey(key, conditions) {
   const input = { Bucket: BUCKET, Key: key };
   if (conditions && conditions.ifNoneMatch) input.IfNoneMatch = conditions.ifNoneMatch;
   if (conditions && conditions.ifModifiedSince) input.IfModifiedSince = conditions.ifModifiedSince;
+  if (conditions && conditions.range) input.Range = conditions.range;
   const res = await s3.send(new GetObjectCommand(input));
   return {
     buf: await readStream(res.Body),
+    contentRange: input.Range ? res.ContentRange : undefined,
     contentType: res.ContentType || contentTypeFor(key),
     cacheControl: res.CacheControl,
     etag: res.ETag,
@@ -230,6 +256,59 @@ function isMiss(err) {
   const name = err && err.name;
   const status = err && err.$metadata && err.$metadata.httpStatusCode;
   return name === 'NoSuchKey' || name === 'NotFound' || name === 'AccessDenied' || status === 404 || status === 403;
+}
+
+// S3's answer to a range that starts past the end of the object.
+function isRangeNotSatisfiable(err) {
+  return Boolean(err && (err.name === 'InvalidRange' || (err.$metadata && err.$metadata.httpStatusCode === 416)));
+}
+
+// The one byte range a Range header asks for ('bytes=0-9', 'bytes=500-',
+// 'bytes=-500'), as S3's Range parameter, at most MAX_RANGE_BYTES long: a
+// longer or open-ended range is shortened (the 206's Content-Range reports the
+// bytes sent, RFC 9110 section 15.3.7), so it fits the door's response limit.
+// 'unsatisfiable' for 'bytes=-0' (an empty suffix, which no file satisfies);
+// undefined for no range, several ranges or a malformed one, which are
+// answered with the whole file (RFC 9110 lets a server ignore Range).
+function singleRange(value) {
+  const m = /^bytes=([0-9]*)-([0-9]*)$/i.exec(String(value || '').trim());
+  if (!m || (m[1] === '' && m[2] === '')) return undefined;
+  const first = m[1] === '' ? undefined : Number(m[1]);
+  const last = m[2] === '' ? undefined : Number(m[2]);
+  if ((first !== undefined && !Number.isSafeInteger(first)) || (last !== undefined && !Number.isSafeInteger(last))) return undefined;
+  if (first === undefined) return last === 0 ? 'unsatisfiable' : 'bytes=-' + Math.min(last, MAX_RANGE_BYTES);
+  if (last !== undefined && last < first) return undefined;
+  const capped = first + MAX_RANGE_BYTES - 1;
+  return 'bytes=' + first + '-' + (last === undefined ? capped : Math.min(last, capped));
+}
+
+// The answer to a range no byte of the file satisfies: a 416 with the size,
+// unless If-Range names another version than the one stored, which gets the
+// whole file (null). The validators and size come from a HEAD, which keeps the
+// request's conditions (a matching If-None-Match is still a 304) and throws on
+// a missing file like the read.
+async function unsatisfiableRange(key, conditions, ifRange) {
+  const input = { Bucket: BUCKET, Key: key };
+  if (conditions.ifNoneMatch) input.IfNoneMatch = conditions.ifNoneMatch;
+  if (conditions.ifModifiedSince) input.IfModifiedSince = conditions.ifModifiedSince;
+  const head = await s3.send(new HeadObjectCommand(input));
+  const stored = { etag: head.ETag, lastModified: head.LastModified ? new Date(head.LastModified).toUTCString() : undefined };
+  if (ifRange && !ifRangeMatches(ifRange, stored)) return null;
+  const size = Number(head.ContentLength);
+  const headers = { 'content-type': 'text/plain; charset=utf-8' };
+  if (size >= 0 && isFinite(size)) headers['content-range'] = 'bytes */' + size;
+  return { statusCode: 416, headers, body: 'Range Not Satisfiable', isBase64Encoded: false };
+}
+
+// Whether an If-Range validator names the object served: a strong ETag equal
+// to the object's, or a date equal to its Last-Modified (a weak ETag never
+// matches; RFC 9110 requires a strong comparison).
+function ifRangeMatches(value, found) {
+  const v = value.trim();
+  if (v.charAt(0) === '"') return Boolean(found.etag) && found.etag === v;
+  if (/^W\\//i.test(v)) return false;
+  const date = Date.parse(v);
+  return Boolean(found.lastModified) && !isNaN(date) && date === Date.parse(found.lastModified);
 }
 
 function isNotModified(err) {
@@ -380,12 +459,32 @@ async function serveUri(requestUri, requestHeaders) {
   // A weak validator names the same object (a gzipped representation's).
   const ifNoneMatch = req['if-none-match'] ? req['if-none-match'].replace(/^W\\//, '') : undefined;
   const ifModifiedSince = req['if-modified-since'] ? new Date(req['if-modified-since']) : undefined;
+  const conditions = {
+    ifNoneMatch,
+    ifModifiedSince: ifModifiedSince && !isNaN(ifModifiedSince.getTime()) ? ifModifiedSince : undefined,
+  };
+  const range = singleRange(req.range);
+  const ifRange = req['if-range'];
   let found;
   try {
-    found = await fetchKey(key, {
-      ifNoneMatch,
-      ifModifiedSince: ifModifiedSince && !isNaN(ifModifiedSince.getTime()) ? ifModifiedSince : undefined,
-    });
+    if (range === 'unsatisfiable') {
+      const answer = await unsatisfiableRange(key, conditions, ifRange);
+      if (answer) return answer;
+    } else {
+      try {
+        found = await fetchKey(key, range ? Object.assign({ range }, conditions) : conditions);
+      } catch (err) {
+        // Past the end (or any range of an empty file): a 416, unless If-Range
+        // names another version than the one stored, which gets the whole file.
+        if (!range || !isRangeNotSatisfiable(err)) throw err;
+        const answer = await unsatisfiableRange(key, conditions, ifRange);
+        if (answer) return answer;
+      }
+    }
+    // A range of another version than the client holds: the whole file instead.
+    if (!found || (found.contentRange && ifRange && !ifRangeMatches(ifRange, found))) {
+      found = await fetchKey(key, conditions);
+    }
   } catch (err) {
     if (isNotModified(err)) {
       // The validator of the matched representation: the client's tag when it
@@ -408,10 +507,14 @@ async function serveUri(requestUri, requestHeaders) {
     'cache-control': cacheControlFor(found.cacheControl, found.contentType.indexOf('text/html') === 0),
   };
   if (found.lastModified) headers['last-modified'] = found.lastModified;
+  headers['accept-ranges'] = 'bytes';
+  // A range is of the stored bytes: sent as read, never gzipped.
+  const partial = Boolean(found.contentRange);
+  if (partial) headers['content-range'] = found.contentRange;
   let body = found.buf;
   const compressible = COMPRESSIBLE.test(found.contentType);
   if (compressible) headers.vary = 'accept-encoding';
-  if (compressible && gzip && body.length >= MIN_COMPRESS_BYTES) {
+  if (compressible && gzip && !partial && body.length >= MIN_COMPRESS_BYTES) {
     body = found.etag || found.lastModified ? gzipOnce(key, found.etag || found.lastModified, body) : zlib.gzipSync(body);
     headers['content-encoding'] = 'gzip';
     if (found.etag) headers.etag = 'W/' + found.etag.replace(/^W\\//, '');
@@ -420,7 +523,7 @@ async function serveUri(requestUri, requestHeaders) {
   }
   const rule = blocksHeaders(requestUri);
   for (const name in rule) headers[name] = rule[name];
-  return { statusCode: 200, headers, body: body.toString('base64'), isBase64Encoded: true };
+  return { statusCode: partial ? 206 : 200, headers, body: body.toString('base64'), isBase64Encoded: true };
 }
 `;
 };

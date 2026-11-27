@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { type AssetProxyOptions, assetProxyCoreJs } from './asset_proxy_core.js';
+import { LAMBDA_SYNC_RESPONSE_LIMIT, maxRangeBytes } from './proxy_limits.js';
 
 /**
  * Static asset-proxy Lambda for API Gateway v2 / Lambda Function URL front doors.
@@ -35,8 +36,12 @@ import { type AssetProxyOptions, assetProxyCoreJs } from './asset_proxy_core.js'
  * @param opts.headers       the app's per-pattern response headers, applied to a successful response
  * @param opts.errorPages    the app's error pages (`404.html` / `500.html` keys under the build prefix)
  * @param opts.imageFallback answer the framework image endpoints with the source image (no image function)
+ * @param opts.maxRangeBytes the most bytes a 206 carries (default: what fits Lambda's 6 MB response limit)
  */
-export const generateApiGwAssetProxyCode = (opts: AssetProxyOptions): string => `${assetProxyCoreJs(opts)}
+export const generateApiGwAssetProxyCode = (opts: AssetProxyOptions): string => `${assetProxyCoreJs({
+  ...opts,
+  maxRangeBytes: opts.maxRangeBytes ?? maxRangeBytes(LAMBDA_SYNC_RESPONSE_LIMIT),
+})}
 exports.handler = async (event) => {
   // Payload 2.0 (HTTP API / Function URL): rawPath. Payload 1.0 (REST API): path.
   // The REST API front door invokes this Lambda with the v1 envelope, so read

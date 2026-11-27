@@ -344,6 +344,15 @@ asset proxy also:
   client that accepts it (`Vary: accept-encoding`);
 - returns `ETag` and `Last-Modified`, and answers a matching `If-None-Match` /
   `If-Modified-Since` with a body-less 304;
+- answers a single byte range (`Range: bytes=0-9`, `bytes=500-`, `bytes=-500`)
+  with a 206 and `Content-Range`, read from S3 as that range and never gzipped.
+  A range longer than the door's response limit allows, including a browser's
+  first media request `bytes=0-`, is shortened to what fits and the client asks
+  for the rest, so media seeking and resumable downloads work for files of any
+  size (see **Size and time limits** below).
+  A range no byte of the file satisfies (past the end, `bytes=-0`) is a 416.
+  Several ranges, a malformed range, or an `If-Range` naming another version of
+  the file get the whole file (200). File responses carry `Accept-Ranges: bytes`;
 - adds `Strict-Transport-Security`, `X-Content-Type-Options`, `X-Frame-Options`
   and `Referrer-Policy` to every response (an app header rule of the same name
   wins). Server and API responses don't pass the proxy and don't get them.
@@ -455,7 +464,10 @@ file is capped by that response's limit:
 | ALB (Lambda target) | 1 MB | 750 KB (a compressible file: 750 KB gzipped) |
 | API Gateway (Lambda proxy integration) | 6 MB (Lambda's response limit, below API Gateway's 10 MB payload limit) | 4.5 MB |
 
-Synth lists every build asset over the limit
+The limit applies to the bytes a response carries. A byte range is shortened
+to what fits (about 704 KiB on ALB, 4.4 MiB on API Gateway), so media and
+ranged downloads of a larger file work; a request for the whole file still
+fails. Synth lists every build asset over the limit
 (`@aws-cdk-blocks/hosting:AssetExceedsProxyLimit`). Serve large files from the
 CloudFront door or the stacked door (static files come straight from S3), or
 from a file bucket. The same limits bind everything else these doors carry:

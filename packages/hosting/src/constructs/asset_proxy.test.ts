@@ -26,8 +26,14 @@ type StoredObject = {
   etag?: string;
   lastModified?: Date;
 };
-type GetInput = { Bucket: string; Key: string; IfNoneMatch?: string; IfModifiedSince?: Date };
-type ProxyResponse = { statusCode: number; headers: Record<string, string>; body: string; isBase64Encoded: boolean };
+type GetInput = { Bucket: string; Key: string; IfNoneMatch?: string; IfModifiedSince?: Date; Range?: string };
+type ProxyResponse = {
+  statusCode: number;
+  statusDescription?: string;
+  headers: Record<string, string>;
+  body: string;
+  isBase64Encoded: boolean;
+};
 type ProxyHandler = (event: Record<string, unknown>) => Promise<ProxyResponse>;
 
 const PREFIX = 'builds/b1';
@@ -38,14 +44,26 @@ const loadHandler = (
   objects: Record<string, StoredObject>,
   reads: GetInput[] = [],
   zlibImpl: Pick<typeof zlib, 'gzipSync'> = zlib,
+  heads: GetInput[] = [],
 ): ProxyHandler => {
   class GetObjectCommand {
     constructor(readonly input: GetInput) {}
   }
+  class HeadObjectCommand {
+    constructor(readonly input: GetInput) {}
+  }
   class S3Client {
-    async send(cmd: GetObjectCommand) {
-      reads.push(cmd.input);
+    async send(cmd: GetObjectCommand | HeadObjectCommand) {
       const obj = objects[cmd.input.Key];
+      if (cmd instanceof HeadObjectCommand) {
+        heads.push(cmd.input);
+        if (!obj) throw Object.assign(new Error('NotFound'), { name: 'NotFound', $metadata: { httpStatusCode: 404 } });
+        if (obj.etag && cmd.input.IfNoneMatch?.split(',').some((tag) => tag.trim().replace(/^W\//, '') === obj.etag)) {
+          throw Object.assign(new Error('Not Modified'), { name: '304', $metadata: { httpStatusCode: 304 } });
+        }
+        return { ContentLength: Buffer.from(obj.body).length, ETag: obj.etag, LastModified: obj.lastModified };
+      }
+      reads.push(cmd.input);
       if (!obj) throw Object.assign(new Error('NoSuchKey'), { name: 'NoSuchKey', $metadata: { httpStatusCode: 404 } });
       if (obj.fails) {
         throw Object.assign(new Error('S3 failed'), { name: 'InternalError', $metadata: { httpStatusCode: obj.fails } });
@@ -53,8 +71,33 @@ const loadHandler = (
       if (obj.etag && cmd.input.IfNoneMatch?.split(',').some((tag) => tag.trim().replace(/^W\//, '') === obj.etag)) {
         throw Object.assign(new Error('Not Modified'), { name: '304', $metadata: { httpStatusCode: 304 } });
       }
+      const whole = Buffer.from(obj.body);
+      // S3's single-range semantics: `bytes=a-b`, `bytes=a-` or `bytes=-n`; a
+      // start past the end (so any range of an empty object) or an empty
+      // suffix is an InvalidRange (416) carrying the object size. The proxy
+      // answers `bytes=-0` itself and never sends it.
+      let body = whole;
+      let contentRange: string | undefined;
+      const range = cmd.input.Range ? /^bytes=(\d*)-(\d*)$/.exec(cmd.input.Range) : null;
+      if (range) {
+        const size = whole.length;
+        const [first, last] =
+          range[1] === ''
+            ? [Math.max(0, size - Number(range[2])), size - 1]
+            : [Number(range[1]), range[2] === '' ? size - 1 : Math.min(Number(range[2]), size - 1)];
+        if (first >= size || (range[1] === '' && Number(range[2]) === 0)) {
+          throw Object.assign(new Error('The requested range is not satisfiable'), {
+            name: 'InvalidRange',
+            ActualObjectSize: String(size),
+            $metadata: { httpStatusCode: 416 },
+          });
+        }
+        body = whole.subarray(first, last + 1);
+        contentRange = `bytes ${first}-${last}/${size}`;
+      }
       return {
-        Body: [Buffer.from(obj.body)],
+        Body: [body],
+        ContentRange: contentRange,
         ContentType: obj.contentType,
         CacheControl: obj.cacheControl,
         ETag: obj.etag,
@@ -64,7 +107,7 @@ const loadHandler = (
   }
   const mod: { exports: { handler?: ProxyHandler } } = { exports: {} };
   const fakeRequire = (id: string) => {
-    if (id === '@aws-sdk/client-s3') return { S3Client, GetObjectCommand };
+    if (id === '@aws-sdk/client-s3') return { S3Client, GetObjectCommand, HeadObjectCommand };
     if (id === 'node:zlib') return zlibImpl;
     throw new Error(`unexpected require: ${id}`);
   };
@@ -435,6 +478,193 @@ for (const [label, generate, event] of variants) {
         assert.equal(res.headers['content-security-policy'], "default-src 'self'", `${res.statusCode}`);
       }
     });
+  });
+}
+
+// ── Byte ranges (media seeking, resumable downloads) ───────────────────────
+
+const VIDEO = Buffer.from(Array.from({ length: 4096 }, (_v, i) => i % 128)).toString('latin1'); // ASCII: the stub stores strings as UTF-8
+const RANGE_OBJECTS: Record<string, StoredObject> = {
+  ...PATH_OBJECTS,
+  [`${PREFIX}/media/clip.mp4`]: {
+    body: VIDEO,
+    contentType: 'video/mp4',
+    etag: '"clip-etag"',
+    lastModified: new Date('2026-01-02T03:04:05Z'),
+  },
+};
+const bytes = (res: ProxyResponse): Buffer => Buffer.from(res.body, res.isBase64Encoded ? 'base64' : 'utf8');
+
+for (const [label, generate, event] of variants) {
+  describe(`${label} asset proxy — byte ranges`, () => {
+    it('answers a single range with 206, Content-Range and only those bytes (S3 reads the range)', async () => {
+      const reads: GetInput[] = [];
+      const proxy = loadHandler(generate({ spaFallback: false }), RANGE_OBJECTS, reads);
+      const res = await proxy(event('/robots.txt', { range: 'bytes=0-9' }));
+      assert.equal(res.statusCode, 206);
+      assert.equal(decode(res), 'User-agent');
+      assert.equal(res.headers['content-range'], 'bytes 0-9/13');
+      assert.equal(res.headers['accept-ranges'], 'bytes');
+      assert.equal(reads[0]?.Range, 'bytes=0-9');
+      assert.equal(res.headers['strict-transport-security'], 'max-age=31536000');
+    });
+
+    it('serves open-ended and suffix ranges of a binary file', async () => {
+      const proxy = loadHandler(generate({ spaFallback: false }), RANGE_OBJECTS);
+      const tail = await proxy(event('/media/clip.mp4', { range: 'bytes=4000-' }));
+      assert.equal(tail.statusCode, 206);
+      assert.equal(tail.headers['content-range'], 'bytes 4000-4095/4096');
+      assert.deepEqual(bytes(tail), Buffer.from(VIDEO, 'latin1').subarray(4000));
+      const suffix = await proxy(event('/media/clip.mp4', { range: 'bytes=-16' }));
+      assert.equal(suffix.headers['content-range'], 'bytes 4080-4095/4096');
+      assert.equal(bytes(suffix).length, 16);
+      assert.equal(suffix.headers.etag, '"clip-etag"');
+    });
+
+    it('advertises Accept-Ranges on a full response', async () => {
+      const proxy = loadHandler(generate({ spaFallback: false }), RANGE_OBJECTS);
+      const res = await proxy(event('/media/clip.mp4'));
+      assert.equal(res.statusCode, 200);
+      assert.equal(res.headers['accept-ranges'], 'bytes');
+      assert.equal(res.headers['content-range'], undefined);
+    });
+
+    it('never gzips a ranged response (the range is of the stored bytes)', async () => {
+      const proxy = loadHandler(generate({ spaFallback: false }), RANGE_OBJECTS);
+      const res = await proxy(event('/assets/big-abc.js', { range: 'bytes=0-99', 'accept-encoding': 'gzip' }));
+      assert.equal(res.statusCode, 206);
+      assert.equal(res.headers['content-encoding'], undefined);
+      assert.equal(decode(res), BIG_JS.slice(0, 100));
+      assert.equal(res.headers.etag, '"big-etag"', 'the identity representation keeps its strong validator');
+    });
+
+    it('answers an unsatisfiable range with 416 and the size in Content-Range', async () => {
+      const proxy = loadHandler(generate({ spaFallback: false }), RANGE_OBJECTS);
+      const res = await proxy(event('/robots.txt', { range: 'bytes=100-200' }));
+      assert.equal(res.statusCode, 416);
+      assert.equal(res.headers['content-range'], 'bytes */13');
+      assert.equal(res.headers['x-content-type-options'], 'nosniff');
+    });
+
+    it('ignores several ranges or a malformed one: the whole file, 200 (never sent to S3)', async () => {
+      const reads: GetInput[] = [];
+      const proxy = loadHandler(generate({ spaFallback: false }), RANGE_OBJECTS, reads);
+      for (const range of ['bytes=0-1,5-6', 'bytes=9-2', 'bytes=-', 'items=0-9', 'bytes=abc']) {
+        const res = await proxy(event('/robots.txt', { range }));
+        assert.equal(res.statusCode, 200, range);
+        assert.equal(decode(res), 'User-agent: *', range);
+      }
+      assert.ok(reads.every((r) => r.Range === undefined));
+    });
+
+    it('honors If-Range: a matching ETag or date gets the range, a changed file the whole body', async () => {
+      const proxy = loadHandler(generate({ spaFallback: false }), RANGE_OBJECTS);
+      const same = await proxy(event('/media/clip.mp4', { range: 'bytes=0-9', 'if-range': '"clip-etag"' }));
+      assert.equal(same.statusCode, 206);
+      const sameDate = await proxy(event('/media/clip.mp4', { range: 'bytes=0-9', 'if-range': 'Fri, 02 Jan 2026 03:04:05 GMT' }));
+      assert.equal(sameDate.statusCode, 206);
+      for (const ifRange of ['"older-etag"', 'W/"clip-etag"', 'Thu, 01 Jan 2026 00:00:00 GMT']) {
+        const changed = await proxy(event('/media/clip.mp4', { range: 'bytes=0-9', 'if-range': ifRange }));
+        assert.equal(changed.statusCode, 200, ifRange);
+        assert.equal(bytes(changed).length, 4096, ifRange);
+        assert.equal(changed.headers['content-range'], undefined, ifRange);
+      }
+      // An unsatisfiable range under a non-matching If-Range is the whole file, not a 416.
+      const stale = await proxy(event('/media/clip.mp4', { range: 'bytes=9000-', 'if-range': '"older-etag"' }));
+      assert.equal(stale.statusCode, 200);
+    });
+
+    it('a matching If-None-Match still answers 304 for a ranged request', async () => {
+      const proxy = loadHandler(generate({ spaFallback: false }), RANGE_OBJECTS);
+      const res = await proxy(event('/media/clip.mp4', { range: 'bytes=0-9', 'if-none-match': '"clip-etag"' }));
+      assert.equal(res.statusCode, 304);
+    });
+
+    it('shortens a range longer than maxRangeBytes, open-ended and suffix ones too (S3 reads only that much)', async () => {
+      const reads: GetInput[] = [];
+      const proxy = loadHandler(generate({ spaFallback: false, maxRangeBytes: 1000 }), RANGE_OBJECTS, reads);
+      const video = Buffer.from(VIDEO, 'latin1');
+      const first = await proxy(event('/media/clip.mp4', { range: 'bytes=0-' }));
+      assert.equal(first.statusCode, 206);
+      assert.equal(first.headers['content-range'], 'bytes 0-999/4096');
+      assert.deepEqual(bytes(first), video.subarray(0, 1000));
+      const middle = await proxy(event('/media/clip.mp4', { range: 'bytes=100-3000' }));
+      assert.equal(middle.headers['content-range'], 'bytes 100-1099/4096');
+      const suffix = await proxy(event('/media/clip.mp4', { range: 'bytes=-2000' }));
+      assert.equal(suffix.headers['content-range'], 'bytes 3096-4095/4096');
+      const fits = await proxy(event('/media/clip.mp4', { range: 'bytes=3500-' }));
+      assert.equal(fits.headers['content-range'], 'bytes 3500-4095/4096');
+      assert.deepEqual(
+        reads.map((r) => r.Range),
+        ['bytes=0-999', 'bytes=100-1099', 'bytes=-1000', 'bytes=3500-4499'],
+      );
+    });
+
+    it('caps a range at what fits the door by default', () => {
+      const code = generate({ spaFallback: false });
+      const cap = Number(/const MAX_RANGE_BYTES = (\d+);/.exec(code)?.[1]);
+      assert.equal(cap, label === 'ALB' ? 720896 : 4653056);
+      // The base64 body plus the envelope stays under the door's response limit.
+      assert.ok(4 * Math.ceil(cap / 3) + 2048 <= (label === 'ALB' ? 1_000_000 : 6 * 1024 * 1024));
+    });
+
+    it('clamps a suffix longer than the file and an end past it to the file', async () => {
+      const proxy = loadHandler(generate({ spaFallback: false }), RANGE_OBJECTS);
+      const suffix = await proxy(event('/robots.txt', { range: 'bytes=-500' }));
+      assert.equal(suffix.statusCode, 206);
+      assert.equal(suffix.headers['content-range'], 'bytes 0-12/13');
+      assert.equal(decode(suffix), 'User-agent: *');
+      const end = await proxy(event('/robots.txt', { range: 'bytes=5-999' }));
+      assert.equal(end.statusCode, 206);
+      assert.equal(end.headers['content-range'], 'bytes 5-12/13');
+      assert.equal(decode(end), 'agent: *');
+    });
+
+    it('answers 416 for bytes=-0 (no S3 read) and for any range of an empty file', async () => {
+      const reads: GetInput[] = [];
+      const objects = { ...RANGE_OBJECTS, [`${PREFIX}/empty.txt`]: { body: '', contentType: 'text/plain' } };
+      const proxy = loadHandler(generate({ spaFallback: false }), objects, reads);
+      const zero = await proxy(event('/robots.txt', { range: 'bytes=-0' }));
+      assert.equal(zero.statusCode, 416);
+      assert.equal(zero.headers['content-range'], 'bytes */13');
+      assert.equal(reads.length, 0, 'bytes=-0 is answered from a HEAD');
+      const empty = await proxy(event('/empty.txt', { range: 'bytes=0-' }));
+      assert.equal(empty.statusCode, 416);
+      assert.equal(empty.headers['content-range'], 'bytes */0');
+      const missing = await proxy(event('/missing.txt', { range: 'bytes=-0' }));
+      assert.equal(missing.statusCode, 404);
+    });
+
+    it('answers 416 for an unsatisfiable range when If-Range names the stored file (ETag or date)', async () => {
+      const heads: GetInput[] = [];
+      const proxy = loadHandler(generate({ spaFallback: false }), RANGE_OBJECTS, [], zlib, heads);
+      for (const ifRange of ['"clip-etag"', 'Fri, 02 Jan 2026 03:04:05 GMT']) {
+        const res = await proxy(event('/media/clip.mp4', { range: 'bytes=4096-', 'if-range': ifRange }));
+        assert.equal(res.statusCode, 416, ifRange);
+        assert.equal(res.headers['content-range'], 'bytes */4096', ifRange);
+      }
+      assert.equal(heads.length, 2);
+    });
+
+    it('serves the whole file for an If-Range on a file with no ETag or Last-Modified', async () => {
+      const proxy = loadHandler(generate({ spaFallback: false }), RANGE_OBJECTS);
+      const ranged = await proxy(event('/robots.txt', { range: 'bytes=0-3', 'if-range': '"any-etag"' }));
+      assert.equal(ranged.statusCode, 200);
+      assert.equal(decode(ranged), 'User-agent: *');
+      const past = await proxy(event('/robots.txt', { range: 'bytes=100-', 'if-range': 'Fri, 02 Jan 2026 03:04:05 GMT' }));
+      assert.equal(past.statusCode, 200);
+      assert.equal(decode(past), 'User-agent: *');
+    });
+
+    if (label === 'ALB') {
+      it('gives a 206 and a 416 their ALB status description', async () => {
+        const proxy = loadHandler(generate({ spaFallback: false }), RANGE_OBJECTS);
+        const partial = await proxy(event('/robots.txt', { range: 'bytes=0-9' }));
+        assert.equal(partial.statusDescription, '206 Partial Content');
+        const unsatisfiable = await proxy(event('/robots.txt', { range: 'bytes=100-' }));
+        assert.equal(unsatisfiable.statusDescription, '416 Range Not Satisfiable');
+      });
+    }
   });
 }
 
