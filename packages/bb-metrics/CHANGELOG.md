@@ -1,5 +1,48 @@
 # @aws-cdk-blocks/bb-metrics
 
+## 1.1.0
+
+### Minor Changes
+
+- 8d9b5e7: `emit` and `emitBatch` now write every data point to its own EMF key without overwriting dimensions or the `_aws` envelope.
+
+  - A metric name equal to one of its dimension keys, or a metric name or dimension key of `_aws`, now throws `MetricsErrors.InvalidMetricName` or `MetricsErrors.InvalidDimensions`. Previously the metric value replaced the dimension value or the EMF metadata, so the metric was not published.
+  - A metric name repeated in one `emitBatch` call is written to a separate EMF document, so every value is recorded. Previously only the last value was kept. Metrics that hit this record more data points after upgrading, so their `Sum` and `SampleCount` statistics go up.
+  - Dimension sets are grouped by an unambiguous key, so `{ a: '1&b=2' }` and `{ a: '1', b: '2' }` are no longer reported under the same dimensions.
+  - Metrics with different timestamps in one batch are written with their own timestamps instead of the first metric's.
+  - A value that is not a finite number (`NaN`, `Infinity`) or a timestamp that is not a valid `Date` is now left out of the document with a warning through the `logger` option, and the rest of the batch is still written. Previously it was written as `null`, and an invalid timestamp made CloudWatch skip the whole document. Nothing is thrown, so a ratio that is `NaN` at zero traffic does not fail the request.
+  - `MetricUnit` now lists all 27 units CloudWatch accepts, including `Count/Second`, `Bytes/Second` and `Terabytes`. A unit outside that list throws the new `MetricsErrors.InvalidUnit`. Previously it was passed through unchecked.
+  - A metric named `__proto__` now gets its own value key instead of being written without a value.
+
+### Patch Changes
+
+- 8fc2801: The npm discovery keyword is now `cdk-blocks`. Every published package carries it in place of `aws-blocks`, so find them with `npm search keywords:cdk-blocks`. If you publish your own Building Block, tag it `cdk-blocks` to be listed with them. `@aws-cdk-blocks/create-block` scaffolds the new keyword, and in every mode, not only outside the monorepo.
+
+  The Building Block catalog in the `aws-cdk-blocks` README lists keywords for every block. They come from the `keywords` of each package's `package.json`, without the `cdk-blocks` tag that every package carries. Before, the catalog read a `**Keywords:**` line in each README, which only `bb-async-job` and `bb-cron-job` had, so the other 19 rows were blank.
+
+  The `bb-async-job` and `bb-cron-job` READMEs no longer have that line. Its terms moved to the `keywords` of each package, so `npm search` finds them too: for example `worker`, `retry` and `batch` for `bb-async-job`, and `schedule`, `periodic` and `recurring` for `bb-cron-job`.
+
+  The README template of `@aws-cdk-blocks/create-block` no longer has a `**Keywords:**` line, and the next steps printed for a block scaffolded in this repository say to add keywords to its `package.json`.
+
+- Updated dependencies [62eb34e]
+- Updated dependencies [1e88d52]
+- Updated dependencies [8fc2801]
+- Updated dependencies [d54eef0]
+- Updated dependencies [bc97b17]
+- Updated dependencies [3b66b2a]
+- Updated dependencies [00d30e5]
+- Updated dependencies [00d30e5]
+- Updated dependencies [2bba814]
+- Updated dependencies [87dec66]
+- Updated dependencies [67336fc]
+- Updated dependencies [dc0957f]
+- Updated dependencies [89d006b]
+- Updated dependencies [c6cd41c]
+- Updated dependencies [ae00f24]
+- Updated dependencies [dcbc505]
+  - @aws-cdk-blocks/core@1.0.2
+  - @aws-cdk-blocks/bb-logger@1.0.1
+
 ## 1.0.0
 
 The first stable release, with no changes since 1.0.0-rc.2. The notes for every change since 0.x are under 1.0.0-rc.0, 1.0.0-rc.1 and 1.0.0-rc.2.

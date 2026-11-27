@@ -1,5 +1,44 @@
 # @aws-cdk-blocks/bb-cron-job
 
+## 1.0.1
+
+### Patch Changes
+
+- 8fc2801: The npm discovery keyword is now `cdk-blocks`. Every published package carries it in place of `aws-blocks`, so find them with `npm search keywords:cdk-blocks`. If you publish your own Building Block, tag it `cdk-blocks` to be listed with them. `@aws-cdk-blocks/create-block` scaffolds the new keyword, and in every mode, not only outside the monorepo.
+
+  The Building Block catalog in the `aws-cdk-blocks` README lists keywords for every block. They come from the `keywords` of each package's `package.json`, without the `cdk-blocks` tag that every package carries. Before, the catalog read a `**Keywords:**` line in each README, which only `bb-async-job` and `bb-cron-job` had, so the other 19 rows were blank.
+
+  The `bb-async-job` and `bb-cron-job` READMEs no longer have that line. Its terms moved to the `keywords` of each package, so `npm search` finds them too: for example `worker`, `retry` and `batch` for `bb-async-job`, and `schedule`, `periodic` and `recurring` for `bb-cron-job`.
+
+  The README template of `@aws-cdk-blocks/create-block` no longer has a `**Keywords:**` line, and the next steps printed for a block scaffolded in this repository say to add keywords to its `package.json`.
+
+- e657fe6: Reject CronJob schedules that EventBridge Scheduler would reject at deploy, in local dev and at synth instead of minutes into `cdk deploy`. A cron expression must set exactly one of day-of-month and day-of-week to `?`, so `cron(0 12 * * MON *)` and `cron(0 0 ? * ? *)` now throw `CronJobErrors.InvalidSchedule`. A day-of-month that no listed month has, such as `cron(0 0 30 2 ? *)`, now throws `CronJobErrors.InvalidSchedule` instead of logging a warning in the local mock. The local mock now throws `CronJobErrors.InvalidTimezone` for `timezone: ''`, as synth already did. A CronJob constructed in the AWS runtime now runs the same schedule and timezone checks as synth, so it rejects the same inputs as the local mock.
+- e1c5c6f: The CronJob local mock now sets `scheduledTime` to the schedule slot, formatted to whole seconds (for example `2026-03-01T00:10:00Z`), as EventBridge Scheduler does. It used to report the moment the local timer ran, with milliseconds.
+- ae00f24: The test helper that checks every IAM role carries `defaults.permissionsBoundary` and is listed in the IAM report now has one definition in `@aws-cdk-blocks/core` instead of a copy in five packages' tests. Behaviour is unchanged.
+- Updated dependencies [62eb34e]
+- Updated dependencies [1e88d52]
+- Updated dependencies [2fdfac1]
+- Updated dependencies [4d0a639]
+- Updated dependencies [8fc2801]
+- Updated dependencies [d54eef0]
+- Updated dependencies [bc97b17]
+- Updated dependencies [3b66b2a]
+- Updated dependencies [00d30e5]
+- Updated dependencies [00d30e5]
+- Updated dependencies [2bba814]
+- Updated dependencies [87dec66]
+- Updated dependencies [67336fc]
+- Updated dependencies [dc0957f]
+- Updated dependencies [89d006b]
+- Updated dependencies [c6cd41c]
+- Updated dependencies [ae00f24]
+- Updated dependencies [dcbc505]
+  - @aws-cdk-blocks/core@1.0.2
+  - @aws-cdk-blocks/bb-async-job@1.0.1
+  - @aws-cdk-blocks/bb-container-compute@1.0.1
+  - @aws-cdk-blocks/bb-lambda-compute@1.0.1
+  - @aws-cdk-blocks/bb-logger@1.0.1
+
 ## 1.0.0
 
 The first stable release, with no changes since 1.0.0-rc.2. The notes for every change since 0.x are under 1.0.0-rc.0, 1.0.0-rc.1 and 1.0.0-rc.2.

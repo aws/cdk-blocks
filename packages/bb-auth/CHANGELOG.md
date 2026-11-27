@@ -1,5 +1,50 @@
 # @aws-cdk-blocks/bb-auth
 
+## 1.0.1
+
+### Patch Changes
+
+- e5c661f: The local user pool now refuses a password in the format Cognito refuses: one that begins or ends with whitespace, or contains a line break. `signUp`, `confirmResetPassword`, `updatePassword` (the old and the new password), `auth.admin.setUserPassword` and the `temporaryPassword` of `auth.admin.createUser` answer `InvalidParameterException` (status 400) for such a password under `npm run dev` and in tests, the same answer Cognito gives on AWS. Before, the local user pool stored the password, so a sign-up that worked locally failed after deploy. Other whitespace inside a password is still allowed.
+- e103a68: The local user pool now refuses usernames and passwords that Cognito refuses (an empty username, one over 128 characters or containing whitespace or control characters, and a password over 256 characters) with `InvalidParameterException` before storing anything.
+- 62eb34e: `Auth` reports `@aws-cdk-blocks/bb-auth:RemovalPolicyUnset` only when the user pool would be deleted outside a sandbox: `removalPolicy` is unset, the stack default is `RemovalPolicy.DESTROY`, and the deployment is not a sandbox. Before, every `Auth` without `removalPolicy` got the warning on every synth, including under `BlocksPresets.production`, which retains the pool, and in a sandbox, where the pool is meant to be deleted.
+- b5cc142: Removed an unused internal method of the `Auth` session store that replaced a session without checking that it was unchanged. Nothing called it, so behaviour is unchanged.
+- 8fc2801: The npm discovery keyword is now `cdk-blocks`. Every published package carries it in place of `aws-blocks`, so find them with `npm search keywords:cdk-blocks`. If you publish your own Building Block, tag it `cdk-blocks` to be listed with them. `@aws-cdk-blocks/create-block` scaffolds the new keyword, and in every mode, not only outside the monorepo.
+
+  The Building Block catalog in the `aws-cdk-blocks` README lists keywords for every block. They come from the `keywords` of each package's `package.json`, without the `cdk-blocks` tag that every package carries. Before, the catalog read a `**Keywords:**` line in each README, which only `bb-async-job` and `bb-cron-job` had, so the other 19 rows were blank.
+
+  The `bb-async-job` and `bb-cron-job` READMEs no longer have that line. Its terms moved to the `keywords` of each package, so `npm search` finds them too: for example `worker`, `retry` and `batch` for `bb-async-job`, and `schedule`, `periodic` and `recurring` for `bb-cron-job`.
+
+  The README template of `@aws-cdk-blocks/create-block` no longer has a `**Keywords:**` line, and the next steps printed for a block scaffolded in this repository say to add keywords to its `package.json`.
+
+- ae00f24: The test helper that checks every IAM role carries `defaults.permissionsBoundary` and is listed in the IAM report now has one definition in `@aws-cdk-blocks/core` instead of a copy in five packages' tests. Behaviour is unchanged.
+- Updated dependencies [62eb34e]
+- Updated dependencies [1e88d52]
+- Updated dependencies [74a0338]
+- Updated dependencies [8fc2801]
+- Updated dependencies [d54eef0]
+- Updated dependencies [bc97b17]
+- Updated dependencies [3b66b2a]
+- Updated dependencies [00d30e5]
+- Updated dependencies [00d30e5]
+- Updated dependencies [2bba814]
+- Updated dependencies [87dec66]
+- Updated dependencies [67336fc]
+- Updated dependencies [dc0957f]
+- Updated dependencies [82bc015]
+- Updated dependencies [e9f4af0]
+- Updated dependencies [89d006b]
+- Updated dependencies [c6cd41c]
+- Updated dependencies [42e947d]
+- Updated dependencies [1cd3cc2]
+- Updated dependencies [ae00f24]
+- Updated dependencies [dcbc505]
+  - @aws-cdk-blocks/core@1.0.2
+  - @aws-cdk-blocks/bb-app-setting@1.0.1
+  - @aws-cdk-blocks/auth-common@1.0.1
+  - @aws-cdk-blocks/bb-kv-store@1.0.1
+  - @aws-cdk-blocks/bb-logger@1.0.1
+  - @aws-cdk-blocks/bb-secret@1.0.1
+
 ## 1.0.0
 
 The first stable release. The changes since 1.0.0-rc.1 are listed below. The notes for every other change since 0.x are under 1.0.0-rc.0 and 1.0.0-rc.1.
