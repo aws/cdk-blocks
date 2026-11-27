@@ -93,9 +93,11 @@ class DartCodeGenerator {
       );
     }
 
+    // With an OIDC client come the exceptions it throws, so an app can catch
+    // a cancelled sign-in without importing blocks_runtime itself.
     if (transferableTags.contains('oidc/client')) {
       buf.writeln(
-        "export 'package:blocks_runtime/blocks_runtime.dart' show OidcClient, OidcAuthState, OidcSignedIn, OidcSignedOut, OidcLoading, OidcUser, TokenStore, InMemoryTokenStore, AuthProvider, BrowserLauncher, ProviderConfig;",
+        "export 'package:blocks_runtime/blocks_runtime.dart' show OidcClient, OidcAuthState, OidcSignedIn, OidcSignedOut, OidcLoading, OidcUser, TokenStore, InMemoryTokenStore, AuthProvider, BrowserLauncher, ProviderConfig, OidcException, OidcCallbackException, OidcCancelledException, OidcExchangeException, OidcUnknownProviderException;",
       );
     }
     // Only a library with a typed OIDC result names these, so only it

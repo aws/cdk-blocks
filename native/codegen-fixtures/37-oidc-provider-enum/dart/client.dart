@@ -40,7 +40,12 @@ export 'package:blocks_runtime/blocks_runtime.dart'
         InMemoryTokenStore,
         AuthProvider,
         BrowserLauncher,
-        ProviderConfig;
+        ProviderConfig,
+        OidcException,
+        OidcCallbackException,
+        OidcCancelledException,
+        OidcExchangeException,
+        OidcUnknownProviderException;
 export 'package:blocks_runtime/blocks_runtime.dart'
     show TypedOidcClient, OidcProvider;
 
