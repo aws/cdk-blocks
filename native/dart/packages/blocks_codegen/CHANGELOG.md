@@ -7,6 +7,11 @@
   `--language-version`, and the builder for the package it builds. A language
   version older than 3.0, which generated clients can't compile at, is an
   error.
+- A generated client with an OIDC client re-exports `OidcException` and its
+  subtypes, so an app can catch `OidcCancelledException` without importing
+  `blocks_runtime`.
+- The package page links to the `aws/cdk-blocks` repository and its issue
+  tracker.
 
 ## 1.0.0
 

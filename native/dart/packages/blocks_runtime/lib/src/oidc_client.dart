@@ -783,8 +783,10 @@ class OidcClient implements AuthProvider {
   ///   all, throws a [TransportException]. All of them keep the tokens and
   ///   the state, so a later call can try again.
   ///
-  /// With no refresh token stored, emits [OidcSignedOut]. When a sign-in or
-  /// sign-out finishes while the request is in flight, the response is
+  /// With no refresh token stored, as after a cookie-session sign-in, it
+  /// sends no request and leaves the state as it is: the cookie may still be
+  /// valid, and reading the cookie session is [restore]'s job. When a sign-in
+  /// or sign-out finishes while the request is in flight, the response is
   /// ignored, so it never stores tokens after a sign-out or over a newer
   /// sign-in's.
   Future<void> refresh() async {
@@ -801,10 +803,10 @@ class OidcClient implements AuthProvider {
     try {
       final refreshToken = await tokenStore.get(_key('refresh_token'));
       if (generation != _generation) return;
-      if (refreshToken == null) {
-        _emit(OidcSignedOut());
-        return;
-      }
+      // A cookie session stores no refresh token (the exchange asks for
+      // none): there is nothing to refresh, and the cookie may still be
+      // valid, so the state stays as it is.
+      if (refreshToken == null) return;
 
       final provider = await tokenStore.get(_key('provider'));
       final response = await guardRequest(
@@ -1157,7 +1159,8 @@ class OidcClient implements AuthProvider {
 
   /// Refreshes the access token after the backend rejected a call. Signs out
   /// only when the refresh route rejects the refresh token (see [refresh]);
-  /// any other refresh failure is rethrown, so the call fails with it.
+  /// any other refresh failure is rethrown, so the call fails with it. With
+  /// no refresh token stored, as for a cookie session, it changes nothing.
   @override
   Future<void> onAuthFailure() async {
     await _ready;

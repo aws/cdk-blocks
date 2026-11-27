@@ -78,7 +78,7 @@ const _noteSchema = {
 const _realtimeExport =
     "export 'package:blocks_runtime/blocks_runtime.dart' show RealtimeChannel, FileDownloadHandle, FileUploadHandle, FileTransferException, RealtimeException, RealtimeChannelClosedException, RealtimeConnectionException, RealtimeSubscriptionEndedException, TransferableException, InvalidDescriptorException;";
 const _oidcExport =
-    "export 'package:blocks_runtime/blocks_runtime.dart' show OidcClient, OidcAuthState, OidcSignedIn, OidcSignedOut, OidcLoading, OidcUser, TokenStore, InMemoryTokenStore, AuthProvider, BrowserLauncher, ProviderConfig;";
+    "export 'package:blocks_runtime/blocks_runtime.dart' show OidcClient, OidcAuthState, OidcSignedIn, OidcSignedOut, OidcLoading, OidcUser, TokenStore, InMemoryTokenStore, AuthProvider, BrowserLauncher, ProviderConfig, OidcException, OidcCallbackException, OidcCancelledException, OidcExchangeException, OidcUnknownProviderException;";
 
 void main() {
   group('== and hashCode compare list and map fields deeply', () {
@@ -264,6 +264,7 @@ void main() {
       expect(output, containsSource('  final RealtimeChannel<Note> feed;'));
       expect(output, containsSource(_realtimeExport));
       expect(output, isNot(containsSource(_oidcExport)));
+      expect(output, isNot(contains('OidcException')));
     });
 
     test('a file handle in a list inside a model', () {
@@ -341,6 +342,8 @@ void main() {
       expect(output, containsSource('  final OidcClient client;'));
       expect(output, containsSource(_oidcExport));
       expect(output, containsSource(_realtimeExport));
+      // An app catches a cancelled sign-in through the generated client.
+      expect(output, contains('OidcCancelledException'));
     });
 
     test('a client with no transferables exports neither', () {
@@ -349,6 +352,7 @@ void main() {
       );
       expect(output, isNot(containsSource(_realtimeExport)));
       expect(output, isNot(containsSource(_oidcExport)));
+      expect(output, isNot(contains('OidcException')));
     });
   });
 }

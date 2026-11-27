@@ -935,6 +935,139 @@ void main() {
     });
   });
 
+  group('OidcClient refresh without a refresh token', () {
+    // A cookie session stores no refresh token (the exchange asks for none),
+    // so refresh() and onAuthFailure() have nothing to refresh: they send no
+    // request and leave the state alone. The cookie session is restore()'s
+    // to read.
+    ({OidcClient client, List<String> paths, List<OidcAuthState> states})
+    cookieClient({required bool sessionValid}) {
+      final paths = <String>[];
+      final session = InMemorySessionStore()
+        ..setCookies(
+          'blocks_session=live; Path=/',
+          requestUri: Uri.parse('http://localhost:3000/'),
+        );
+      final client = OidcClient(
+        exchangePath: '/cdk-blocks/auth/exchange',
+        refreshPath: '/cdk-blocks/auth/exchange/refresh',
+        signOutPath: '/cdk-blocks/auth/signout',
+        providers: ['google'],
+        providerConfigs: {},
+        baseUrl: 'http://localhost:3000/cdk-blocks/api',
+        tokenStore: InMemoryTokenStore(),
+        sessionStore: session,
+        httpClient: MockClient((req) async {
+          paths.add(req.url.path);
+          if (!sessionValid) return http.Response('', 401);
+          return http.Response(
+            jsonEncode({
+              'user': {'userId': 'u1', 'username': 'alice'},
+            }),
+            200,
+          );
+        }),
+      );
+      final states = <OidcAuthState>[];
+      client.authStateChanges.listen(states.add);
+      return (client: client, paths: paths, states: states);
+    }
+
+    test('a valid cookie session stays signed in', () async {
+      final t = cookieClient(sessionValid: true);
+      final user = await t.client.restore();
+      expect(user?.userId, 'u1');
+      await Future<void>.delayed(Duration.zero);
+      final before = t.states.length;
+
+      await t.client.refresh();
+      await t.client.onAuthFailure();
+      await Future<void>.delayed(Duration.zero);
+
+      expect(t.states.length, before, reason: 'no state change');
+      expect(
+        t.client.authState,
+        isA<OidcSignedIn>().having((s) => s.user.userId, 'userId', 'u1'),
+      );
+      expect(t.paths, [
+        '/cdk-blocks/auth/session',
+      ], reason: 'only the session read: no refresh request');
+    });
+
+    test('with no session the client is signed out and stays so', () async {
+      final t = cookieClient(sessionValid: false);
+      expect(await t.client.restore(), isNull);
+      expect(t.client.authState, isA<OidcSignedOut>());
+      await Future<void>.delayed(Duration.zero);
+      final before = t.states.length;
+
+      await t.client.refresh();
+      await t.client.onAuthFailure();
+      await Future<void>.delayed(Duration.zero);
+
+      expect(t.states.length, before, reason: 'no state change');
+      expect(t.client.authState, isA<OidcSignedOut>());
+      expect(t.paths, ['/cdk-blocks/auth/session']);
+    });
+
+    test(
+      'a bearer-token sign-in still refreshes with its refresh token',
+      () async {
+        final store = InMemoryTokenStore();
+        final bodies = <String, Map<String, dynamic>>{};
+        final client = OidcClient(
+          exchangePath: '/auth/exchange',
+          refreshPath: '/auth/refresh',
+          signOutPath: '/auth/signout',
+          providers: ['google'],
+          providerConfigs: {},
+          baseUrl: 'http://localhost:3000',
+          tokenStore: store,
+          httpClient: MockClient((req) async {
+            bodies[req.url.path] = jsonDecode(req.body) as Map<String, dynamic>;
+            if (req.url.path == '/auth/refresh') {
+              return http.Response(
+                jsonEncode({
+                  'accessToken': 'at_new',
+                  'refreshToken': 'rt_new',
+                  'expiresIn': 3600,
+                }),
+                200,
+              );
+            }
+            return http.Response(
+              jsonEncode({
+                'accessToken': 'at_1',
+                'refreshToken': 'rt_1',
+                'expiresIn': 3600,
+                'user': {'userId': 'u1', 'username': 'alice'},
+              }),
+              200,
+            );
+          }),
+        );
+        await client.exchange(
+          code: 'c',
+          verifier: 'v',
+          callbackUrl: 'x',
+          provider: 'google',
+          state: 's',
+          nonce: 'n',
+        );
+
+        await client.refresh();
+
+        expect(bodies['/auth/refresh'], {
+          'refreshToken': 'rt_1',
+          'provider': 'google',
+        });
+        expect(await store.get('access_token'), 'at_new');
+        expect(await store.get('refresh_token'), 'rt_new');
+        expect(client.authState, isA<OidcSignedIn>());
+      },
+    );
+  });
+
   group('OidcClient signOut', () {
     final origin = Uri.parse('http://localhost:3000/');
 
