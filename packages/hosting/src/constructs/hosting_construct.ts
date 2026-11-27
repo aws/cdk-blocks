@@ -280,6 +280,20 @@ export type HostingConstructProps = {
       reservedConcurrency?: number;
     };
     /**
+     * Reserved concurrent executions for the ISR revalidation worker (the
+     * SQS-triggered Lambda that refreshes stale pages; only deployed when the
+     * build emits one, e.g. Next.js ISR). Default: undefined (no reservation),
+     * for the same fresh-account reason as `imageOptimization`.
+     *
+     * A reservation is both a cap and a claim: it also takes that many
+     * executions out of the account's unreserved pool. While throttled, SQS
+     * messages return to the queue and move to the DLQ after 3 receives, so
+     * pages stay stale until traffic triggers another revalidation.
+     */
+    revalidation?: {
+      reservedConcurrency?: number;
+    };
+    /**
      * Provisioned concurrency for the SSR Lambda (cold-start elimination).
      * When > 0, the construct creates a `live` alias with this many
      * always-warm execution environments and points the SSR REST API
@@ -1191,6 +1205,8 @@ export class HostingConstruct extends Construct {
           code: Code.fromAsset(manifest.cache.revalidationFunction.bundle),
           timeout: Duration.seconds(30),
           memorySize: 256,
+          // No reservation by default; see `compute.revalidation.reservedConcurrency`.
+          reservedConcurrentExecutions: props.compute?.revalidation?.reservedConcurrency,
           logGroup: revalidationLogGroup,
           environment: {
             CACHE_BUCKET_NAME: this.cacheBucket.bucketName,
@@ -1205,7 +1221,19 @@ export class HostingConstruct extends Construct {
           this.cacheTable.grantReadWriteData(revalidationFn);
         }
 
-        revalidationFn.addEventSource(new SqsEventSource(this.revalidationQueue, { batchSize: 5 }));
+        // Cap the SQS poller at the reservation so messages beyond it wait in the
+        // queue instead of being throttled into the DLQ. SQS maximum concurrency
+        // is 2-1000: a reservation of 0 or 1 leaves the poller uncapped, and one
+        // above 1000 caps it at 1000.
+        const revalidationReservation = props.compute?.revalidation?.reservedConcurrency;
+        revalidationFn.addEventSource(
+          new SqsEventSource(this.revalidationQueue, {
+            batchSize: 5,
+            ...(revalidationReservation !== undefined && revalidationReservation >= 2
+              ? { maxConcurrency: Math.min(revalidationReservation, 1000) }
+              : {}),
+          }),
+        );
 
         this.computeFunctions.set('revalidation', revalidationFn);
       }
