@@ -201,11 +201,15 @@ export class AsyncJob<T = unknown> extends Scope {
 	 *   circular reference).
 	 */
 	async submit(payload: T, options?: SubmitOptions): Promise<{ jobId: string }> {
-		validateDelaySeconds(options?.delaySeconds);
+		const delaySeconds = options?.delaySeconds;
+		validateDelaySeconds(delaySeconds);
 		const body = await this.validatePayload(payload);
+		return this.enqueueValidated(body, delaySeconds ?? 0);
+	}
+
+	private async enqueueValidated(body: string, delaySeconds: number): Promise<{ jobId: string }> {
 		const jobId = randomUUID().slice(0, 13);
 		const sentAt = new Date().toISOString();
-		const delaySeconds = options?.delaySeconds ?? 0;
 
 		this._queue.totalSubmitted++;
 
@@ -242,7 +246,7 @@ export class AsyncJob<T = unknown> extends Scope {
 	/**
 	 * Enqueue multiple jobs in a single call.
 	 *
-	 * The mock runtime enqueues each payload via `submit()` in turn; the AWS
+	 * The mock runtime enqueues each validated payload in turn; the AWS
 	 * runtime instead packs them into SQS `SendMessageBatch` requests. Either way a
 	 * batch of any size up to {@link MAX_BATCH_PAYLOADS} is accepted — larger
 	 * batches are rejected up front.
@@ -265,17 +269,19 @@ export class AsyncJob<T = unknown> extends Scope {
 			throw blocksError(AsyncJobErrors.BatchTooLarge, `Batch contains ${payloads.length} payloads, exceeds the ${MAX_BATCH_PAYLOADS} per-call limit`);
 		}
 
-		validateDelaySeconds(options?.delaySeconds);
+		const delaySeconds = options?.delaySeconds;
+		validateDelaySeconds(delaySeconds);
 
 		// Validate every payload before enqueuing any, so one bad payload fails the
 		// whole call rather than half-submitting the batch — matching the AWS runtime.
+		const bodies: string[] = [];
 		for (const payload of payloads) {
-			await this.validatePayload(payload);
+			bodies.push(await this.validatePayload(payload));
 		}
 
 		const jobIds: Array<string | null> = [];
-		for (const payload of payloads) {
-			const { jobId } = await this.submit(payload, options);
+		for (const body of bodies) {
+			const { jobId } = await this.enqueueValidated(body, delaySeconds ?? 0);
 			jobIds.push(jobId);
 		}
 		return { jobIds, failed: [] };

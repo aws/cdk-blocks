@@ -169,9 +169,7 @@ describe('AsyncJob.submitBatch() validates delaySeconds the same way on mock and
 
 describe('AsyncJob.submitBatch() checks delaySeconds before the payloads on mock and AWS', () => {
 	// Both entries check the batch delay before validating any payload, so a batch
-	// with an invalid delay *and* an invalid payload reports the delay on both. The
-	// mock's per-payload submit() would reject the delay anyway; this case is what
-	// guards the batch-level check that sets the order.
+	// with an invalid delay *and* an invalid payload reports the delay on both.
 	test('an invalid delay plus an oversized payload throws ValidationFailed, not PayloadTooLarge', async (t) => {
 		t.mock.timers.enable({ apis: ['setTimeout'] });
 		const payloads: Payload[] = [{ n: 1 }, { n: 2, pad: 'x'.repeat(300 * 1024) }];
@@ -341,4 +339,23 @@ describe('the mock handler gets the JSON round-trip of the payload, as the AWS h
 		payload.n = 2;
 		assert.deepStrictEqual(await seen, { n: 1 });
 	});
+});
+
+test('submitBatch enqueues each validated JSON payload without serializing it again', async (t) => {
+	t.mock.timers.enable({ apis: ['setTimeout'] });
+	const makeBatch = () => {
+		let calls = 0;
+		return [{ n: 1 }, { toJSON: () => (++calls === 1 ? { n: 2 } : undefined) }];
+	};
+	const mockJob = makeMockJob<unknown>();
+	const { job: awsJob, inputs } = makeAwsJob<unknown>();
+	const options = { delaySeconds: 1 };
+
+	const awsResult = await awsJob.submitBatch(makeBatch(), options);
+	assert.deepStrictEqual(awsResult, { jobIds: ['msg-0', 'msg-1'], failed: [] });
+	assert.deepStrictEqual(inputs.map((input) => input.Entries?.map((entry) => entry.MessageBody)), [['{"n":1}', '{"n":2}']]);
+
+	const mockResult = await mockJob.submitBatch(makeBatch(), options);
+	assert.deepStrictEqual(mockResult, { jobIds: mockJob._queue.delayed.map((entry) => entry.jobId), failed: [] });
+	assert.deepStrictEqual(mockJob._queue.delayed.map((entry) => entry.payload), [{ n: 1 }, { n: 2 }]);
 });
