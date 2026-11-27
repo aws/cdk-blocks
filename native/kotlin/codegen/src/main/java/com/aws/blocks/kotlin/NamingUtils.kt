@@ -12,26 +12,62 @@ object NamingUtils {
 
     /**
      * Whether Kotlin can declare the spec name [name] as written, with backticks where it needs
-     * them (`class`, `content-type`, `1st`, `it's`, `a b`), which KotlinPoet adds. It can't declare
-     * an empty name, or one holding a character from [UNESCAPABLE_CHARACTERS] (KotlinPoet throws
-     * "Can't escape identifier") or a control character (a line break ends a backticked name).
+     * them (`class`, `content-type`, `1st`, `a$b`), which KotlinPoet adds, and Android can load
+     * the result. It can't declare an empty name, or one holding a character from
+     * [UNESCAPABLE_CHARACTERS] (KotlinPoet throws "Can't escape identifier") or a control
+     * character (a line break ends a backticked name).
+     *
+     * Android rejects many more: a property, function or class becomes a DEX field, method or
+     * class name, and `d8` fails the Android build on one that isn't a DEX SimpleName
+     * ([isDexSimpleName]), though Kotlin compiled it: "Field name 'c#' cannot be represented in
+     * dex format", or "Space characters in SimpleName 'a b' are not allowed prior to DEX version
+     * 040". So `it's`, `a b` and `c#` aren't declarable either.
      */
     fun isDeclarable(name: String): Boolean =
-        name.isNotEmpty() && name.none { it in UNESCAPABLE_CHARACTERS || it.isISOControl() }
+        name.isNotEmpty() &&
+            name.none { it in UNESCAPABLE_CHARACTERS || it.isISOControl() } &&
+            isDexSimpleName(name)
 
     /**
-     * Characters Windows rejects in a file name that [isDeclarable] admits. A type's name is the
-     * name of its class file (`Ns$Input$Cre"ate.class`), so a type can't be named with one.
+     * Whether [name] is a DEX SimpleName that `d8` accepts at the runtime's `minSdk` 23, which
+     * emits DEX before version 040: each code point is [isDexNameChar]. An unpaired surrogate is
+     * not one.
      */
-    private val FILE_NAME_UNSAFE_CHARACTERS = setOf('"', '*', '?', '|')
+    fun isDexSimpleName(name: String): Boolean {
+        var i = 0
+        while (i < name.length) {
+            val codePoint = name.codePointAt(i)
+            if (Character.isSurrogate(name[i]) && Character.charCount(codePoint) == 1) return false
+            if (!isDexNameChar(codePoint)) return false
+            i += Character.charCount(codePoint)
+        }
+        return true
+    }
+
+    /**
+     * Whether [codePoint] can appear in a DEX SimpleName before version 040: an allowlist, since
+     * DEX admits only letters, digits, `$`, `-` and `_` from ASCII, plus these Unicode ranges. It
+     * leaves out the spaces (U+00A0, U+2000–U+200A, U+202F, which DEX 040 admits), the
+     * zero-width and direction marks (U+200B–U+200F), the line and paragraph separators
+     * (U+2028–U+2029), the bidi controls (U+202A–U+202E) and U+FFF0–U+FFFF. `d8` enforces exactly
+     * these ranges — see
+     * [SimpleName](https://source.android.com/docs/core/runtime/dex-format#simplename).
+     */
+    fun isDexNameChar(codePoint: Int): Boolean = when (codePoint) {
+        in 'a'.code..'z'.code, in 'A'.code..'Z'.code, in '0'.code..'9'.code -> true
+        '$'.code, '-'.code, '_'.code -> true
+        in 0x00a1..0x1fff, in 0x2010..0x2027, in 0x2030..0xd7ff, in 0xe000..0xffef -> true
+        in 0x10000..0x10ffff -> true
+        else -> false
+    }
 
     /**
      * Whether Kotlin can declare a type named [name]: [isDeclarable], and also a valid file name on
      * every platform, since the compiler writes each class to a file of that name. Windows rejects
-     * the characters in [FILE_NAME_UNSAFE_CHARACTERS] and drops a trailing space.
+     * `"`, `*`, `?` and `|` and drops a trailing space; [isDeclarable]'s DEX allowlist already
+     * leaves all of them out, so the two checks agree.
      */
-    private fun isDeclarableTypeName(name: String): Boolean =
-        isDeclarable(name) && name.none { it in FILE_NAME_UNSAFE_CHARACTERS } && !name.endsWith(' ')
+    private fun isDeclarableTypeName(name: String): Boolean = isDeclarable(name)
 
     /** The runs of letters and digits in [name] (`back\slash` -> `back`, `slash`). */
     private fun words(name: String): List<String> = name.split(Regex("[^\\p{L}\\p{N}]+")).filter { it.isNotEmpty() }

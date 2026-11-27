@@ -1061,9 +1061,11 @@ class KotlinCodeGenerator(
         return constants
     }
 
-    /** Whether [name] can name a constant, as itself or backticked. */
-    private fun canNameConstant(name: String): Boolean =
-        name.isNotEmpty() && name.all { isConstantNameChar(it) }
+    /**
+     * Whether [name] can name a constant, as itself or backticked: [NamingUtils.isDeclarable],
+     * whose DEX allowlist is what rules out `c#` and `sign in`.
+     */
+    private fun canNameConstant(name: String): Boolean = NamingUtils.isDeclarable(name)
 
     private fun synthesizeConstantName(literal: String): String {
         val segments = literal.split(NON_IDENTIFIER_RUN)
@@ -2897,33 +2899,6 @@ class KotlinCodeGenerator(
 
         /** A run of characters a Kotlin identifier can't hold, which separates name segments. */
         private val NON_IDENTIFIER_RUN = Regex("[^\\p{L}\\p{N}]+")
-
-        /**
-         * Whether [name] can hold [char] — an allowlist, because each platform the generated code
-         * reaches forbids more than the last.
-         *
-         * Kotlin itself admits any character inside backticks except the grammar's nine, but a
-         * generated constant also has to survive DEX, whose SimpleName before version 040 is
-         * letters, digits, `$` and `_` plus a handful of Unicode ranges. `d8` rejects the rest
-         * outright: a provider named `c#` compiles and then fails the Android build with
-         * "Field name 'C#' cannot be represented in dex format".
-         *
-         * Non-ASCII is admitted, since the DEX ranges cover letters broadly, except the spaces
-         * DEX names explicitly — see
-         * [SimpleName](https://source.android.com/docs/core/runtime/dex-format#simplename).
-         */
-        private fun isConstantNameChar(char: Char): Boolean = when {
-            char in 'a'..'z' || char in 'A'..'Z' || char in '0'..'9' -> true
-            char == '$' || char == '_' -> true
-            char.code < 0x80 -> false
-            else -> char !in DEX_REJECTED_SPACES
-        }
-
-        /** The spaces DEX rejects before version 040, which its SimpleName grammar excludes. */
-        private val DEX_REJECTED_SPACES = charArrayOf(
-            '\u00a0', '\u2000', '\u2001', '\u2002', '\u2003', '\u2004', '\u2005', '\u2006',
-            '\u2007', '\u2008', '\u2009', '\u200a', '\u202f', '\u205f', '\u3000',
-        )
 
         /**
          * The generator's own top-level declarations and file names in the package: the `Servers`

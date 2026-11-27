@@ -163,7 +163,7 @@ Generated names follow the spec, and the wire keeps the spec's names.
 | Spec name | Kotlin name | Example |
 |---|---|---|
 | A property, parameter or operation | the spec name, in backticks where Kotlin needs them | `` `class` ``, `` `content-type` `` |
-| A name Kotlin can't declare even in backticks: one holding `.`, `;`, `[`, `]`, `/`, `<`, `>`, `:`, `\`, a backtick or a control character such as a line break | its words in camelCase | the key `back\slash` is the property `backSlash` with `@SerialName("back\\slash")`; the method `a.b.ping` is `A.bPing()`, which still calls `a.b.ping` |
+| A name Kotlin can't declare even in backticks (one holding `.`, `;`, `[`, `]`, `/`, `<`, `>`, `:`, `\`, a backtick or a control character such as a line break), or one Android can't load: before DEX 040 (`minSdk` below 30) a DEX name holds only letters, digits, `$`, `-` and `_` from ASCII, so not a space, `'`, `#`, `+` or `,` | its words in camelCase | the key `back\slash` is the property `backSlash` with `@SerialName("back\\slash")`; the key `with space` is `withSpace`; the method `a.b.ping` is `A.bPing()`, which still calls `a.b.ping` |
 | A type, enum constant or union subclass | PascalCase | `InProgress` |
 
 - When two names land on one Kotlin name in the same scope (properties `user_name` and `userName` with inline object types, discriminator values `in-progress` and `in_progress`), the first keeps it and the next gets `_2`, then `_3`, and so on.

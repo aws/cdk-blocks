@@ -21,11 +21,11 @@ public class Api(
    * An operation whose name and parameters are not identifiers
    */
   public suspend fun getSampleX(
-    `run { error("xParam") } || p`: String,
+    runErrorXParamP: String,
     item: SampleTypeX,
     optIonal: Int? = null,
   ): SampleTypeX {
-    val args: List<JsonElement> = if (optIonal != null) listOf(JsonPrimitive(`run { error("xParam") } || p`), BlocksJson.encodeToJsonElement(item), JsonPrimitive(optIonal)) else listOf(JsonPrimitive(`run { error("xParam") } || p`), BlocksJson.encodeToJsonElement(item))
+    val args: List<JsonElement> = if (optIonal != null) listOf(JsonPrimitive(runErrorXParamP), BlocksJson.encodeToJsonElement(item), JsonPrimitive(optIonal)) else listOf(JsonPrimitive(runErrorXParamP), BlocksJson.encodeToJsonElement(item))
     val request = BlocksRequest(method = "api.get\"Sample`;x", params = args, id = BlocksRequest.nextId())
     val result = client.execute(request)
     if (result is JsonNull) throw TransportException("Unexpected null result for api.get\"Sample`;x")

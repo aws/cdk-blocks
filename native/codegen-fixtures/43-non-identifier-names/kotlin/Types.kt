@@ -18,29 +18,34 @@ import kotlinx.serialization.encoding.Encoder
  */
 @Serializable
 public data class SampleTypeX(
-  public val `run { error("x") } || id`: String,
+  @SerialName("run { error(\"x\") } || id")
+  public val runErrorXId: String,
   public val `$`: String? = null,
-  public val `${x}`: String? = null,
+  @SerialName("${'$'}{x}")
+  public val x: String? = null,
   @SerialName("\\(y)")
   public val y: String? = null,
   @SerialName("*/")
   public val unnamed: String? = null,
-  public val `q"uote`: String? = null,
-  public val `s'ingle`: String? = null,
+  @SerialName("q\"uote")
+  public val qUote: String? = null,
+  @SerialName("s'ingle")
+  public val sIngle: String? = null,
   @SerialName("semi;colon")
   public val semiColon: String,
   @SerialName("back`tick")
   public val backTick: String? = null,
   @SerialName("new\nline")
   public val newLine: String? = null,
-  public val `with space`: Int,
+  @SerialName("with space")
+  public val withSpace: Int,
   public val `9lives`: Boolean? = null,
   public val kind: Kind? = null,
 ) {
   init {
-    require(`run { error("x") } || id`.length >= 2) { "run { error(\"x\") } || id must be at least 2 characters" }
+    require(runErrorXId.length >= 2) { "run { error(\"x\") } || id must be at least 2 characters" }
     require(semiColon.length <= 10) { "semi;colon must be at most 10 characters" }
-    require(`with space` >= 1) { "with space must be >= 1" }
+    require(withSpace >= 1) { "with space must be >= 1" }
   }
 
   @Serializable(with = Kind.Serializer::class)
