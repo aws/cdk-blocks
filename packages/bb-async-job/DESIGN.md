@@ -73,6 +73,8 @@ Local Mock
 
 **Rationale:** Failing fast on the caller's side produces a precise typed error (`PayloadTooLarge`, `ValidationFailed`, `BatchEmpty`) instead of a generic SQS rejection, and avoids a network round-trip for input that cannot succeed. Both runtimes enqueue the already-validated JSON bodies, so one bad payload fails the call without half-submitting the batch or calling a payload's `toJSON()` again after enqueueing has started. The mock applies identical checks so violations surface the same `error.name` in local dev. Without the delay check, the mock ran a negative delay immediately and waited out any delay above 900 s, while SQS rejected both with `InvalidParameterValue`, which reached an RPC client as a nameless 500 (or, from `submitBatch`, as `BatchSubmitFailed` for every entry).
 
+See [PR #1820](https://github.com/aws/cdk-blocks/pull/1820) for the local batch regression.
+
 ### D-AJ-4a: `submitBatch` auto-chunks; a multi-chunk submit is not atomic
 
 **Decision:** `submitBatch` accepts up to {@link MAX_BATCH_PAYLOADS} (10,000) payloads. It packs them into `SendMessageBatch` requests bounded by both SQS per-request limits — at most 10 entries and at most 256 KB of aggregate message body — and sends those requests with bounded concurrency (at most {@link MAX_BATCH_CONCURRENCY} = 5 in flight). Each batch entry's `Id` is the payload's original index, so returned `MessageId`s (and failures) map straight back into input order. The 10,000-payload limit is a soft cap: over the limit throws `BatchTooLarge` before any send, a guardrail against a single call fanning out to an unbounded number of SQS requests.
