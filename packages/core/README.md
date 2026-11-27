@@ -74,7 +74,7 @@ An id is checked at `cdk synth`, not when the scope is constructed:
 
 ## ApiNamespace
 
-`new ApiNamespace<T>(scope: ScopeParent, label: string, handler: ApiHandler<T>, options?: ApiNamespaceOptions): AsyncAPI<T>`, where `handler` is `(context: BlocksContext) => T`. Each method of the returned object becomes an RPC endpoint and a method of the typed client. Clients call the namespace by the name it is exported under, not by `label`.
+`new ApiNamespace<T extends ApiMethodMap<T>>(scope: ScopeParent, label: string, handler: (context: BlocksContext) => T, options?: ApiNamespaceOptions): AsyncAPI<T>`, where `T` is a plain object or a class instance whose public members are all methods. Each method of the returned object becomes an RPC endpoint and a method of the typed client. Clients call the namespace by the name it is exported under, not by `label`.
 
 ```typescript
 import { ApiNamespace } from '@aws-cdk-blocks/core';
@@ -705,6 +705,8 @@ if (!sandboxMode || previewMode) {
 
 Tear a preview sandbox down with `npm run sandbox:destroy`.
 
+A top-level prop that `Hosting` doesn't read, such as a misspelled setting or a prop of `@aws-cdk-blocks/hosting`'s `HostingConstruct` like `cdn`, gets a synth warning, `@aws-cdk-blocks/core:UnknownHostingProp`, naming the key. It has no effect. TypeScript already rejects such a key in an object literal; the warning covers config written in JavaScript, read from JSON or spread from another object. Set the door's settings in `frontDoor.features` (or the top-level `Hosting` settings) instead.
+
 ## Building Blocks
 
 `npm run docs` lists every Building Block, and `npm run docs <Block>` prints one block's README. The `Pipeline` CI/CD construct is documented in the [`@aws-cdk-blocks/pipeline` README](../pipeline/README.md).
@@ -754,13 +756,15 @@ At startup the dev server regenerates `cdk-blocks/client.js` from your backend. 
 
 ## Script output (`BLOCKS_LOG_LEVEL`)
 
-The lifecycle scripts in `@aws-cdk-blocks/core/scripts` (`deploy`, `destroy`, `startSandbox`, `destroySandbox`, `startDevServer`, which the generated `npm run deploy` / `sandbox` / `sandbox:destroy` / `destroy` / `dev` scripts call) read the `BLOCKS_LOG_LEVEL` environment variable to decide how much to print:
+The lifecycle scripts in `@aws-cdk-blocks/core/scripts` (`deploy`, `destroy`, `startSandbox`, `destroySandbox`, `startDevServer`, which the generated `npm run deploy` / `sandbox` / `sandbox:destroy` / `destroy` / `dev` scripts call) read the `BLOCKS_LOG_LEVEL` environment variable to decide how much to print.
+
+The generated scripts run these through the `aws-cdk-blocks` task runner, which sets `BLOCKS_LOG_LEVEL` for them: `normal` by default, `quiet` with `--quiet`, `verbose` with `--verbose`, `debug` with `--debug`, or the value you set yourself (`BLOCKS_LOG_LEVEL=verbose npm run deploy`). So `normal` is what `npm run deploy` prints unless you choose another level. The "unset" row applies when your own code calls the scripts directly.
 
 | `BLOCKS_LOG_LEVEL` | What prints |
 |---|---|
 | unset (or any other value) | Everything: every progress step and the raw CDK output, as at `verbose`, plus the dev server's RPC error stack traces. |
-| `quiet` | Errors and final results only. CDK output is hidden while it runs. |
-| `normal` | Short progress steps and results. CDK output is condensed into a few lines (`Synthesizing app...`, a resource count); failure and rollback lines still print as they happen. |
+| `quiet` | Errors and final results only. CDK output, synth warnings included, is hidden while it runs. |
+| `normal` | Short progress steps and results. CDK output is condensed into a few lines (`Synthesizing app...`, a resource count); failure and rollback lines still print as they happen, and so does every synth warning (a CDK warning annotation, such as `@aws-cdk-blocks/hosting:PlainHttpFrontDoor`), once, with its construct path and how to acknowledge it. |
 | `verbose` | The same lines as unset: every progress step plus the raw CDK output (the dev server leaves out RPC error stack traces, see below). |
 | `debug` | `verbose` plus stack traces for errors the scripts catch and report as warnings. |
 
