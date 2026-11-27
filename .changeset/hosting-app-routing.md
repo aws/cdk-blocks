@@ -1,7 +1,7 @@
 ---
 "@aws-cdk-blocks/hosting": minor
 "@aws-cdk-blocks/core": patch
-"@aws-cdk-blocks/blocks": patch
+"aws-cdk-blocks": patch
 ---
 
 A bring-your-own front door can now route at the app: `defineFrontDoor({ service, routing: 'app', build })`.
@@ -20,5 +20,5 @@ or a door that declares `serverResponse: 'streaming'`, fails synth with an actio
 
 `routing` defaults to `'door'`: existing doors and apps synthesize the same templates. New exported types:
 `EntryOrigin`, `AppRoutingDoorInput`, `DoorRouting` and `DoorInputFor`; `FrontDoor` and `defineFrontDoor` gain an
-optional third type parameter for the routing mode. The umbrella `@aws-cdk-blocks/blocks` is bumped because the bundled
+optional third type parameter for the routing mode. The umbrella `aws-cdk-blocks` is bumped because the bundled
 hosting docs it mirrors have changed (README, and the new DESIGN.md).
