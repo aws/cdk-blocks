@@ -544,7 +544,8 @@ const itemSchema = z.object({
   sk: z.string(),
   data: z.string(),
   timestamp: z.number(),
-  optional: z.string().optional()
+  optional: z.string().optional(),
+  tags: z.array(z.string().min(1)).optional(),
 });
 
 type Item = z.infer<typeof itemSchema>;
@@ -1408,6 +1409,10 @@ export const api = new ApiNamespace(scope, 'api', (context) => ({
   async tableDelete(...args: Parameters<typeof table.delete>) {
     await table.delete(...args);
     return { success: true };
+  },
+
+  async tableAppendTags(key: Parameters<typeof table.get>[0], tags: string[]) {
+    return await table.appendToList(key, 'tags', tags);
   },
 
   async tableQuery(...args: Parameters<typeof table.query>) {
