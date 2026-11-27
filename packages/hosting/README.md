@@ -205,8 +205,19 @@ over plain HTTP.
 - `compute: { type: 'web-function' }` (AWS Lambda Web Functions) works with the
   CloudFront door only. Every other door routes to Lambda functions, so synth
   fails with `UnsupportedComputeFrontDoorError`.
-- Next.js middleware (`middleware.ts`) runs only on the CloudFront door.
-  Behind any other door synth fails with `MiddlewareNeedsCloudFrontDoorError`.
+- Next.js middleware (`middleware.ts`) runs inside the server function by
+  default: OpenNext bundles it there, so it runs for the requests the server
+  function handles, behind every door, the API Gateway HTTP API door (and
+  `HostingPresets.preview`) included. Routes with `export const runtime =
+  'edge'` are built as separate functions that don't include the middleware,
+  so it doesn't run for them (with `edgeRoutes: 'regional'`, as in
+  `HostingPresets.preview`, the door routes those paths straight to their
+  function). Gate those routes inside the route handlers. Only a hand-written
+  `open-next.config.ts` with `middleware: { external: true }` builds the
+  middleware as a separate Lambda@Edge function, which only the CloudFront
+  door runs. Behind any other door synth then fails with
+  `MiddlewareNeedsCloudFrontDoorError` rather than deploying the app with its
+  middleware (and any route gating it does) skipped.
 - A Lambda@Edge compute behind any other door fails synth with
   `EdgeRouteNeedsCloudFrontDoorError`.
 
@@ -256,12 +267,24 @@ frontDoor: { kind: 'alb', features: { geoRestriction: { type: 'allowlist', count
 | Setting | CloudFront | ALB | API Gateway | Custom (BYO) |
 |---|---|---|---|---|
 | `domain` | ✓ (certificate in us-east-1, aliases, Route 53 records, `wwwRedirect`) | ✓ (regional certificate, HTTPS listener, :80 → :443 redirect, Route 53 alias records; no `wwwRedirect`) | ✓ (regional; no `wwwRedirect`) | ✓ |
-| `waf` | ✓ (CLOUDFRONT-scoped web ACL) | ✓ (REGIONAL web ACL) | – | ✓ |
+| `waf` | ✓ (CLOUDFRONT-scoped web ACL; `enabled` fails synth in a known region outside us-east-1, `webAclArn` works from any region) | ✓ (REGIONAL web ACL) | – | ✓ |
 | `logging` | ✓ | ✓ (the ALB's own logs: off unless set) | – | ✓ |
 | `monitoring` | ✓ | ✓ (`enabled` only: ALB 5xx and latency alarms, on unless `enabled: false`, no topic or subscriptions) | – | ✓ |
 | `skewProtection` | ✓ | – | – | ✓ |
 | `geoRestriction` | ✓ | – | – | ✓ |
 | `priceClass`, `contentSecurityPolicy`, `ssrDefaultTtl`, `cacheKeyCookies`, `cacheKeyHeaders`, `responseHeadersPolicy`, `quotas`, `serverOrigin` | ✓ | – | – | – |
+
+AWS WAF creates CLOUDFRONT-scoped web ACLs only in us-east-1, so on the
+CloudFront door `waf: { enabled: true }` deploys only to us-east-1. Synth
+fails with `WafRegionError` when the stack's region is known (an explicit
+`env.region`) and outside us-east-1, and region validation isn't skipped. A
+stack without an `env` region (the scaffolded templates create one) skips the
+check: it synthesizes in any region, and outside us-east-1 the failure comes at
+deploy instead.
+For a stack in another region, create the web ACL in a us-east-1 stack of your
+own (with `crossRegionReferences: true` on both stacks, or by passing the ARN as
+a string) and pass its ARN as `waf: { enabled: true, webAclArn }`: an ARN is
+attached as is, from any region.
 
 - `geoRestriction.type` is `'allowlist'` or `'denylist'`. The legacy
   `'whitelist'` / `'blacklist'` mean the same. Any other value fails synth
@@ -543,6 +566,17 @@ build's hashed assets: a tab opened before a deploy that then lazy-loads one of
 its chunks gets a 404 (the website's error document) and needs a reload. The page is plain HTTP and the
 API is cross-site, so an auth Building Block needs `crossDomain: true`; its
 session cookie is then set by the API's own HTTPS response.
+
+The bucket policy that makes the bucket public read needs S3 Block Public
+Access to allow public bucket policies, at the account level and on the bucket
+(`'none'` turns the bucket's own `BlockPublicPolicy` and `RestrictPublicBuckets`
+off). New AWS accounts block public bucket policies at the account level, and
+many organizations enforce it. Where it is on, the deploy fails at the bucket
+policy (`AWS::S3::BucketPolicy` … `public policies are prevented by the
+BlockPublicPolicy setting in S3 Block Public Access`) and rolls back. Check
+with `aws s3control get-public-access-block --account-id <account>`; if your
+account must keep blocking public policies, use the CloudFront door, which
+serves a private bucket.
 
 The website endpoint takes no certificate, so `'none'` always warns at synth
 (`@aws-cdk-blocks/hosting:PlainHttpFrontDoor`), with or without a backend API: the
@@ -1793,7 +1827,7 @@ synth. `error.name` and `error.code` hold the name in the table, and
 | `InvalidSkewProtectionMaxAgeError` | `skewProtection.maxAge` is outside 0 to 2592000 seconds (30 days), or exceeds `storage.buildRetentionDays`. |
 | `InvalidWebFunctionOptionError` | `maxConcurrencyPerEnvironment` is not an integer in 1–128, `maxEnvironments` is not an integer in 2–10000, or `rateLimit` is not 0, 100–1000 in steps of 100, or 2000–10000 in steps of 1000. |
 | `LoggingV2RegionError` | `logging.version: 'v2'` in a stack outside us-east-1. |
-| `MiddlewareNeedsCloudFrontDoorError` | The app has Next.js middleware and the door is not CloudFront. |
+| `MiddlewareNeedsCloudFrontDoorError` | The app's Next.js middleware is built as a separate Lambda@Edge function (`middleware: { external: true }` in a hand-written `open-next.config.ts`) and the door is not CloudFront. Middleware bundled into the server function (the default) works behind every door. |
 | `MissingCertificateError` | A `domain` has no `hostedZone`, no `hostedZoneId` and no `certificate`. |
 | `MissingFrontDoorUrlError` | A custom door's `build` returns no `url`. |
 | `OriginSecretOverPlainHttpError` | Production synth of a `stacked` door whose edge → router hop is plain HTTP to an internet-facing router, without `allowPlainHttp: true`. |

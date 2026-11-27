@@ -3242,6 +3242,12 @@ const assertComputeReachableByDoor = (
  * deploy with its middleware — often its auth gate or redirects — silently
  * skipped.
  *
+ * Only an external middleware bundle (`.open-next/middleware`, from
+ * `middleware: { external: true }` in a hand-written `open-next.config.ts`)
+ * sets `manifest.middleware`. By default OpenNext bundles the middleware into
+ * the server function, which runs it behind every door, so this check doesn't
+ * fire.
+ *
  * @param manifest the deploy manifest.
  * @param kind the resolved door kind.
  * @param label the door as the app wrote it, for the message. @default kind
@@ -3251,11 +3257,14 @@ const assertMiddlewareReachableByDoor = (manifest: DeployManifest, kind: string,
   if (!manifest.middleware || kind === 'cloudfront') return;
   throw new HostingError('MiddlewareNeedsCloudFrontDoorError', {
     message:
-      `The app has middleware (Next.js \`middleware.ts\`), which only the CloudFront door runs; the '${label}' front ` +
-      'door would deploy the app with its middleware never running — and with it any route gating or redirects it does.',
+      `The app's Next.js middleware (\`middleware.ts\`) is built as a separate Lambda@Edge function ` +
+      "(`middleware: { external: true }` in open-next.config.ts), which only the CloudFront door runs; the " +
+      `'${label}' front door would deploy the app with its middleware never running — and with it any route ` +
+      'gating or redirects it does.',
     resolution:
-      "Use the CloudFront door (omit `frontDoor`, or `'cloudfront'`), or move the middleware's logic into the pages " +
-      'or route handlers before choosing another door.',
+      "Use the CloudFront door (omit `frontDoor`, or `'cloudfront'`), or remove `middleware: { external: true }` " +
+      'from open-next.config.ts so OpenNext bundles the middleware into the server function, which runs it behind ' +
+      "every door. Otherwise move the middleware's logic into the pages or route handlers.",
   });
 };
 

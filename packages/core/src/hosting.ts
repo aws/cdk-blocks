@@ -252,6 +252,16 @@ export interface HostingProps {
   /**
    * Framework type: `'nextjs'`, `'spa'`, or `'static'`.
    * Auto-detected from `package.json` when omitted.
+   *
+   * Also `'nitro'` (or `'nuxt'`), `'astro'` and `'sveltekit'`. Auto-detection
+   * reads the app's own `package.json`, first match wins: `next` → `'nextjs'`;
+   * `nuxt`, `nitropack`, `@solidjs/start`, `@analogjs/platform-server` or
+   * `@tanstack/start` → `'nitro'`; `astro` → `'astro'`; `@sveltejs/kit` →
+   * `'sveltekit'`; otherwise `'spa'`.
+   *
+   * A `'nitro'` app (Nuxt included) also needs `buildOutputDir: '.output'`:
+   * without it, the build output is looked for in `dist/` and synth fails with
+   * `Build output directory not found`.
    */
   framework?: FrameworkType;
 
