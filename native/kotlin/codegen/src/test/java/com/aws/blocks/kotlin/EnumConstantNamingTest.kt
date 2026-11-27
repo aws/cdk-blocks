@@ -92,13 +92,15 @@ class EnumConstantNamingTest : FunSpec({
     test("a value DEX can't hold is rebuilt, even though Kotlin could") {
         // d8 rejects these: "Field name 'C#' cannot be represented in dex format". Kotlin itself
         // compiles the backticked form, so only an Android build catches it.
-        val source = generate(enumParamSpec("c#", "a+b", "sign in", "e\u00a0f"))
+        val source = generate(enumParamSpec("c#", "a+b", "sign in", "e\u00a0f", "zero\u200bwidth", "end\ufff0"))
 
         source shouldContain "C"
         source shouldContain "@SerialName(\"c#\")"
         source shouldContain "AB"
         source shouldContain "SignIn"
         source shouldContain "EF"
+        source shouldContain "ZeroWidth"
+        source shouldContain "End"
         source shouldNotContain "`"
     }
 

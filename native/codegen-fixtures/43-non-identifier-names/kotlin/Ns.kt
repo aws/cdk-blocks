@@ -48,7 +48,8 @@ public class Ns(
       @Serializable
       @SerialName("re`move")
       public data class ReMove(
-        public val `${id}`: String,
+        @SerialName("${'$'}{id}")
+        public val id: String,
       ) : Input()
     }
   }

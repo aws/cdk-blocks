@@ -62,6 +62,9 @@ private fun generate(methods: List<String>, schemas: Map<String, String> = empty
  * `@SerialName`, an enum constant or variant its `@SerialName`, and an operation sends its spec
  * method name. A sanitized name never takes a name the spec already uses in that scope (it gets
  * `_2`). Every name Kotlin can declare is unchanged, backticks included.
+ *
+ * So is a name Kotlin can declare but Android can't load: `d8` rejects a DEX name holding a space,
+ * `'`, `#` or most other ASCII punctuation before DEX version 040 (`minSdk` 23), so `a b` -> `aB`.
  */
 class IdentifierSanitizingTest : FunSpec({
 
@@ -132,14 +135,56 @@ class IdentifierSanitizingTest : FunSpec({
     test("names Kotlin can declare are unchanged, backticks included") {
         val types = generate(
             listOf(method("api.get", result = ref("Weird"))),
-            mapOf("Weird" to obj("content-type" to STRING, "contentType" to STRING, "it's" to STRING, "a\$b" to STRING, "a b" to STRING)),
+            mapOf("Weird" to obj("content-type" to STRING, "contentType" to STRING, "a\$b" to STRING, "1st" to STRING, "\u00e9t\u00e9" to STRING)),
         ).getValue("Types")
-        types shouldContain "public val `a b`: String,"
         types shouldContain "public val `content-type`: String,"
         types shouldContain "public val contentType: String,"
-        types shouldContain "public val `it's`: String,"
         types shouldContain "public val `a\$b`: String,"
+        types shouldContain "public val `1st`: String,"
+        types shouldContain "public val \u00e9t\u00e9: String,"
         types shouldNotContain "@SerialName"
+    }
+
+    test("a name DEX can't hold is sanitized, even though Kotlin could declare it") {
+        // Kotlin compiles each of these backticked, but d8 rejects the field at minSdk 23:
+        // "Field name 'c#' cannot be represented in dex format", or "Space characters in
+        // SimpleName 'a b' are not allowed prior to DEX version 040".
+        val types = generate(
+            listOf(method("api.get", result = ref("Weird"))),
+            mapOf(
+                "Weird" to obj(
+                    "a b" to STRING, "it's" to STRING, "c#" to STRING, "x+y" to STRING, "p,q" to STRING,
+                    "e\u00a0f" to STRING, "zero\u200bwidth" to STRING, "line\u2028sep" to STRING,
+                ),
+            ),
+        ).getValue("Types")
+        types shouldContain "@SerialName(\"a b\")\n  public val aB: String,"
+        types shouldContain "@SerialName(\"it's\")\n  public val itS: String,"
+        types shouldContain "@SerialName(\"c#\")\n  public val c: String,"
+        types shouldContain "@SerialName(\"x+y\")\n  public val xY: String,"
+        types shouldContain "@SerialName(\"p,q\")\n  public val pQ: String,"
+        types shouldContain "public val eF: String,"
+        types shouldContain "public val zeroWidth: String,"
+        types shouldContain "public val lineSep: String,"
+        types shouldNotContain "`"
+    }
+
+    test("an operation, parameter or server DEX can't hold is sanitized") {
+        val servers = JsonArray(listOf(buildJsonObject { put("name", "my server"); put("url", "http://localhost") })).toString()
+        val files = generate(listOf(method("api.sign in", param("user name"))), servers = servers)
+        val api = files.getValue("Api")
+        api shouldContain "public suspend fun signIn(userName: String): String {"
+        api shouldContain "method = \"api.sign in\""
+        files.getValue("Servers") shouldContain "myServer"
+        files.values.joinToString("\n") shouldNotContain "`my server`"
+    }
+
+    test("a type name DEX can't hold is built from its words") {
+        NamingUtils.toPascalCase("sign in") shouldBe "SignIn"
+        NamingUtils.toPascalCase("c#") shouldBe "C"
+        NamingUtils.toPascalCase("it's") shouldBe "ItS"
+        NamingUtils.toPascalCase("zero\u200bwidth") shouldBe "ZeroWidth"
+        NamingUtils.toPascalCase("caf\u00e9") shouldBe "Caf\u00e9"
     }
 
     test("a validation message escapes the spec's pattern and field name") {
