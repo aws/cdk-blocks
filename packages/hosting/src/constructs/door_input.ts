@@ -117,6 +117,9 @@ export function buildDoorInput(params: BuildDoorInputParams): DoorInput {
   };
 
   let server: ServerOrigin | undefined;
+  // The entry is the server function, wrapped by the router: it answers
+  // buffered whatever the framework handler does, so its URL is BUFFERED.
+  const entryIsServer = params.entry !== undefined && params.server?.fn === params.entry.fn;
   if (params.server) {
     const { fn, streaming } = params.server;
     let url = params.server.url;
@@ -133,7 +136,7 @@ export function buildDoorInput(params: BuildDoorInputParams): DoorInput {
           }
           url = fn.addFunctionUrl({
             authType: FunctionUrlAuthType.AWS_IAM,
-            invokeMode: streaming ? InvokeMode.RESPONSE_STREAM : InvokeMode.BUFFERED,
+            invokeMode: streaming && !entryIsServer ? InvokeMode.RESPONSE_STREAM : InvokeMode.BUFFERED,
           });
         }
         return url;
@@ -161,7 +164,15 @@ export function buildDoorInput(params: BuildDoorInputParams): DoorInput {
       // Created on first read only (the server's own URL when the entry is the
       // server function: a function carries one Function URL).
       get url(): IFunctionUrl {
-        if (serverOrigin) return serverOrigin.url;
+        if (serverOrigin) {
+          if (params.server?.url && serverOrigin.streaming) {
+            // A function carries one Function URL, and this one may stream.
+            throw new Error(
+              'origins.entry.url: the server function already carries a streaming Function URL, but the entry answers buffered and needs a BUFFERED one.',
+            );
+          }
+          return serverOrigin.url;
+        }
         if (!url) {
           if (!canAddFunctionUrl(fn)) {
             throw new Error('origins.entry.url: the entry function cannot carry a Function URL.');

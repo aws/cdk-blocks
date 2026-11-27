@@ -81,6 +81,34 @@ describe('buildDoorInput — app facts and origins', () => {
     Template.fromStack(stack).resourceCountIs('AWS::Lambda::Url', 2); // the image URL + the server URL
   });
 
+  it('origins.entry.url is BUFFERED even when the entry is a streaming server function', () => {
+    const { stack, bucket, server } = setup();
+    const input = buildDoorInput({
+      plan: ssrPlan,
+      bucket,
+      staticDir: '.',
+      server: { fn: server, streaming: true },
+      entry: { fn: server },
+    });
+    assert.equal(input.origins.entry?.url, input.origins.server?.url);
+    const t = Template.fromStack(stack);
+    t.resourceCountIs('AWS::Lambda::Url', 2); // the image URL + the entry (server) URL
+    assert.deepEqual(t.findResources('AWS::Lambda::Url', { Properties: { InvokeMode: 'RESPONSE_STREAM' } }), {});
+  });
+
+  it('origins.entry.url refuses a streaming Function URL the server function already carries', () => {
+    const { bucket, server } = setup();
+    const url = server.addFunctionUrl({ authType: FunctionUrlAuthType.AWS_IAM });
+    const input = buildDoorInput({
+      plan: ssrPlan,
+      bucket,
+      staticDir: '.',
+      server: { fn: server, url, streaming: true },
+      entry: { fn: server },
+    });
+    assert.throws(() => input.origins.entry?.url, /BUFFERED/);
+  });
+
   it('lists /cdk-blocks/*, the legacy /aws-blocks/* and the raw routes as API paths, (sign-in included under /cdk-blocks/*)', () => {
     const { bucket } = setup();
     const input = buildDoorInput({
