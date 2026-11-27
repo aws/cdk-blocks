@@ -14,26 +14,10 @@ import { homedir, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { describe, it } from 'node:test';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { BENCH_AGENT_USER, isolationAvailable } from './isolation.mjs';
+import { EXCLUDED_FILE_RE, findSpecLeaks } from './spec-leak.mjs';
 
 const EXIT_DRAIN_GRACE_MS = 2000;
-
-// MUST stay in sync with BENCH_AGENT_USER in run-shell.ts — the dedicated
-// unprivileged user the agent's shell runs as so it cannot signal the harness.
-const BENCH_AGENT_USER = process.env.BENCH_AGENT_USER || 'benchagent';
-
-// Mirror isolationAvailable() in run-shell.ts: can the agent's shell run as benchagent via
-// passwordless sudo+runuser here? When not (local dev), the isolation tests skip rather than fail.
-function isolationAvailable() {
-	try {
-		const r = spawnSync('sudo', ['-n', 'runuser', '-u', BENCH_AGENT_USER, '--', 'true'], {
-			stdio: 'ignore',
-			timeout: 5000,
-		});
-		return r.status === 0 && !r.error;
-	} catch {
-		return false;
-	}
-}
 
 function isAlive(pid) {
 	try {
@@ -88,16 +72,6 @@ function runContained(command, graceMs = EXIT_DRAIN_GRACE_MS) {
 	});
 }
 
-// Mirrors assertNoSpecLeak in 4-judge.ts — MUST stay in sync. Only test-spec CODE files + bench-tests/
-// are leaks, never a framework *.spec.json manifest.
-function findSpecLeaks(dir) {
-	const shellQuote = (s) => `'${s.replace(/'/g, `'\\''`)}'`;
-	return execSync(
-		`find ${shellQuote(dir)} \\( -name bench-tests -o -regextype posix-extended -regex '.*\\.spec\\.[cm]?[jt]sx?' \\) -print`,
-		{ encoding: 'utf-8' },
-	).trim();
-}
-
 describe('agent-bench shell runner — backgrounded-process containment', () => {
 	it('resolves promptly, captures foreground output, and reaps the backgrounded child (the fix)', async () => {
 		const start = Date.now();
@@ -145,6 +119,35 @@ describe('agent-bench judge spec-leak detection', () => {
 				!leaks.some((l) => l.includes('blocks.spec.json')),
 				`framework blocks.spec.json must NOT be flagged as a spec leak; got ${JSON.stringify(leaks)}`,
 			);
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	it('flags exactly the file names the judge copy excludes', () => {
+		const names = [
+			'a.spec.js',
+			'a.spec.jsx',
+			'a.spec.ts',
+			'a.spec.tsx',
+			'a.spec.cjs',
+			'a.spec.mts',
+			'a.spec.json',
+			'a.spec.d.ts',
+			'a.spec.ts.bak',
+			'spec.ts',
+			'a.test.ts',
+		];
+		const dir = mkdtempSync(join(tmpdir(), 'bench-leak-'));
+		try {
+			for (const name of names) writeFileSync(join(dir, name), '');
+			const flagged = findSpecLeaks(dir)
+				.split('\n')
+				.filter(Boolean)
+				.map((path) => path.slice(dir.length + 1))
+				.sort();
+			assert.deepEqual(flagged, names.filter((name) => EXCLUDED_FILE_RE.test(name)).sort());
+			assert.deepEqual(flagged, ['a.spec.cjs', 'a.spec.js', 'a.spec.jsx', 'a.spec.mts', 'a.spec.ts', 'a.spec.tsx']);
 		} finally {
 			rmSync(dir, { recursive: true, force: true });
 		}
@@ -307,7 +310,7 @@ describe('agent-bench shell runner — process-identity isolation (issue #184)',
 		writeFileSync(join(ws, 'node_modules', 'mydep', 'package.json'), JSON.stringify({ name: 'mydep', version: '1.0.0', main: 'index.js' }));
 		writeFileSync(join(ws, 'node_modules', 'mydep', 'index.js'), "module.exports=()=>'dep-loaded';");
 		const me = spawnSync('id', ['-un'], { encoding: 'utf-8' }).stdout.trim();
-		// Mirror buildAgentSpawn: re-materialize PATH/HOME after the privilege drop so npm/node are found.
+		// sudo resets the env and runuser is not a login shell: pass PATH/HOME so npm/node are found.
 		const runAs = (cmd) =>
 			spawnSync(
 				'sudo',
