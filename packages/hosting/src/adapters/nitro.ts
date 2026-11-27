@@ -243,6 +243,73 @@ const warnNitroUnsupportedFeatures = (info: NitroBuildInfo): void => {
   }
 };
 
+/**
+ * Whether route-rule pattern `broader` matches every path that rule key
+ * `route` names, in Nitro's (rou3) pattern syntax: `**` matches any rest of
+ * the path (including none, so `/blog/**` covers `/blog`), `*` and `:name`
+ * match one segment. A wildcard in `route` is compared as text, which is
+ * enough to tell that `/**` covers `/blog/**`.
+ */
+const rulePatternCovers = (broader: string, route: string): boolean => {
+  // Compared segment by segment rather than compiled to a RegExp, so no
+  // character of a rule key is ever read as a regex metacharacter.
+  const toSegments = (path: string): string[] => (path.length > 1 ? path.replace(/\/+$/, '') : path).split('/');
+  const pattern = toSegments(broader);
+  const target = toSegments(route);
+  const matchFrom = (p: number, t: number): boolean => {
+    if (p === pattern.length) return t === target.length;
+    const segment = pattern[p];
+    if (segment === '**') {
+      for (let next = t; next <= target.length; next++) {
+        if (matchFrom(p + 1, next)) return true;
+      }
+      return false;
+    }
+    if (t === target.length) return false;
+    if (segment === '*' || segment.startsWith(':')) return target[t] !== '' && matchFrom(p + 1, t + 1);
+    return segment === target[t] && matchFrom(p + 1, t + 1);
+  };
+  return matchFrom(0, 0);
+};
+
+/**
+ * Warn about each route rule that sets `isr` and nothing that caches. Nitro
+ * implements `isr` only in its Vercel, Netlify and Zeabur presets; the
+ * `aws-lambda` and `node-server` presets that Hosting builds leave it out, so
+ * `isr` does not cache such a route. `swr` (and `cache`) work on these
+ * presets: the server sends `s-maxage` + `stale-while-revalidate`, which the
+ * edge honors. A warning rather than an error, because the route still serves
+ * correctly, only uncached.
+ *
+ * Not named, because `isr` is not what decides how they are served:
+ *   - a rule that also sets `prerender: true` (the route is served from S3);
+ *   - a `<route>/_payload.json` rule whose `<route>` has a rule of its own
+ *     (Nuxt mirrors each `isr` rule onto its payload path);
+ *   - a route that a broader rule with `cache` or `swr` also matches (Nitro
+ *     merges every matching rule, so the route inherits that cache).
+ */
+const warnIgnoredIsrRules = (routeRules: Record<string, NitroRouteRule>): void => {
+  const entries = Object.entries(routeRules);
+  const caches = (rule: NitroRouteRule): boolean =>
+    Boolean(rule.cache) || Boolean((rule as Record<string, unknown>).swr);
+  const ignored = entries
+    .filter(([route, rule]) => {
+      if (!(rule as Record<string, unknown>).isr || caches(rule) || rule.prerender) return false;
+      if (route.endsWith('/_payload.json')) {
+        const parent = route.slice(0, -'/_payload.json'.length) || '/';
+        if (parent in routeRules) return false;
+      }
+      return !entries.some(([other, otherRule]) => other !== route && caches(otherRule) && rulePatternCovers(other, route));
+    })
+    .map(([route]) => route);
+  if (ignored.length === 0) return;
+  process.stderr.write(
+    `⚠️  The \`isr\` route rule does not cache on AWS for these routes: ${ignored.join(', ')}. ` +
+      'Nitro implements `isr` only in its Vercel, Netlify and Zeabur presets. Use `swr: <seconds>` instead ' +
+      '(for example `routeRules: { \'/isr\': { swr: 60 } }`): it caches the page at the edge and revalidates it in the background.\n',
+  );
+};
+
 type NitroRouteRule = {
   prerender?: boolean;
   redirect?: string | { to: string; statusCode?: 301 | 302 | 307 | 308 };
@@ -439,6 +506,7 @@ export const nitroAdapter = (options: NitroAdapterOptions): DeployManifest => {
     nitroInfo.config?.awsLambda?.streaming === true || resolvedPreset === 'aws-lambda-streaming';
   validateNitroPreset(resolvedPreset);
   warnNitroUnsupportedFeatures(nitroInfo);
+  warnIgnoredIsrRules(mergedRouteRules);
   // Nuxt/Nitro projects can also carry a vercel.json with crons (e.g. set up
   // for a Vercel preview) — warn for parity with the Next/Astro path.
   warnIfVercelCron(projectDir);

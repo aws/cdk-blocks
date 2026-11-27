@@ -196,7 +196,7 @@ export type DeployManifest = {
    * asset requests to the CURRENT build prefix — which no longer contains
    * them → 403. This is NOT Next-specific:
    *   - Next/OpenNext: SSG/ISR HTML from the SSR Lambda → `s-maxage=31536000`.
-   *   - Nuxt/Nitro: `routeRules` `cache.maxAge` / `swr` / `isr` emit
+   *   - Nuxt/Nitro: `routeRules` `cache.maxAge` / `swr` emit
    *     `s-maxage=N` on compute-origin HTML (see nitro adapter).
    *   - Astro SSR: pages that set `Cache-Control` on the response.
    * The common trigger is "a compute origin serving cacheable HTML that
