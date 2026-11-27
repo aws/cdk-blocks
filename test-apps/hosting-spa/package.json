@@ -23,6 +23,7 @@
   },
   "dependencies": {
     "@aws-cdk-blocks/bb-auth": "1.0.0",
+    "@aws-cdk-blocks/hosting": "1.0.0",
     "aws-cdk-blocks": "1.0.1"
   },
   "devDependencies": {

@@ -1270,13 +1270,13 @@ jobs:
       # API Gateway allows one REST API delete every 30 seconds per account,
       # and CloudFormation fails a REST API delete it can't make in about 4.5
       # minutes (DELETE_FAILED, 429 Too Many Requests). The legs' stacks hold
-      # 16 REST APIs (DefaultCompute/API, plus Cdn/SsrRestApi on the nextjs,
+      # 17 REST APIs (DefaultCompute/API, plus Cdn/SsrRestApi on the nextjs,
       # nuxt, nuxt-buffered and sveltekit legs), and other PRs' runs delete
       # theirs in the same accounts. So each leg uses the account
       # `account-offset` after the PR's own (see .github/actions/e2e-slot),
       # spreading every run's deletes over three accounts. The offsets put at
-      # most two 2-API legs on one account, and the fewest REST APIs (4,
-      # against 7 and 5) on offset 0, which also takes the PR's Sandbox,
+      # most two 2-API legs on one account, and no more REST APIs (5,
+      # against 7 and 5) on offset 0 than elsewhere, as it also takes the PR's Sandbox,
       # Production, Telemetry and Compute Smoke stacks.
       # A leg's offset must stay fixed: changing it moves the leg's stack to
       # another account, and the old account's cleanup-stacks.yml leg then
@@ -1302,6 +1302,15 @@ jobs:
             script: test:e2e:hosting-spa
             front-door: alb
             account-offset: 2
+          # The same SPA suite behind a bring-your-own door that routes at the
+          # app (`routing: 'app'`): an HTTP API whose default route is the app's
+          # entry function (no CloudFront), then the redeploy, which checks the
+          # entry's build cutover.
+          - framework: spa-app
+            app-dir: test-apps/hosting-spa
+            script: test:e2e:hosting-spa
+            front-door: app
+            account-offset: 0
           - framework: nextjs
             app-dir: test-apps/hosting-ssr
             script: test:e2e:hosting-ssr

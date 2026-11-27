@@ -24,6 +24,7 @@ import type {
   DoorInput,
   DoorOrigin,
   DoorRoute,
+  EntryOrigin,
   ImageOrigin,
   ServerOrigin,
 } from './front_door.js';
@@ -55,6 +56,12 @@ export type BuildDoorInputParams = {
   image?: { fn: IFunction; url: IFunctionUrl };
   /** The backend API, when `Hosting` was given one. */
   api?: { url: string; paths?: readonly string[] };
+  /**
+   * The app's entry function, when the door routes at the app
+   * (`routing: 'app'`): the server function (wrapped by the router), or the
+   * router function of an app without one.
+   */
+  entry?: { fn: IFunction };
   errorPages?: { notFound?: string; serverError?: string };
   /**
    * The error pages the framework build shipped (`manifest.errorPages`), as
@@ -110,6 +117,9 @@ export function buildDoorInput(params: BuildDoorInputParams): DoorInput {
   };
 
   let server: ServerOrigin | undefined;
+  // The entry is the server function, wrapped by the router: it answers
+  // buffered whatever the framework handler does, so its URL is BUFFERED.
+  const entryIsServer = params.entry !== undefined && params.server?.fn === params.entry.fn;
   if (params.server) {
     const { fn, streaming } = params.server;
     let url = params.server.url;
@@ -126,7 +136,7 @@ export function buildDoorInput(params: BuildDoorInputParams): DoorInput {
           }
           url = fn.addFunctionUrl({
             authType: FunctionUrlAuthType.AWS_IAM,
-            invokeMode: streaming ? InvokeMode.RESPONSE_STREAM : InvokeMode.BUFFERED,
+            invokeMode: streaming && !entryIsServer ? InvokeMode.RESPONSE_STREAM : InvokeMode.BUFFERED,
           });
         }
         return url;
@@ -141,6 +151,38 @@ export function buildDoorInput(params: BuildDoorInputParams): DoorInput {
         url: params.image.url,
       }
     : undefined;
+
+  let entry: EntryOrigin | undefined;
+  if (params.entry) {
+    const { fn } = params.entry;
+    const serverOrigin = server && server.fn === fn ? server : undefined;
+    let url: IFunctionUrl | undefined;
+    entry = {
+      kind: 'entry',
+      fn,
+      streaming: false,
+      // Created on first read only (the server's own URL when the entry is the
+      // server function: a function carries one Function URL).
+      get url(): IFunctionUrl {
+        if (serverOrigin) {
+          if (params.server?.url && serverOrigin.streaming) {
+            // A function carries one Function URL, and this one may stream.
+            throw new Error(
+              'origins.entry.url: the server function already carries a streaming Function URL, but the entry answers buffered and needs a BUFFERED one.',
+            );
+          }
+          return serverOrigin.url;
+        }
+        if (!url) {
+          if (!canAddFunctionUrl(fn)) {
+            throw new Error('origins.entry.url: the entry function cannot carry a Function URL.');
+          }
+          url = fn.addFunctionUrl({ authType: FunctionUrlAuthType.AWS_IAM, invokeMode: InvokeMode.BUFFERED });
+        }
+        return url;
+      },
+    };
+  }
 
   const api: ApiOrigin | undefined = params.api
     ? {
@@ -186,6 +228,7 @@ export function buildDoorInput(params: BuildDoorInputParams): DoorInput {
       ...(server ? { server } : {}),
       ...(image ? { image } : {}),
       ...(api ? { api } : {}),
+      ...(entry ? { entry } : {}),
     },
     features,
   };
