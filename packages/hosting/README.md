@@ -253,6 +253,13 @@ frontDoor: { kind: 'apiGateway', api: 'rest', features: { domain: { domainName: 
 frontDoor: { kind: 'alb', features: { geoRestriction: { type: 'allowlist', countries: ['US'] } } } // ✗ type error
 ```
 
+`waf` takes `{ enabled: true }` (and an optional `rateLimit`) for a
+rate-limited web ACL built for you, or `{ webAclArn }` for a web ACL of your
+own; with `webAclArn`, `enabled` is not needed. The CloudFront and ALB doors
+attach your web ACL and build none, whatever `enabled` says; a custom door
+receives `enabled` as written (`false` when omitted). An empty `webAclArn`
+without `enabled` fails synth.
+
 | Setting | CloudFront | ALB | API Gateway | Custom (BYO) |
 |---|---|---|---|---|
 | `domain` | ✓ (certificate in us-east-1, aliases, Route 53 records, `wwwRedirect`) | ✓ (regional certificate, HTTPS listener, :80 → :443 redirect, Route 53 alias records; no `wwwRedirect`) | ✓ (regional; no `wwwRedirect`) | ✓ |

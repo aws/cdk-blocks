@@ -22,8 +22,9 @@ import type {
   HostingFrontDoor,
   StackedDoorFeatures,
 } from './front_door_options.js';
-import type { HostingConstructProps } from './hosting_construct.js';
+import type { HostingConstructProps, HostingWafConfig } from './hosting_construct.js';
 
+const ACL = 'arn:aws:wafv2:us-east-1:111111111111:global/webacl/acl/1';
 const door = defineFrontDoor({ service: 'x', build: () => ({ url: 'https://x.example.com' }) });
 const domain = { domainName: 'app.example.com', hostedZone: 'example.com' };
 
@@ -63,6 +64,11 @@ const positives: HostingFrontDoor[] = [
       skewProtection: { enabled: true, maxAge: 60 },
     },
   },
+  // A web ACL of your own needs no `enabled`: the ARN is the whole setting.
+  { features: { waf: { webAclArn: ACL } } },
+  { kind: 'cloudfront', features: { waf: { webAclArn: ACL } } },
+  { kind: 'alb', features: { waf: { webAclArn: ACL } } },
+  { kind: 'custom', door, features: { waf: { webAclArn: ACL } } },
 ];
 const stackedPositive: StackedDoorFeatures = {
   edge: { waf: { webAclArn: 'arn:aws:wafv2:us-east-1:111111111111:global/webacl/e/1' }, contentSecurityPolicy: "default-src 'self'" },
@@ -116,7 +122,21 @@ const negatives: HostingFrontDoor[] = [
   { kind: 'custom', door, features: { ssrDefaultTtl: Duration.seconds(5) } },
   // @ts-expect-error — the default door has no `vpc` setting.
   { features: { vpc: undefined, waf: { enabled: true } } },
+  // @ts-expect-error — a WAF setting needs `enabled` or `webAclArn`: a rate limit alone builds nothing.
+  { features: { waf: { rateLimit: 500 } } },
 ];
+// The deprecated top-level `waf` takes a web ACL of your own without `enabled` too.
+const releasedWebAcl: Partial<HostingConstructProps> = { waf: { webAclArn: ACL } };
+// `HostingWafConfig` keeps a required `enabled`, so code that reads it as a boolean compiles as before.
+const readsWafConfig = (config: HostingWafConfig): boolean => config.enabled;
+// A door built with `defineFrontDoor` receives `features.waf.enabled` as a boolean.
+const readsDoorWaf = defineFrontDoor({
+  service: 'waf-reader',
+  build: (_scope, input) => {
+    const enabled: boolean = input.features.waf ? input.features.waf.enabled : false;
+    return { url: `https://${enabled ? 'on' : 'off'}.example.com` };
+  },
+});
 const stackedNegatives: StackedDoorFeatures[] = [
   // @ts-expect-error — the edge builds no web ACL; it takes yours (`webAclArn`).
   { edge: { waf: { enabled: true } } },
@@ -146,10 +166,13 @@ const exhaustive: [
 
 describe('frontDoor.features — compile-time contract', () => {
   it('compiles the positive cases and rejects the negative ones (checked by tsc)', () => {
-    assert.equal(positives.length, 10);
+    assert.equal(positives.length, 14);
     assert.ok(stackedPositive.edge && stackedPositive.router);
     assert.ok(released.cdn);
-    assert.equal(negatives.length, 18);
+    assert.ok(releasedWebAcl.waf);
+    assert.equal(readsWafConfig({ enabled: true }), true);
+    assert.ok(readsDoorWaf);
+    assert.equal(negatives.length, 19);
     assert.equal(stackedNegatives.length, 4);
     assert.ok(noneWithFeatures);
     assert.ok(exhaustive);

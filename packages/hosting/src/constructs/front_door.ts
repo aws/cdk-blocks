@@ -219,7 +219,10 @@ export type DoorFeatures = {
    * by id with `HostedZone.fromHostedZoneAttributes`.
    */
   readonly domain?: Readonly<HostingDomainConfig>;
-  /** Request filtering. `webAclArn` when the app brought a web ACL; `rateLimit` per 5-minute window per IP. */
+  /**
+   * Request filtering. `webAclArn` when the app brought a web ACL; `rateLimit` per 5-minute window per IP.
+   * `enabled` is always set here (`false` when the app gave only `webAclArn`).
+   */
   readonly waf?: Readonly<HostingWafConfig>;
   /** Access logging (`enabled` is always `true` here). */
   readonly logging?: Readonly<HostingLoggingConfig>;

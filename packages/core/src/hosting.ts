@@ -37,6 +37,7 @@ import {
   removeUnusedAwsCliLayers,
   type StackedDoorFeatures,
   type HostingWafConfig,
+  type HostingWafSettings,
   type SkewProtectionConfig,
   type WebFunctionConstruct,
   type WebFunctionOptions,
@@ -155,7 +156,7 @@ export type ComputeConfig = {
   logRetention?: cdk.aws_logs.RetentionDays;
 };
 
-export type { FrameworkType, HostingDomainConfig, HostingWafConfig, SkewProtectionConfig };
+export type { FrameworkType, HostingDomainConfig, HostingWafConfig, HostingWafSettings, SkewProtectionConfig };
 
 /**
  * Custom-domain config for the CDK Blocks {@link Hosting} block — the leaf
@@ -366,7 +367,7 @@ export interface HostingProps {
    * WAF protection configuration.
    * @deprecated Use `frontDoor.features.waf` (CloudFront, ALB, custom doors).
    */
-  waf?: HostingWafConfig;
+  waf?: HostingWafSettings;
 
   /** Retain the S3 bucket when the stack is deleted. Default: false. */
   retainOnDelete?: boolean;

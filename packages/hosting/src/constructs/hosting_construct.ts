@@ -204,6 +204,40 @@ export type HostingWafConfig = {
 };
 
 /**
+ * The `waf` setting a front door takes: a {@link HostingWafConfig}, or your own
+ * web ACL's ARN alone.
+ *
+ * Either `enabled` (a rate-limited web ACL built for you) or `webAclArn` (your
+ * own web ACL) is required. With `webAclArn`, `enabled` is not needed: the
+ * CloudFront and ALB doors attach your ACL and build none, whatever `enabled`
+ * says. A custom door (`defineFrontDoor`) receives `enabled` as written
+ * (`false` when omitted) in `features.waf`.
+ *
+ * @example
+ * ```ts
+ * waf: { enabled: true, rateLimit: 2000 } // a web ACL built for you
+ * waf: { webAclArn: myWebAcl.attrArn }     // your own web ACL
+ * ```
+ */
+export type HostingWafSettings =
+  | HostingWafConfig
+  | {
+      /**
+       * Not needed with `webAclArn`. The CloudFront and ALB doors ignore it (your
+       * ACL is attached and none is built); a custom door receives it as written.
+       */
+      enabled?: boolean;
+      /** Requests per 5-minute window per IP. Default: 1000 */
+      rateLimit?: number;
+      /**
+       * ARN of an existing WAFv2 WebACL in us-east-1. When provided, the
+       * construct uses this ACL directly instead of creating a new one.
+       * Enables cross-region deployments.
+       */
+      webAclArn: string;
+    };
+
+/**
  * Props for the HostingConstruct.
  *
  * This construct is FRAMEWORK-AGNOSTIC. It reads a DeployManifest and
@@ -241,7 +275,7 @@ export type HostingConstructProps = {
    * WAF configuration.
    * @deprecated Use `frontDoor.features.waf` (CloudFront, ALB, custom doors).
    */
-  waf?: HostingWafConfig;
+  waf?: HostingWafSettings;
   /** Compute (Lambda) overrides for all compute resources. */
   compute?: {
     /**

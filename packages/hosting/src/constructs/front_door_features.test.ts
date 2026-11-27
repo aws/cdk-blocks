@@ -195,6 +195,61 @@ describe('HostingConstruct — frontDoor.features', () => {
     assert.equal(seen.input?.features.skewProtection, undefined);
   });
 
+  // ── your own web ACL alone (`waf: { webAclArn }`, no `enabled`) ──
+
+  it('CloudFront: `waf: { webAclArn }` attaches your web ACL and builds none', () => {
+    const { template } = synth({ frontDoor: { features: { waf: { webAclArn: WEB_ACL } } } });
+    template.resourceCountIs('AWS::WAFv2::WebACL', 0);
+    template.hasResourceProperties('AWS::CloudFront::Distribution', {
+      DistributionConfig: Match.objectLike({ WebACLId: WEB_ACL }),
+    });
+  });
+
+  it('CloudFront: `waf: { webAclArn }` synthesizes the same template as `{ enabled: true, webAclArn }`', () => {
+    const alone = synth({ frontDoor: { features: { waf: { webAclArn: WEB_ACL } } } }).template.toJSON();
+    const withEnabled = synth({ frontDoor: { features: { waf: { enabled: true, webAclArn: WEB_ACL } } } }).template.toJSON();
+    assert.deepEqual(alone, withEnabled);
+  });
+
+  it('ALB: `waf: { webAclArn }` associates your web ACL and builds none', () => {
+    const { template } = synth({ frontDoor: { kind: 'alb', features: { waf: { webAclArn: REGIONAL_ACL } } } });
+    template.resourceCountIs('AWS::WAFv2::WebACL', 0);
+    template.hasResourceProperties('AWS::WAFv2::WebACLAssociation', { WebACLArn: REGIONAL_ACL });
+  });
+
+  it('deprecated top-level `waf: { webAclArn }` attaches your web ACL and builds none', () => {
+    const { template } = synth({ waf: { webAclArn: WEB_ACL } });
+    template.resourceCountIs('AWS::WAFv2::WebACL', 0);
+    template.hasResourceProperties('AWS::CloudFront::Distribution', {
+      DistributionConfig: Match.objectLike({ WebACLId: WEB_ACL }),
+    });
+  });
+
+  it('custom: `waf: { webAclArn }` reaches the door with `enabled: false`', () => {
+    const seen: { input?: DoorInput } = {};
+    synth({ frontDoor: { kind: 'custom', door: recordingDoor(seen), features: { waf: { webAclArn: WEB_ACL } } } });
+    assert.deepEqual(seen.input?.features.waf, { enabled: false, webAclArn: WEB_ACL });
+  });
+
+  it('an empty `webAclArn` without `enabled` fails synth (InvalidFrontDoorSettingError)', () => {
+    for (const [props, prop] of [
+      [{ frontDoor: { features: { waf: { webAclArn: '' } } } }, '`frontDoor.features.waf.webAclArn`'],
+      [{ frontDoor: { kind: 'alb', features: { waf: { webAclArn: ' ' } } } }, '`frontDoor.features.waf.webAclArn`'],
+      [{ waf: { webAclArn: '' } }, '`waf.webAclArn`'],
+    ] as const) {
+      assert.throws(
+        () => synth(props),
+        (e: Error) => e.name === 'InvalidFrontDoorSettingError' && e.message.includes(prop),
+        prop,
+      );
+    }
+  });
+
+  it('an empty `webAclArn` with `enabled: true` still builds the web ACL (released behavior)', () => {
+    const { template } = synth({ frontDoor: { features: { waf: { enabled: true, webAclArn: '' } } } });
+    template.resourceCountIs('AWS::WAFv2::WebACL', 1);
+  });
+
   // ── the deprecated top-level aliases ──
 
   it('an alias is merged: top-level props == the same settings in frontDoor.features (whole template)', () => {
