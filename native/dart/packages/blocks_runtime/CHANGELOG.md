@@ -1,3 +1,12 @@
+## Unreleased
+
+- `PersistentSessionStore` bounds its first read of storage with the new
+  `readTimeout` option (5 seconds by default). A read that hangs, as a secure
+  storage read can on a locked device, no longer holds up every call: it is
+  reported as a `TimeoutException` and calls go ahead with the session held in
+  memory. If the read completes later, cookies set or removed in the meantime
+  are kept. `flush()` no longer waits on a read that hangs.
+
 ## 1.0.0
 
 ### Breaking

@@ -343,6 +343,17 @@ await session.flush();
 
 A read or write that fails never throws into your app: the session keeps working from memory. The error goes to the store's `onPersistError` callback; without one it is logged with `dart:developer`'s `log` (name `blocks_runtime.session`) and written once to standard error. Only the first failure is reported until storage works again, and a store that could not be read is read again when a cookie changes, or on a call at least 30 seconds after the last failed read, not on every call.
 
+The first read is bounded, so a storage read that hangs (rather than fails) can't hold up your calls. If it hasn't completed after `readTimeout` (5 seconds by default, `PersistentSessionStore.defaultReadTimeout`), it counts as a failed read: it is reported as a `TimeoutException`, and calls go ahead with the session held in memory. The store doesn't start another read while that one is still running. If it completes later, the cookies it read are added, except that a cookie set or removed in the meantime, and everything before a sign-out, is kept as it is in memory; a sign-in made in the meantime wins. Set your own bound with the constructor:
+
+```dart
+PersistentSessionStore(
+  store: FileTokenStore(applicationId: 'com.example.notes_cli'),
+  readTimeout: const Duration(seconds: 2),
+);
+```
+
+`load()`, when you call it yourself, isn't bounded.
+
 `InMemorySessionStore`, `PersistentSessionStore` and `FileTokenStore` are `final` classes. For a store of your own, implement `SessionStore` or `TokenStore`; in tests, use a `PersistentSessionStore` over an `InMemoryTokenStore` rather than a mock.
 
 ## User-agent attribution
