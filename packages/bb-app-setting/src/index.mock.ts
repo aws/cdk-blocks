@@ -5,7 +5,7 @@ import { Scope, registerSdkIdentifiers, blocksError } from '@aws-cdk-blocks/core
 import { getMockDataDir, assertNotMockInDeployedEnv } from '@aws-cdk-blocks/core/bb-utils';
 import type { ScopeParent } from '@aws-cdk-blocks/core';
 import type { StandardSchemaV1 } from '@standard-schema/spec';
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { AppSettingErrors } from './errors.js';
@@ -30,19 +30,54 @@ export { SECRETS_BULK_CONSTRUCT_ID } from './secrets-bulk.js';
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
-function readSettings(scope: Scope): Record<string, unknown> {
-	const fp = join(getMockDataDir(scope, { root: true }), 'settings.json');
-	if (!existsSync(fp)) return {};
+function readSettings(scope: Scope): { path: string; json: string; values: Record<string, unknown> } {
+	const path = join(getMockDataDir(scope, { root: true }), 'settings.json');
 	try {
-		return JSON.parse(readFileSync(fp, 'utf8'));
+		const json = readFileSync(path, 'utf8');
+		return { path, json, values: JSON.parse(json) };
 	} catch {
-		return {};
+		return { path, json: '{}', values: {} };
 	}
 }
 
-function writeSettings(scope: Scope, data: Record<string, unknown>): void {
-	const fp = join(getMockDataDir(scope, { root: true }), 'settings.json');
-	writeFileSync(fp, JSON.stringify(data, null, 2));
+// The input is already validated JSON. Find top-level member boundaries without
+// walking the value tree or re-encoding existing values (e.g. -0).
+function splitSettings(json: string): Map<string, string> {
+	if (!json.trimStart().startsWith('{')) throw new TypeError('Expected settings.json to contain a JSON object');
+	const entries = new Map<string, string>();
+	let depth = 0;
+	let key: string | undefined;
+	let valueStart: number | undefined;
+	for (let index = 0; index < json.length; index++) {
+		const token = json[index];
+		if (token === '"') {
+			const start = index;
+			for (index++; index < json.length && json[index] !== '"'; index++) {
+				if (json[index] === '\\') index++;
+			}
+			if (depth === 1 && valueStart === undefined) key = JSON.parse(json.slice(start, index + 1));
+			continue;
+		}
+		if (depth === 1) {
+			if (key !== undefined && valueStart !== undefined && (token === ',' || token === '}')) {
+				entries.set(key, json.slice(valueStart, index).trim());
+				key = undefined;
+				valueStart = undefined;
+			} else if (token === ':' && valueStart === undefined) {
+				valueStart = index + 1;
+			}
+		}
+		if (token === '{' || token === '[') depth++;
+		if (token === '}' || token === ']') depth--;
+	}
+	return entries;
+}
+
+function writeSetting(path: string, json: string, id: string, serialized: string | undefined): void {
+	const entries = splitSettings(json);
+	if (serialized !== undefined) entries.set(id, serialized);
+	const members = Array.from(entries, ([key, value]) => `  ${JSON.stringify(key)}: ${value}`);
+	writeFileSync(path, members.length === 0 ? '{}' : `{\n${members.join(',\n')}\n}`);
 }
 
 // Uses core's prefixing `blocksError` (message prefixed with the error `name`).
@@ -133,10 +168,11 @@ export class AppSetting<T = string> extends Scope {
 		registerSdkIdentifiers(this.fullId, { parameterName: this.parameterName });
 
 		// Persist initial value to settings.json if not already present
-		const settings = readSettings(this);
-		if (!(this.fullId in settings)) {
-			settings[this.fullId] = this.initialValue;
-			writeSettings(this, settings);
+		const { path, json, values } = readSettings(this);
+		if (!(this.fullId in values)) {
+			// Preserve the existing initialization semantics, including toJSON(fullId).
+			const initial = splitSettings(JSON.stringify({ [this.fullId]: this.initialValue })).get(this.fullId);
+			writeSetting(path, json, this.fullId, initial);
 		}
 	}
 
@@ -153,7 +189,7 @@ export class AppSetting<T = string> extends Scope {
 	 * ```
 	 */
 	async get(): Promise<T> {
-		const settings = readSettings(this);
+		const { values: settings } = readSettings(this);
 		const value = (this.fullId in settings ? settings[this.fullId] : this.initialValue) as T;
 
 		if (this.isSecret && value === ('' as unknown as T)) {
@@ -186,8 +222,7 @@ export class AppSetting<T = string> extends Scope {
 		const serialized = serializeValue(value);
 		assertValueWithinSizeLimit(serialized, this.isSecret);
 
-		const settings = readSettings(this);
-		settings[this.fullId] = value;
-		writeSettings(this, settings);
+		const { path, json } = readSettings(this);
+		writeSetting(path, json, this.fullId, serialized);
 	}
 }

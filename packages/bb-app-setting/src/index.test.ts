@@ -2,9 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import assert from 'node:assert';
-import { existsSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { beforeEach, describe, test } from 'node:test';
+import { Scope } from '@aws-cdk-blocks/core';
 import { AppSetting, AppSettingErrors } from './index.mock.js';
 
 // Clean mock data between tests
@@ -427,6 +428,37 @@ describe('4 KB size limit', () => {
 // ═══════════════════════════════════════════════════════════════════════════
 
 describe('Disk persistence', () => {
+	const deepJson = `${'['.repeat(2_000)}0${']'.repeat(2_000)}`;
+
+	test('preserves deep values and negative zero when creating and updating a sibling setting', async () => {
+		const scope = new Scope('root');
+		const deep = new AppSetting<unknown>(scope, 'deep', { value: null });
+		const numbers = new AppSetting(scope, 'numbers', { value: { negativeZero: 0 } });
+		const path = join('.cdk-blocks/local/data', 'settings.json');
+		writeFileSync(path, `{${JSON.stringify(deep.fullId)}:${deepJson},${JSON.stringify(numbers.fullId)}:{"negativeZero":-0}}`);
+
+		const assertPreserved = async () => {
+			assert.strictEqual(JSON.stringify(await deep.get()), deepJson);
+			assert.strictEqual((await numbers.get()).negativeZero, -0);
+		};
+		await assertPreserved();
+
+		const sibling = new AppSetting<unknown>(scope, 'sibling', { value: { toJSON: (key: string) => `${key}: [",}]` } });
+		await assertPreserved();
+		assert.strictEqual(await sibling.get(), `${sibling.fullId}: [",}]`);
+
+		await sibling.put('updated');
+		await assertPreserved();
+		assert.strictEqual(await sibling.get(), 'updated');
+	});
+
+	test('put accepts a deeply nested value within the JSON size limit', async () => {
+		const setting = new AppSetting<unknown>(new Scope('root'), 'deep', { value: null });
+		await setting.put(JSON.parse(deepJson));
+
+		assert.strictEqual(JSON.stringify(await setting.get()), deepJson);
+	});
+
 	test('data persists across instances with same scope path', async () => {
 		const s1 = new AppSetting({ id: 'root' } as any, 'persist', {
 			name: '/app/persist',
