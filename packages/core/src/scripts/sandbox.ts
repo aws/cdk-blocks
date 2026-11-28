@@ -1467,6 +1467,13 @@ export interface DestroyRetryDeps {
 	 * of backing off. Default: every failure might be transient.
 	 */
 	deterministicFailure?: () => string | undefined;
+	/**
+	 * Runs once after a destroy attempt succeeded, for a note about what the
+	 * destroy left behind (see `retainedResourcesNote` in `./destroy.ts`). A
+	 * rejection is logged as a warning: the stack is already deleted, so it
+	 * never fails the destroy. Default: nothing.
+	 */
+	afterDestroy?: () => Promise<void>;
 }
 
 /**
@@ -1525,6 +1532,12 @@ export async function runDestroyWithRetries(deps: DestroyRetryDeps): Promise<voi
 		try {
 			await deps.runDestroy();
 			console.log(attempt === 0 ? `\n✅ ${label} destroyed!` : `\n✅ ${label} destroyed on retry!`);
+			try {
+				await deps.afterDestroy?.();
+			} catch (e) {
+				log.warn(`  ⚠️  could not check for resources the destroy left behind: ${(e as Error).message}`);
+				log.debugError(e);
+			}
 			return;
 		} catch (error) {
 			// An operator stopped the destroy (a second SIGTERM, Ctrl-C): no retry.

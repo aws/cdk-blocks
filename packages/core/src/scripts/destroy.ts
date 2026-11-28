@@ -61,6 +61,96 @@ export async function stackExists(
   }
 }
 
+/** A resource a destroy left in the account because its removal policy is RETAIN. */
+export interface RetainedResource {
+  type: string;
+  logicalId: string;
+  /** The name or id of the resource in the account. */
+  physicalId?: string;
+}
+
+/**
+ * The id (ARN) of the stack named `stackName`, or `undefined` when the lookup
+ * fails. CloudFormation answers `DescribeStackEvents` for a deleted stack only
+ * by id, so the id has to be read before the destroy.
+ */
+export async function findStackId(cfn: DescribeStacksClient, stackName: string): Promise<string | undefined> {
+  try {
+    const { DescribeStacksCommand } = await import('@aws-sdk/client-cloudformation');
+    const res = (await cfn.send(new DescribeStacksCommand({ StackName: stackName }))) as {
+      Stacks?: Array<{ StackId?: string }>;
+    };
+    return res.Stacks?.[0]?.StackId;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * The resources CloudFormation skipped when it deleted the stack with id
+ * `stackId`: those with a `DELETE_SKIPPED` event, which a RETAIN removal policy
+ * causes. Each resource is listed once. Throws when the events can't be read.
+ */
+export async function retainedByDestroy(cfn: DescribeStacksClient, stackId: string): Promise<RetainedResource[]> {
+  const { DescribeStackEventsCommand } = await import('@aws-sdk/client-cloudformation');
+  type Event = {
+    ResourceStatus?: string;
+    ResourceType?: string;
+    LogicalResourceId?: string;
+    PhysicalResourceId?: string;
+  };
+  const found = new Map<string, RetainedResource>();
+  let nextToken: string | undefined;
+  // 30 pages of events (100 each) is far more than one stack's delete writes.
+  for (let page = 0; page < 30; page++) {
+    const res = (await cfn.send(new DescribeStackEventsCommand({ StackName: stackId, NextToken: nextToken }))) as {
+      StackEvents?: Event[];
+      NextToken?: string;
+    };
+    for (const ev of res.StackEvents ?? []) {
+      if (ev.ResourceStatus !== 'DELETE_SKIPPED' || !ev.LogicalResourceId || ev.ResourceType === 'AWS::CloudFormation::Stack') continue;
+      found.set(ev.LogicalResourceId, {
+        type: ev.ResourceType ?? 'unknown type',
+        logicalId: ev.LogicalResourceId,
+        physicalId: ev.PhysicalResourceId,
+      });
+    }
+    nextToken = res.NextToken;
+    if (!nextToken) break;
+  }
+  return [...found.values()];
+}
+
+/**
+ * What to tell the user after a destroy left `resources` behind, or `undefined`
+ * when it left none: each resource by type and name, and how to delete the
+ * kinds that can't be deleted directly.
+ */
+export function retainedResourcesNote(resources: readonly RetainedResource[]): string | undefined {
+  if (resources.length === 0) return undefined;
+  const lines = resources.map((r) => `   - ${r.type}  ${r.physicalId ?? r.logicalId}`);
+  const hints: string[] = [];
+  if (resources.some((r) => r.type === 'AWS::DynamoDB::Table')) {
+    hints.push(
+      '   A DynamoDB table with deletion protection: aws dynamodb update-table --table-name <name> ' +
+        '--no-deletion-protection-enabled, then aws dynamodb delete-table --table-name <name>.',
+    );
+  }
+  if (resources.some((r) => r.type === 'AWS::S3::Bucket')) {
+    hints.push(
+      '   An S3 bucket: empty it (aws s3 rm s3://<name> --recursive; a versioned bucket also needs its old versions removed), ' +
+        'then aws s3 rb s3://<name>.',
+    );
+  }
+  return [
+    `\n⚠️  The stack is gone, but ${resources.length} ${resources.length === 1 ? 'resource was' : 'resources were'} kept ` +
+      'because of a RETAIN removal policy. They still exist in your account, and may still hold data and cost money:',
+    ...lines,
+    '   Delete them yourself once you no longer need the data.',
+    ...hints,
+  ].join('\n');
+}
+
 export interface DeployedStackOptions extends DeploymentTargetOptions {
   stackName: string;
   /** The Region to look in. Default: the Region CDK deploys to. */
@@ -75,25 +165,59 @@ export interface DeployedStackOptions extends DeploymentTargetOptions {
  * otherwise (no credentials, AccessDenied, no network).
  */
 export async function deployedStackExists(options: DeployedStackOptions): Promise<boolean | undefined> {
-  const target = await resolveDeploymentTarget(options);
-  const region = options.region ?? target.region;
-  if (!region) return undefined;
-  // Loaded only when a lookup runs, like the other SDK clients of the scripts.
-  const { CloudFormationClient, DescribeStacksCommand } = await import('@aws-sdk/client-cloudformation');
-  const credentials = target.profile ? undefined : environmentAccessKeys(options.env);
-  // SDK clients read AWS_PROFILE from process.env, not from `options.env`.
-  const profile = target.profile ?? (credentials ? undefined : options.env?.AWS_PROFILE || undefined);
-  const cfn = new CloudFormationClient({
-    region,
-    profile,
-    ...(credentials ? { credentials } : {}),
-    maxAttempts: 2,
-  });
+  const cfn = await deploymentCloudFormation(options);
+  if (!cfn) return undefined;
+  const { DescribeStacksCommand } = await import('@aws-sdk/client-cloudformation');
   try {
     return await stackExists(cfn, (StackName) => new DescribeStacksCommand({ StackName }), options.stackName);
   } finally {
     cfn.destroy();
   }
+}
+
+/**
+ * A CloudFormation client for the account and Region CDK deploys to (see
+ * {@link deployedStackExists}), or `undefined` without a Region. The caller
+ * calls `destroy()` on it.
+ */
+async function deploymentCloudFormation(options: DeployedStackOptions) {
+  const target = await resolveDeploymentTarget(options);
+  const region = options.region ?? target.region;
+  if (!region) return undefined;
+  // Loaded only when a lookup runs, like the other SDK clients of the scripts.
+  const { CloudFormationClient } = await import('@aws-sdk/client-cloudformation');
+  const credentials = target.profile ? undefined : environmentAccessKeys(options.env);
+  // SDK clients read AWS_PROFILE from process.env, not from `options.env`.
+  const profile = target.profile ?? (credentials ? undefined : options.env?.AWS_PROFILE || undefined);
+  return new CloudFormationClient({
+    region,
+    profile,
+    ...(credentials ? { credentials } : {}),
+    maxAttempts: 2,
+  });
+}
+
+/**
+ * Read the id of the stack `stackName` before it is deleted, and return the
+ * function that, after the delete, prints the resources it left behind
+ * ({@link retainedResourcesNote}). `undefined` when the id can't be read.
+ */
+async function retainedResourcesReporter(options: DeployedStackOptions): Promise<(() => Promise<void>) | undefined> {
+  const cfn = await deploymentCloudFormation(options);
+  if (!cfn) return undefined;
+  const stackId = await findStackId(cfn, options.stackName);
+  if (!stackId) {
+    cfn.destroy();
+    return undefined;
+  }
+  return async () => {
+    try {
+      const note = retainedResourcesNote(await retainedByDestroy(cfn, stackId));
+      if (note) console.log(note);
+    } finally {
+      cfn.destroy();
+    }
+  };
 }
 
 /**
@@ -221,7 +345,10 @@ export async function destroy(options: DestroyOptions) {
     // (DeleteRestApi 429), which single-shot `cdk destroy` surfaced as a hard
     // teardown failure with no recovery. A failure whose stack events show such
     // a throttle gets a longer, jittered backoff (see runDestroyWithRetries).
-    await runDestroyWithRetries(productionDestroyDeps(options, cdkEnv));
+    const reportRetained = options.stackName
+      ? await retainedResourcesReporter({ projectRoot: options.projectRoot, stackName: options.stackName })
+      : undefined;
+    await runDestroyWithRetries({ ...productionDestroyDeps(options, cdkEnv), afterDestroy: reportRetained });
   });
 }
 
